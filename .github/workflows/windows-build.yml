@@ -4,6 +4,13 @@ on:
   push:
   workflow_dispatch:
 
+# Online database (Supabase). The publishable key is designed to ship inside
+# the app; keep this repository PRIVATE because the key allows reading the data.
+# Repository secrets with the same names, if set, take priority.
+env:
+  SUPABASE_URL_DEFAULT: https://dpmluuckgstycdctqwym.supabase.co
+  SUPABASE_KEY_DEFAULT: sb_publishable_qsw0KVpDbNr616WaSmG70w_QplfFMPs
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -26,8 +33,8 @@ jobs:
 
       - name: Check Supabase secrets
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || env.SUPABASE_URL_DEFAULT }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY || env.SUPABASE_KEY_DEFAULT }}
         run: |
           if (-not $env:SUPABASE_URL -or -not $env:SUPABASE_KEY) {
             Write-Error "SUPABASE_URL / SUPABASE_KEY repository secrets are missing - the app would build without online sync. Add them under Settings > Secrets and variables > Actions > Repository secrets."
@@ -40,8 +47,8 @@ jobs:
 
       - name: Build Windows release
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || env.SUPABASE_URL_DEFAULT }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY || env.SUPABASE_KEY_DEFAULT }}
         run: flutter build windows --release --dart-define=SUPABASE_URL="$env:SUPABASE_URL" --dart-define=SUPABASE_KEY="$env:SUPABASE_KEY"
 
       - name: Upload Windows build
