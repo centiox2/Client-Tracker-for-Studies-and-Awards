@@ -31,6 +31,13 @@ jobs:
       - name: Run tests
         run: flutter test
 
+      # Reads a sample M-Pesa photo with Windows' built-in text reader, the
+      # way Scan photo does on Windows. Informational: a runner without an
+      # OCR language mustn't block the build.
+      - name: Check photo reading (Windows OCR)
+        continue-on-error: true
+        run: dart run tool/ocr_check.dart test/fixtures/mpesa_sample.png
+
       - name: Check Supabase secrets
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL || env.SUPABASE_URL_DEFAULT }}
