@@ -116,6 +116,12 @@ void main() {
     expect(staffA, isNot(staffB));
   });
 
+  test('a code read with 0 for O still counts as already added', () {
+    final repo = RevenueRepository(db);
+    repo.add(DateTime(2026, 11, 3), 4574000, note: 'M-Pesa · UK3JPO8PVA');
+    expect(repo.existingCodes(['UK3JP08PVA', 'ZZ9ZZ99ZZZ']), {'UK3JP08PVA'});
+  });
+
   test('currency defaults to KSh and can be changed', () {
     final settings = AppSettingsRepository(db);
     expect(settings.currency, 'KSh');
