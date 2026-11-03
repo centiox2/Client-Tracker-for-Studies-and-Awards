@@ -169,8 +169,10 @@ class SyncEngine {
       'format': 'client-tracker-backup',
       'version': AppDatabase.schemaVersion,
       'tables': {
+        // Only tables the cloud sent: tables it doesn't have yet (an online
+        // database set up before they existed) keep their local rows.
         for (final table in AppDatabase.syncedTables.keys)
-          table: snap[table] ?? const [],
+          if (snap.containsKey(table)) table: snap[table],
       },
     });
     _db.applyingRemote(() => _db.restoreFromJson(json));

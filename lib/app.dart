@@ -12,6 +12,7 @@ import 'screens/quick_search/quick_search_dialog.dart';
 import 'screens/quick_search/shortcuts_dialog.dart';
 import 'screens/auth/sign_in_screen.dart';
 import 'screens/reports/reports_screen.dart';
+import 'screens/revenue/revenue_screen.dart';
 import 'screens/settings/settings_screen.dart';
 import 'screens/staff_management/staff_management_screen.dart';
 import 'screens/weekly_tracker/weekly_tracker_screen.dart';
@@ -72,16 +73,33 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       Icons.calendar_view_week_outlined,
       shortLabel: 'Tracker',
     ),
+    _revenueTab,
     _AppTabInfo(AppTab.history, 'History', Icons.history),
     _AppTabInfo(AppTab.staff, 'Staff', Icons.groups_2_outlined),
     _reportsTab,
     _AppTabInfo(AppTab.settings, 'Settings', Icons.settings_outlined),
   ];
 
+  static const _revenueTab = _AppTabInfo(
+    AppTab.revenue,
+    'Revenue',
+    Icons.payments_outlined,
+  );
+
+  /// The phone's bottom bar holds five buttons at most; with more pages the
+  /// main ones stay and the rest go under "More".
+  static const _phoneMain = [
+    AppTab.home,
+    AppTab.week,
+    AppTab.revenue,
+    AppTab.reports,
+  ];
+
   /// Signed out: Reports plus read-only History and Staff — nothing that
   /// can change data.
   static const _viewerTabs = <_AppTabInfo>[
     _reportsTab,
+    _revenueTab,
     _AppTabInfo(AppTab.history, 'History', Icons.history),
     _AppTabInfo(AppTab.staff, 'Staff', Icons.groups_2_outlined),
   ];
@@ -176,20 +194,50 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       LogicalKeyboardKey.digit4,
       LogicalKeyboardKey.digit5,
       LogicalKeyboardKey.digit6,
+      LogicalKeyboardKey.digit7,
     ];
     final index = keys.indexOf(event.logicalKey);
-    if (index >= 0) ref.read(navTabProvider.notifier).set(_tabs[index].tab);
+    if (index >= 0 && index < _tabs.length) {
+      ref.read(navTabProvider.notifier).set(_tabs[index].tab);
+    }
     return KeyEventResult.ignored;
   }
 
   Widget _page(AppTab tab) => switch (tab) {
     AppTab.home => const DashboardScreen(),
     AppTab.week => const WeeklyTrackerScreen(),
+    AppTab.revenue => RevenueScreen(readOnly: _isViewer),
     AppTab.history => HistoryScreen(readOnly: _isViewer),
     AppTab.staff => StaffManagementScreen(readOnly: _isViewer),
     AppTab.reports => const ReportsScreen(),
     AppTab.settings => const SettingsScreen(),
   };
+
+  /// The phone's "More" sheet: the pages that don't fit the bottom bar.
+  void _showMore(List<_AppTabInfo> tabs, AppTab current) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final item in tabs)
+              ListTile(
+                leading: Icon(item.icon),
+                title: Text(item.label),
+                selected: item.tab == current,
+                onTap: () {
+                  Navigator.of(sheet).pop();
+                  ref.read(navTabProvider.notifier).set(item.tab);
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -213,6 +261,21 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     );
 
     if (!desktop) {
+      final tabs = isViewer ? _viewerTabs : _adminTabs;
+      final useMore = tabs.length > 5;
+      final barTabs = useMore
+          ? [
+              for (final t in tabs)
+                if (_phoneMain.contains(t.tab)) t,
+            ]
+          : tabs;
+      final moreTabs = useMore
+          ? [
+              for (final t in tabs)
+                if (!_phoneMain.contains(t.tab)) t,
+            ]
+          : const <_AppTabInfo>[];
+      final barIndex = barTabs.indexWhere((item) => item.tab == tab);
       return Scaffold(
         body: SafeArea(
           child: Column(
@@ -224,16 +287,31 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           ),
         ),
         bottomNavigationBar: NavigationBar(
-          selectedIndex: _tabs.indexWhere((item) => item.tab == tab),
-          onDestinationSelected: (index) =>
-              ref.read(navTabProvider.notifier).set(_tabs[index].tab),
+          // A page under "More" lights up the More button.
+          selectedIndex: barIndex >= 0 ? barIndex : barTabs.length,
+          onDestinationSelected: (index) {
+            if (index < barTabs.length) {
+              ref.read(navTabProvider.notifier).set(barTabs[index].tab);
+            } else {
+              _showMore(moreTabs, tab);
+            }
+          },
           destinations: [
-            for (final item in _tabs)
+            for (final item in barTabs)
               NavigationDestination(
                 icon: Icon(item.icon),
                 selectedIcon: Icon(item.icon),
                 label: item.shortLabel ?? item.label,
                 tooltip: item.label,
+              ),
+            if (useMore)
+              NavigationDestination(
+                icon: const Icon(Icons.menu),
+                selectedIcon: const Icon(Icons.menu),
+                label: barIndex >= 0
+                    ? 'More'
+                    : moreTabs.firstWhere((t) => t.tab == tab).label,
+                tooltip: 'More pages',
               ),
           ],
         ),
@@ -879,6 +957,7 @@ class _WeekPicker extends ConsumerWidget {
 
 String _tabLabel(AppTab tab) => switch (tab) {
   AppTab.home => 'Overview',
+  AppTab.revenue => 'Revenue',
   AppTab.week => 'Weekly tracker',
   AppTab.history => 'History',
   AppTab.staff => 'Staff',

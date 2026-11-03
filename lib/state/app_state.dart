@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/staff.dart';
 import '../repositories/client_count_repository.dart';
 import '../repositories/report_repository.dart';
+import '../repositories/revenue_repository.dart';
 import '../repositories/week_repository.dart';
 import 'providers.dart';
 
@@ -60,7 +61,7 @@ class AdminSessionNotifier extends Notifier<bool> {
 }
 
 /// Navigation sections, shared by sidebar (desktop) and bottom bar (mobile).
-enum AppTab { home, week, history, staff, reports, settings }
+enum AppTab { home, week, revenue, history, staff, reports, settings }
 
 /// The shell's context, captured by [HomeShell] so helper functions outside
 /// the widget tree (e.g. [jumpWeeks]) can show snackbars. Null until the
@@ -236,6 +237,45 @@ final dailyTargetProvider = Provider<int?>((ref) {
   ref.watch(dataVersionProvider);
   return ref.read(appSettingsRepositoryProvider).dailyTarget;
 });
+
+/// Revenue transactions entered for one day.
+final revenueEntriesProvider = Provider.family<List<RevenueEntry>, DateTime>((
+  ref,
+  day,
+) {
+  ref.watch(dataVersionProvider);
+  return ref.read(revenueRepositoryProvider).entriesFor(day);
+});
+
+/// Daily revenue totals for an inclusive date range (every day included).
+final revenueDaysProvider =
+    Provider.family<List<RevenueDay>, (DateTime, DateTime)>((ref, range) {
+      ref.watch(dataVersionProvider);
+      return ref
+          .read(revenueRepositoryProvider)
+          .daysBetween(range.$1, range.$2);
+    });
+
+/// The currency label shown before amounts ("KSh" unless changed).
+final currencyProvider = Provider<String>((ref) {
+  ref.watch(dataVersionProvider);
+  return ref.read(appSettingsRepositoryProvider).currency;
+});
+
+/// The day the Revenue page shows (today unless another day is picked).
+final revenueDateProvider = NotifierProvider<RevenueDateNotifier, DateTime>(
+  RevenueDateNotifier.new,
+);
+
+class RevenueDateNotifier extends Notifier<DateTime> {
+  @override
+  DateTime build() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  void set(DateTime day) => state = DateTime(day.year, day.month, day.day);
+}
 
 /// When a number was last saved in this session — the tracker's quiet
 /// "Saved · 10:42" so you can trust autosave. Null until the first save.
@@ -453,6 +493,38 @@ class AppActions {
   /// Saves (or, when blank, removes) a day's note.
   void setDayNote(int dayId, String note) {
     _ref.read(dayNotesRepositoryProvider).setNote(dayId, note);
+    _touch();
+  }
+
+  // ---- Revenue -----------------------------------------------------------
+
+  int addRevenue(DateTime day, int amountCents, {String note = ''}) {
+    final id = _ref
+        .read(revenueRepositoryProvider)
+        .add(day, amountCents, note: note);
+    _touch();
+    return id;
+  }
+
+  void updateRevenue(int id, {required int amountCents, required String note}) {
+    _ref
+        .read(revenueRepositoryProvider)
+        .update(id, amountCents: amountCents, note: note);
+    _touch();
+  }
+
+  void deleteRevenue(int id) {
+    _ref.read(revenueRepositoryProvider).delete(id);
+    _touch();
+  }
+
+  void restoreRevenue(RevenueEntry entry) {
+    _ref.read(revenueRepositoryProvider).restore(entry);
+    _touch();
+  }
+
+  void setCurrency(String currency) {
+    _ref.read(appSettingsRepositoryProvider).currency = currency;
     _touch();
   }
 

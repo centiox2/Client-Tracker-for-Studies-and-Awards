@@ -30,6 +30,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _busy = false;
 
   final _target = TextEditingController();
+  final _currency = TextEditingController();
 
   // Shared by the Scrollbar and the list: on desktop a list doesn't attach
   // to the primary controller, so a scrollbar without one can't paint.
@@ -39,6 +40,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void dispose() {
     _target.dispose();
+    _currency.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -57,6 +59,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
+  void _saveCurrency() {
+    ref.read(appActionsProvider).setCurrency(_currency.text);
+    final saved = ref.read(currencyProvider);
+    _currency.text = saved;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('Revenue shown in $saved')));
+  }
+
   @override
   Widget build(BuildContext context) {
     final weeks = ref.watch(historyProvider);
@@ -66,6 +76,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final theme = Theme.of(context);
     if (!_targetSeeded) {
       _target.text = target?.toString() ?? '';
+      _currency.text = ref.read(currencyProvider);
       _targetSeeded = true;
     }
     // The export dropdown follows the week list until the user picks one.
@@ -123,6 +134,33 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
             const SizedBox(width: 10),
             OutlinedButton(onPressed: _saveTarget, child: const Text('Save')),
+          ],
+        ),
+      ),
+      _Section(
+        title: 'Revenue currency',
+        icon: Icons.payments_outlined,
+        description:
+            'Shown before every revenue amount, e.g. KSh, USD or €. Leave '
+            'empty for KSh.',
+        child: Row(
+          children: [
+            SizedBox(
+              width: 140,
+              child: TextField(
+                key: const ValueKey('currency-field'),
+                controller: _currency,
+                maxLength: 8,
+                decoration: const InputDecoration(
+                  labelText: 'Currency',
+                  isDense: true,
+                  counterText: '',
+                ),
+                onSubmitted: (_) => _saveCurrency(),
+              ),
+            ),
+            const SizedBox(width: 10),
+            OutlinedButton(onPressed: _saveCurrency, child: const Text('Save')),
           ],
         ),
       ),

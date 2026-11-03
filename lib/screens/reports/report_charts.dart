@@ -18,10 +18,14 @@ class _Delta extends StatelessWidget {
     required this.current,
     required this.previous,
     required this.against,
+    this.format,
   });
 
   final int current;
   final int previous;
+
+  /// Formats the difference (e.g. as money); plain number when null.
+  final String Function(int)? format;
 
   /// What is being compared with, e.g. "last week".
   final String against;
@@ -50,7 +54,7 @@ class _Delta extends StatelessWidget {
         ),
         Flexible(
           child: Text(
-            '${diff.abs()}$pct vs $against',
+            '${format?.call(diff.abs()) ?? diff.abs()}$pct vs $against',
             style: style,
             // Wraps on a phone instead of cutting off "vs last week".
             maxLines: MediaQuery.sizeOf(context).width < 600 ? 2 : 1,
