@@ -8,24 +8,44 @@ import '../../services/payment_text_parser.dart';
 import '../../services/photo_text.dart';
 import '../../state/app_state.dart';
 
-/// Phone: pick a photo of the payment message(s); the text is read on the
-/// device and each payment found is offered for adding.
+/// Pick a photo of the payment message(s); the text is read on this device
+/// (phone or Windows) and each payment found is offered for adding.
 Future<void> scanPaymentPhoto(
   BuildContext context,
   WidgetRef ref,
   DateTime day,
 ) async {
   final messenger = ScaffoldMessenger.of(context);
-  String? text;
+  final path = await pickPhoto();
+  if (path == null || !context.mounted) return;
+  // Reading takes a moment (a few seconds on Windows): say so.
+  final navigator = Navigator.of(context);
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const AlertDialog(
+      content: Row(
+        children: [
+          SizedBox.square(
+            dimension: 22,
+            child: CircularProgressIndicator(strokeWidth: 2.5),
+          ),
+          SizedBox(width: 16),
+          Text('Reading the photo…'),
+        ],
+      ),
+    ),
+  );
+  String text;
   try {
-    text = await pickPhotoText();
+    text = await readPhotoText(path);
   } catch (e) {
-    messenger.showSnackBar(
-      SnackBar(content: Text('Couldn’t read that photo: $e')),
-    );
+    navigator.pop();
+    messenger.showSnackBar(SnackBar(content: Text('$e')));
     return;
   }
-  if (text == null || !context.mounted) return;
+  navigator.pop();
+  if (!context.mounted) return;
   await _review(context, ref, text, day, fromPhoto: true);
 }
 
@@ -36,11 +56,30 @@ Future<void> pastePaymentMessage(
   WidgetRef ref,
   DateTime day,
 ) async {
-  final controller = TextEditingController();
-  final text = await showDialog<String>(
+  final text = await _textDialog(
+    context,
+    title: 'Paste payment message',
+    help:
+        'Several messages at once are fine. You can also use Scan photo to '
+        'read a picture of the message.',
+  );
+  if (text == null || text.trim().isEmpty || !context.mounted) return;
+  await _review(context, ref, text, day, fromPhoto: false);
+}
+
+/// The message text, editable: pasted, or read from a photo and open for
+/// corrections (a misread digit, say) before it's checked again.
+Future<String?> _textDialog(
+  BuildContext context, {
+  required String title,
+  required String help,
+  String initial = '',
+}) {
+  final controller = TextEditingController(text: initial);
+  return showDialog<String>(
     context: context,
     builder: (context) => AlertDialog(
-      title: const Text('Paste payment message'),
+      title: Text(title),
       content: SizedBox(
         width: 440,
         child: Column(
@@ -52,7 +91,7 @@ Future<void> pastePaymentMessage(
               controller: controller,
               autofocus: true,
               minLines: 5,
-              maxLines: 10,
+              maxLines: 12,
               decoration: const InputDecoration(
                 hintText:
                     'UK3JPO8PVA Confirmed. on 3/11/26 at 1:38 PM '
@@ -61,8 +100,7 @@ Future<void> pastePaymentMessage(
             ),
             const SizedBox(height: 10),
             Text(
-              'Several messages at once are fine. From a photo on Windows: '
-              'open it with Snipping Tool or Photos and use “Copy all text”.',
+              help,
               style: Theme.of(context).textTheme.bodySmall
                   ?.copyWith(color: Dt.textMuted(Theme.of(context))),
             ),
@@ -81,9 +119,10 @@ Future<void> pastePaymentMessage(
       ],
     ),
   );
-  if (text == null || text.trim().isEmpty || !context.mounted) return;
-  await _review(context, ref, text, day, fromPhoto: false);
 }
+
+/// Returned by the review dialog when the admin wants to fix the text.
+const _editText = <ParsedPayment>[];
 
 Future<void> _review(
   BuildContext context,
@@ -92,33 +131,67 @@ Future<void> _review(
   DateTime day, {
   required bool fromPhoto,
 }) async {
-  final found = parsePayments(text);
-  if (found.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          fromPhoto
-              ? 'No payment found in that photo. Try a clearer photo, or '
-                    'type the amount.'
-              : 'No payment found in that text.',
-        ),
+  var current = text;
+  while (true) {
+    final found = parsePayments(current);
+    if (found.isEmpty) {
+      if (!fromPhoto) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No payment found in that text.')),
+        );
+        return;
+      }
+      // From a photo: show what was read so it can be corrected.
+      final fixed = await _textDialog(
+        context,
+        title: 'No payment recognised',
+        help: current.trim().isEmpty
+            ? 'No text could be read from that photo. Try a sharper, '
+                  'straight-on photo, or type the message here.'
+            : 'This is the text read from the photo. Correct it (for '
+                  'example the amount) and press Read.',
+        initial: current,
+      );
+      if (fixed == null || fixed.trim().isEmpty || !context.mounted) return;
+      current = fixed;
+      continue;
+    }
+    final codes = [for (final p in found) ?p.code];
+    final already = ref.read(revenueRepositoryProvider).existingCodes(codes);
+    final chosen = await showDialog<List<ParsedPayment>>(
+      context: context,
+      builder: (_) => _ReviewDialog(
+        found: found,
+        already: already,
+        currency: ref.read(currencyProvider),
+        fallbackDay: day,
+        canEditText: true,
       ),
     );
+    if (!context.mounted || chosen == null) return;
+    if (identical(chosen, _editText)) {
+      final fixed = await _textDialog(
+        context,
+        title: fromPhoto ? 'Text from the photo' : 'Payment message',
+        help: 'Correct anything that was misread, then press Read.',
+        initial: current,
+      );
+      if (fixed == null || fixed.trim().isEmpty || !context.mounted) return;
+      current = fixed;
+      continue;
+    }
+    if (chosen.isEmpty) return;
+    _addChosen(context, ref, chosen, day);
     return;
   }
-  final codes = [for (final p in found) ?p.code];
-  final already = ref.read(revenueRepositoryProvider).existingCodes(codes);
-  final chosen = await showDialog<List<ParsedPayment>>(
-    context: context,
-    builder: (_) => _ReviewDialog(
-      found: found,
-      already: already,
-      currency: ref.read(currencyProvider),
-      fallbackDay: day,
-    ),
-  );
-  if (chosen == null || chosen.isEmpty || !context.mounted) return;
+}
 
+void _addChosen(
+  BuildContext context,
+  WidgetRef ref,
+  List<ParsedPayment> chosen,
+  DateTime day,
+) {
   final actions = ref.read(appActionsProvider);
   var total = 0;
   final days = <DateTime>{};
@@ -151,7 +224,9 @@ class _ReviewDialog extends StatefulWidget {
     required this.already,
     required this.currency,
     required this.fallbackDay,
+    this.canEditText = false,
   });
+  final bool canEditText;
   final List<ParsedPayment> found;
   final Set<String> already;
   final String currency;
@@ -244,6 +319,11 @@ class _ReviewDialogState extends State<_ReviewDialog> {
         ),
       ),
       actions: [
+        if (widget.canEditText)
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(_editText),
+            child: const Text('Edit text'),
+          ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
