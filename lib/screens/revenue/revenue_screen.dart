@@ -1,3 +1,4 @@
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -28,6 +29,9 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
   final _note = TextEditingController();
   final _amountFocus = FocusNode();
   String? _error;
+
+  /// True while photos are being dragged over the page.
+  bool _dragging = false;
 
   @override
   void dispose() {
@@ -103,7 +107,7 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
     final monthTotal = month.fold<int>(0, (s, d) => s + d.totalCents);
     final monthDays = month.where((d) => d.count > 0).length;
 
-    return LayoutBuilder(
+    final page = LayoutBuilder(
       builder: (context, viewport) {
         final phone = viewport.maxWidth < 600;
         final pad = phone ? 14.0 : 18.0;
@@ -146,7 +150,7 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
                         error: _error,
                         onSubmit: () => _add(day),
                         onScan: photoTextSupported
-                            ? () => scanPaymentPhoto(context, ref, day)
+                            ? () => scanPaymentPhotos(context, ref, day)
                             : null,
                         onPaste: () => pastePaymentMessage(context, ref, day),
                         onChanged: () {
@@ -230,6 +234,60 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
           ],
         );
       },
+    );
+    if (widget.readOnly || !photoDropSupported) return page;
+    // Windows: drag any number of payment photos onto the page.
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _dragging = true),
+      onDragExited: (_) => setState(() => _dragging = false),
+      onDragDone: (details) {
+        setState(() => _dragging = false);
+        final paths = [for (final f in details.files) f.path];
+        importPaymentPhotos(context, ref, day, paths);
+      },
+      child: Stack(
+        children: [
+          page,
+          if (_dragging)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(
+                  margin: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface
+                        .withValues(alpha: 0.92),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.primary,
+                      width: 2,
+                    ),
+                    borderRadius: BorderRadius.circular(Dt.rMd),
+                  ),
+                  alignment: Alignment.center,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.add_photo_alternate_outlined,
+                        size: 40,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        'Drop payment photos to read them',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Each payment goes on the date in its message',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -436,7 +494,7 @@ class _AddPanel extends StatelessWidget {
             key: const ValueKey('scan-photo'),
             onPressed: onScan,
             icon: const Icon(Icons.document_scanner_outlined, size: 16),
-            label: const Text('Scan photo'),
+            label: const Text('Scan photos'),
           ),
         OutlinedButton.icon(
           key: const ValueKey('paste-payment'),
@@ -444,6 +502,8 @@ class _AddPanel extends StatelessWidget {
           icon: const Icon(Icons.content_paste, size: 16),
           label: const Text('Paste message'),
         ),
+        if (photoDropSupported && onScan != null)
+          Text('or drag photos onto this page', style: hint),
       ],
     );
     return AppPanel(
@@ -544,7 +604,7 @@ class _EntryRow extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    'Added ${DateFormat('HH:mm').format(entry.createdAt)}',
+                    DateFormat('HH:mm').format(entry.createdAt),
                     style: theme.textTheme.labelSmall?.copyWith(color: muted),
                   ),
                 ],

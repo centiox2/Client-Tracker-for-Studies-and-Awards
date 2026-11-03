@@ -90,14 +90,17 @@ class RevenueRepository {
   /// One day's total and count.
   RevenueDay day(DateTime day) => daysBetween(day, day).single;
 
-  int add(DateTime day, int amountCents, {String note = ''}) {
+  /// [at] is when the payment happened, when known (e.g. read from the
+  /// payment message); otherwise now. Entries are listed in that order.
+  int add(DateTime day, int amountCents, {String note = '', DateTime? at}) {
     _check(amountCents);
     final now = DateTime.now().toIso8601String();
+    final when = (at ?? DateTime.now()).toIso8601String();
     _db.raw.execute(
       'INSERT INTO revenue_entries '
       '(id, date, amount_cents, note, created_at, updated_at) '
       'VALUES (new_id(), ?, ?, ?, ?, ?);',
-      [_key(day), amountCents, _clean(note), now, now],
+      [_key(day), amountCents, _clean(note), when, now],
     );
     return _db.raw.lastInsertRowId;
   }

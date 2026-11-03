@@ -498,10 +498,15 @@ class AppActions {
 
   // ---- Revenue -----------------------------------------------------------
 
-  int addRevenue(DateTime day, int amountCents, {String note = ''}) {
+  int addRevenue(
+    DateTime day,
+    int amountCents, {
+    String note = '',
+    DateTime? at,
+  }) {
     final id = _ref
         .read(revenueRepositoryProvider)
-        .add(day, amountCents, note: note);
+        .add(day, amountCents, note: note, at: at);
     _touch();
     return id;
   }

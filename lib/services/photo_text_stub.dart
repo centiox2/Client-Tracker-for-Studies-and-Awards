@@ -1,7 +1,20 @@
+import 'photo_text_types.dart';
+
+export 'photo_text_types.dart';
+
 bool get photoTextSupported => false;
 
-/// Lets the user choose a photo; its path, or null if cancelled.
-Future<String?> pickPhoto() async => null;
+/// Photos can be dragged onto the window (desktop).
+bool get photoDropSupported => false;
 
-/// The text in the photo at [path].
-Future<String> readPhotoText(String path) async => '';
+/// Lets the user choose one or more photos; their paths (empty if cancelled).
+Future<List<String>> pickPhotos() async => const [];
+
+/// Reads the text in each photo.
+Future<List<PhotoText>> readPhotoTexts(
+  List<String> paths, {
+  void Function(int done)? onProgress,
+}) async => [
+  for (final p in paths)
+    PhotoText(p, error: 'Photos can’t be read on this device'),
+];

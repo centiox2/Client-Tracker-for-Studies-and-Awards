@@ -254,4 +254,50 @@ void main() {
     expect(RevenueRepository(db).entriesFor(day), hasLength(1));
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('a batch: same payment twice is caught, each timed by its '
+      'message', (tester) async {
+    await pumpApp(tester, admin: true);
+    await tester.tap(find.text('Revenue').last);
+    await tester.pumpAndSettle();
+
+    final now = DateTime.now();
+    final y = now.subtract(const Duration(days: 1));
+    String d(DateTime t) => '${t.day}/${t.month}/${t.year % 100}';
+    // Two overlapping screenshots show today's payment twice; yesterday's
+    // is in there too.
+    final text =
+        'UK3JPO8PVA Confirmed. on ${d(now)} at 1:38 AM Ksh45,740.00 received '
+        'from DAVID KANGOGO 254722699840. New Utility balance is Ksh9.00\n'
+        'UK3JP08PVA Confirmed. on ${d(now)} at 1:38 AM Ksh45,740.00 received '
+        'from DAVID KANGOGO 254722699840. New Utility balance is Ksh9.00\n'
+        'TJ2AB34CDE Confirmed. on ${d(y)} at 4:05 PM Ksh1,200.00 received '
+        'from JANE W 254711000111. New Utility balance is Ksh1.00';
+    await tester.tap(find.byKey(const ValueKey('paste-payment')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('paste-message')), text);
+    await tester.tap(find.widgetWithText(FilledButton, 'Read'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('3 payments found'), findsOneWidget);
+    expect(find.text('Same payment as above'), findsOneWidget);
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.widgetWithText(FilledButton, 'Add 2 · KSh 46,940'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final repo = RevenueRepository(db);
+    final today = repo.entriesFor(DateTime(now.year, now.month, now.day));
+    final yesterday = repo.entriesFor(DateTime(y.year, y.month, y.day));
+    expect(today.single.amountCents, 4574000);
+    expect(today.single.createdAt.hour, 1);
+    expect(today.single.createdAt.minute, 38);
+    expect(yesterday.single.amountCents, 120000);
+    expect(yesterday.single.createdAt.hour, 16);
+    expect(find.textContaining('across 2 days'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }
