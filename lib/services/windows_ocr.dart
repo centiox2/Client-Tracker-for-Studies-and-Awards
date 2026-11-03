@@ -42,33 +42,46 @@ if ($null -eq $engine) {
 }
 if ($null -eq $engine) { [Console]::Error.WriteLine('NO_OCR_LANGUAGE'); exit 3 }
 
-$file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($env:CT_OCR_IMAGE)) ([Windows.Storage.StorageFile])
-$stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
-$decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
-
-# Windows' reader has a size limit; shrink big phone photos to fit.
-$max = [Windows.Media.Ocr.OcrEngine]::MaxImageDimension
-$w = $decoder.PixelWidth; $h = $decoder.PixelHeight
-if ($w -gt $max -or $h -gt $max) {
-  $scale = [Math]::Min($max / $w, $max / $h)
-  $transform = [Windows.Graphics.Imaging.BitmapTransform]::new()
-  $transform.ScaledWidth = [uint32][Math]::Floor($w * $scale)
-  $transform.ScaledHeight = [uint32][Math]::Floor($h * $scale)
-  $transform.InterpolationMode = [Windows.Graphics.Imaging.BitmapInterpolationMode]::Fant
-  $bitmap = Await ($decoder.GetSoftwareBitmapAsync(
-    [Windows.Graphics.Imaging.BitmapPixelFormat]::Bgra8,
-    [Windows.Graphics.Imaging.BitmapAlphaMode]::Premultiplied,
-    $transform,
-    [Windows.Graphics.Imaging.ExifOrientationMode]::RespectExifOrientation,
-    [Windows.Graphics.Imaging.ColorManagementMode]::DoNotColorManage)) ([Windows.Graphics.Imaging.SoftwareBitmap])
-} else {
-  $bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
-}
-
-$result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
-$stream.Dispose()
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-foreach ($line in $result.Lines) { [Console]::Out.WriteLine($line.Text) }
+$max = [Windows.Media.Ocr.OcrEngine]::MaxImageDimension
+$paths = $env:CT_OCR_IMAGES -split "`n"
+for ($i = 0; $i -lt $paths.Count; $i++) {
+  $path = $paths[$i].Trim()
+  if ($path -eq '') { continue }
+  try {
+    $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($path)) ([Windows.Storage.StorageFile])
+    $stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+    $decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+    # Windows' reader has a size limit; shrink big phone photos to fit.
+    $w = $decoder.PixelWidth; $h = $decoder.PixelHeight
+    if ($w -gt $max -or $h -gt $max) {
+      $scale = [Math]::Min($max / $w, $max / $h)
+      $transform = [Windows.Graphics.Imaging.BitmapTransform]::new()
+      $transform.ScaledWidth = [uint32][Math]::Floor($w * $scale)
+      $transform.ScaledHeight = [uint32][Math]::Floor($h * $scale)
+      $transform.InterpolationMode = [Windows.Graphics.Imaging.BitmapInterpolationMode]::Fant
+      $bitmap = Await ($decoder.GetSoftwareBitmapAsync(
+        [Windows.Graphics.Imaging.BitmapPixelFormat]::Bgra8,
+        [Windows.Graphics.Imaging.BitmapAlphaMode]::Premultiplied,
+        $transform,
+        [Windows.Graphics.Imaging.ExifOrientationMode]::RespectExifOrientation,
+        [Windows.Graphics.Imaging.ColorManagementMode]::DoNotColorManage)) ([Windows.Graphics.Imaging.SoftwareBitmap])
+    } else {
+      $bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+    }
+    $result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+    $stream.Dispose()
+    [Console]::Out.WriteLine("===CT_FILE:$($i)===")
+    foreach ($line in $result.Lines) { [Console]::Out.WriteLine($line.Text) }
+  } catch {
+    # One unreadable photo mustn't stop the others.
+    $e = $_.Exception
+    while ($e.InnerException) { $e = $e.InnerException }
+    $msg = ($e.Message -replace "[\r\n]+", ' ')
+    [Console]::Out.WriteLine("===CT_ERROR:$($i):$($msg)===")
+  }
+  [Console]::Out.Flush()
+}
 } catch {
   # Report the real reason as plain text (PowerShell would otherwise wrap
   # it in CLIXML on stderr).
@@ -79,16 +92,40 @@ foreach ($line in $result.Lines) { [Console]::Out.WriteLine($line.Text) }
 }
 ''';
 
+/// The text read from one photo, or why it couldn't be read.
+class WindowsOcrResult {
+  const WindowsOcrResult(this.path, {this.text, this.error});
+  final String path;
+  final String? text;
+  final String? error;
+}
+
 /// Reads the text in the image at [path], one line per text line.
 Future<String> readTextOnWindows(String path) async {
+  final r = (await readTextsOnWindows([path])).single;
+  if (r.error != null) {
+    throw WindowsOcrException('Windows couldn’t read that image (${r.error}).');
+  }
+  return r.text ?? '';
+}
+
+/// Reads many images in one go (Windows' reader starts once, which is much
+/// quicker than once per photo). [onProgress] gets the number done so far.
+/// A photo that can't be read gets an [WindowsOcrResult.error]; the rest
+/// carry on.
+Future<List<WindowsOcrResult>> readTextsOnWindows(
+  List<String> paths, {
+  void Function(int done)? onProgress,
+}) async {
+  if (paths.isEmpty) return const [];
   // -EncodedCommand takes UTF-16LE base64: no quoting problems at all.
   final units = _script.codeUnits;
   final bytes = <int>[
     for (final u in units) ...[u & 0xff, u >> 8],
   ];
-  final ProcessResult result;
+  final Process process;
   try {
-    result = await Process.run(
+    process = await Process.start(
       'powershell.exe',
       [
         // The app has no console of its own; keep PowerShell's hidden.
@@ -103,38 +140,76 @@ Future<String> readTextOnWindows(String path) async {
         '-EncodedCommand',
         base64.encode(bytes),
       ],
-      // Windows' file API rejects paths that mix / and \ ("The specified
-      // path is invalid"), so hand it a clean absolute Windows path.
+      // Paths go in an environment variable, one per line, never into the
+      // script. Windows' file API rejects paths that mix / and \\.
       environment: {
-        'CT_OCR_IMAGE': File(path).absolute.path.replaceAll('/', r'\'),
+        'CT_OCR_IMAGES': [
+          for (final p in paths) File(p).absolute.path.replaceAll('/', r'\'),
+        ].join('\n'),
       },
-      stdoutEncoding: utf8,
-      stderrEncoding: utf8,
-    ).timeout(const Duration(seconds: 60));
+    );
   } on ProcessException {
     throw WindowsOcrException(
       'Windows PowerShell isn’t available on this PC, so photos can’t be '
       'read here. Use Paste message instead.',
     );
   }
-  if (result.exitCode == 3 ||
-      (result.stderr as String).contains('NO_OCR_LANGUAGE')) {
+
+  final texts = <int, StringBuffer>{};
+  final errors = <int, String>{};
+  final general = StringBuffer();
+  int? current;
+  var done = 0;
+  final fileMark = RegExp(r'^===CT_FILE:(\d+)===$');
+  final errorMark = RegExp(r'^===CT_ERROR:(\d+):(.*)===$');
+  final stderrText = process.stderr.transform(utf8.decoder).join();
+  await for (final line
+      in process.stdout
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .timeout(const Duration(seconds: 120))) {
+    final f = fileMark.firstMatch(line);
+    final e = errorMark.firstMatch(line);
+    if (f != null) {
+      current = int.parse(f.group(1)!);
+      texts[current] = StringBuffer();
+      onProgress?.call(++done);
+    } else if (e != null) {
+      current = null;
+      errors[int.parse(e.group(1)!)] = e.group(2)!.trim();
+      onProgress?.call(++done);
+    } else if (current != null) {
+      texts[current]!.writeln(line);
+    } else {
+      general.writeln(line);
+    }
+  }
+  final exitCode = await process.exitCode;
+  final err = await stderrText;
+  if (exitCode == 3 || err.contains('NO_OCR_LANGUAGE')) {
     throw WindowsOcrException(
       'Windows has no text-reading language installed. Add English in '
       'Settings › Time & language › Language & region, then try again.',
     );
   }
-  final out = (result.stdout as String).trim();
-  if (result.exitCode != 0) {
-    final reported = RegExp(r'OCR_ERROR: (.*)').firstMatch(out)?.group(1);
-    final detail = (reported ?? (result.stderr as String))
-        .trim()
-        .split('\n')
-        .first;
+  if (exitCode != 0) {
+    final reported = RegExp(r'OCR_ERROR: (.*)')
+        .firstMatch(general.toString())
+        ?.group(1);
+    final detail = (reported ?? err).trim().split('\n').first;
     throw WindowsOcrException(
-      'Windows couldn’t read that image'
+      'Windows couldn’t read photos'
       '${detail.isEmpty ? '' : ' ($detail)'}.',
     );
   }
-  return out;
+  return [
+    for (var i = 0; i < paths.length; i++)
+      WindowsOcrResult(
+        paths[i],
+        text: texts[i]?.toString().trim(),
+        error: texts.containsKey(i)
+            ? null
+            : errors[i] ?? 'nothing was returned for this photo',
+      ),
+  ];
 }
