@@ -174,20 +174,7 @@ class _TrendsViewState extends ConsumerState<_TrendsView> {
       children: [
         Align(alignment: Alignment.centerLeft, child: picker),
         const SizedBox(height: 14),
-        LayoutBuilder(
-          builder: (context, c) {
-            final perRow = widget.compact ? 2 : tiles.length;
-            final w = ((c.maxWidth - 10 * (perRow - 1)) / perRow).clamp(
-              0.0,
-              double.infinity,
-            );
-            return Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [for (final t in tiles) SizedBox(width: w, child: t)],
-            );
-          },
-        ),
+        _TileGrid(perRow: widget.compact ? 2 : tiles.length, children: tiles),
         const SizedBox(height: 12),
         if (widget.compact) ...[
           weekdayPanel,

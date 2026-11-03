@@ -151,7 +151,9 @@ void main() {
     await pumpApp(tester, admin: false);
 
     expect(find.text('Revenue today'), findsOneWidget);
-    expect(find.text('KSh 12,300'), findsOneWidget);
+    // The currency is a small label before the number, like a unit.
+    expect(find.text('12,300'), findsOneWidget);
+    expect(find.text('KSh'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('quick-revenue')));
     await tester.pumpAndSettle();
