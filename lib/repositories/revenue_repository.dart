@@ -95,7 +95,8 @@ class RevenueRepository {
     final now = DateTime.now().toIso8601String();
     _db.raw.execute(
       'INSERT INTO revenue_entries '
-      '(date, amount_cents, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?);',
+      '(id, date, amount_cents, note, created_at, updated_at) '
+      'VALUES (new_id(), ?, ?, ?, ?, ?);',
       [_key(day), amountCents, _clean(note), now, now],
     );
     return _db.raw.lastInsertRowId;

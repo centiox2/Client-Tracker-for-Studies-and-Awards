@@ -82,6 +82,9 @@ Future<String> readTextOnWindows(String path) async {
     result = await Process.run(
       'powershell.exe',
       [
+        // The app has no console of its own; keep PowerShell's hidden.
+        '-WindowStyle',
+        'Hidden',
         '-NoProfile',
         '-NonInteractive',
         '-ExecutionPolicy',

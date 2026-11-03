@@ -29,7 +29,31 @@ class DatabaseExceptionApp implements Exception {
 class AppDatabase {
   /// Public so the platform bootstrap files (same package, different
   /// libraries) can construct instances.
-  AppDatabase.internal(this.file, this._db);
+  AppDatabase.internal(this.file, this._db) {
+    _db.createFunction(
+      functionName: 'new_id',
+      argumentCount: const common.AllowedArgumentCount(0),
+      function: (_) => nextId(),
+    );
+  }
+
+  static int _lastId = 0;
+
+  /// A new row id that won't clash with one made on another device.
+  ///
+  /// Each device used to number new rows 1, 2, 3… on its own, so the phone
+  /// and the PC could both create "revenue entry 12" before syncing, and
+  /// online one silently replaced the other (or, for client numbers, the
+  /// upload failed outright). Ids now come from the microsecond clock,
+  /// strictly increasing on this device: two devices would have to insert in
+  /// the same microsecond to collide. Still below 2^53, so exact everywhere
+  /// (including the web build), and still in creation order. Inserts use it
+  /// in SQL as `new_id()`.
+  static int nextId() {
+    final now = DateTime.now().microsecondsSinceEpoch;
+    _lastId = now > _lastId ? now : _lastId + 1;
+    return _lastId;
+  }
 
   final String file;
   final common.CommonDatabase _db;

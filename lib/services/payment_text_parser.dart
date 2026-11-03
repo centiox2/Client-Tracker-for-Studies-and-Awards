@@ -68,21 +68,32 @@ final _codeConfirmed = RegExp(
   caseSensitive: false,
 );
 
+// One amount as it may appear, including how text recognition mangles it:
+// "45,740.00", "45740.00" (commas lost), "45, 740.00" (stray space),
+// "45.740.00" (comma read as a dot), "45 740", "45,740.0O" (0 read as O).
+// A separator only counts when a digit follows it; a space only when a
+// group of exactly three digits follows ("Ksh500 2547…" stops at 500).
+const _amount = r'[\dO](?:[\dO]|[,.](?=\s?[\dO])|\s(?=[\dO]{3}\b))*';
+
 // "Ksh45,740.00", "KES 1,000", "Kshs. 500", "Ksh 2 000.50"
 final _money = RegExp(
-  r'\b(?:Kshs?|KES|KSH|Sh)\.?\s?((?:\d|O)[\dO]{0,2}(?:[,\s]?[\dO]{3})*(?:\.[\dO]{1,2})?)',
+  r'\b(?:Kshs?|KES|KSH|Sh)\.?\s?('
+  '$_amount'
+  ')',
   caseSensitive: false,
 );
 
 // "balance is Ksh106,520.00", "New M-PESA balance is Ksh…", "Bal: KES …"
 final _balance = RegExp(
-  r'\b(?:bal(?:ance)?\.?\s*(?:is|:)?\s*)(?:Kshs?|KES|KSH|Sh)\.?\s?[\dO][\dO,\s]*(?:\.[\dO]{1,2})?',
+  r'\b(?:bal(?:ance)?\.?\s*(?:is|:)?\s*)(?:Kshs?|KES|KSH|Sh)\.?\s?'
+  '$_amount',
   caseSensitive: false,
 );
 
 // Transaction cost is also not the payment.
 final _cost = RegExp(
-  r'\b(?:transaction cost|charges?|fee)\s*,?\s*(?:Kshs?|KES|KSH)\.?\s?[\dO][\dO,]*(?:\.[\dO]{1,2})?',
+  r'\b(?:transaction cost|charges?|fee)\s*,?\s*(?:Kshs?|KES|KSH)\.?\s?'
+  '$_amount',
   caseSensitive: false,
 );
 
@@ -164,24 +175,27 @@ ParsedPayment? _parseOne(String? code, String body, String whole) {
 bool _looksLikeCode(String s) =>
     RegExp(r'[0-9]').hasMatch(s) && RegExp(r'[A-Za-z]').hasMatch(s);
 
-/// "45,740.00" → 4574000. OCR often reads 0 as O inside numbers.
+/// "45,740.00" → 4574000. Two digits after the last separator are cents;
+/// every other separator or space is a thousands mark. OCR often reads 0 as
+/// O inside numbers.
 int? _cents(String raw) {
-  final s = raw
-      .replaceAll(RegExp('[Oo]'), '0')
-      .replaceAll(RegExp(r'[,\s]'), '');
-  final parts = s.split('.');
-  final whole = int.tryParse(parts[0]);
+  var s = raw.replaceAll(RegExp('[Oo]'), '0').replaceAll(RegExp(r'\s'), '');
+  var frac = '00';
+  final cents = RegExp(r'[.,](\d{1,2})$').firstMatch(s);
+  if (cents != null) {
+    frac = cents.group(1)!.padRight(2, '0');
+    s = s.substring(0, cents.start);
+  }
+  final whole = int.tryParse(s.replaceAll(RegExp('[.,]'), ''));
   if (whole == null) return null;
-  final frac = parts.length > 1
-      ? parts[1].padRight(2, '0').substring(0, 2)
-      : '00';
   return whole * 100 + int.parse(frac);
 }
 
 String? _payer(String body) {
+  // Case matters here: a full stop then a capitalised word ("… KANGOGO.
+  // Account …") ends the name; an initial ("ALICE K. MWANGI") doesn't.
   final m = RegExp(
-    r'\bfrom\s+(.+?)(?=\s*(?:\+?\d[\d\s]{8,}|\bon\s+\d|\.\s|\.$|\bAccount\b|\bAcc\b|\bNew\b|$))',
-    caseSensitive: false,
+    r'\b[Ff][Rr][Oo][Mm]\s+(.+?)(?=\s*(?:\+?\d[\d\s]{8,}|\b[Oo][Nn]\s+\d|\.\s+(?=[A-Z][a-z])|\.$|\b(?:Account|ACCOUNT|account|Acc|ACC|New|NEW)\b|$))',
   ).firstMatch(body);
   final name = m?.group(1)?.trim();
   if (name == null || name.isEmpty) return null;

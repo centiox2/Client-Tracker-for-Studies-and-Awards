@@ -66,8 +66,8 @@ class WeekRepository {
     late Week week;
     _db.transaction(() {
       _db.raw.execute(
-        'INSERT INTO weeks (start_date, end_date, created_at, updated_at) '
-        'VALUES (?, ?, ?, ?);',
+        'INSERT INTO weeks (id, start_date, end_date, created_at, updated_at) '
+        'VALUES (new_id(), ?, ?, ?, ?);',
         [
           _dateKey(monday),
           _dateKey(monday.add(const Duration(days: 4))),
@@ -84,7 +84,8 @@ class WeekRepository {
       for (var i = 0; i < 5; i++) {
         final day = monday.add(Duration(days: i));
         _db.raw.execute(
-          'INSERT INTO work_days (week_id, date, weekday) VALUES (?, ?, ?);',
+          'INSERT INTO work_days (id, week_id, date, weekday) '
+          'VALUES (new_id(), ?, ?, ?);',
           [week.id, _dateKey(day), day.weekday],
         );
       }
@@ -111,8 +112,8 @@ class WeekRepository {
         for (final staffId in staffIds) {
           _db.raw.execute(
             'INSERT OR IGNORE INTO client_counts '
-            '(day_id, staff_id, new_clients, existing_clients, updated_at) '
-            'VALUES (?, ?, 0, 0, ?);',
+            '(id, day_id, staff_id, new_clients, existing_clients, updated_at) '
+            'VALUES (new_id(), ?, ?, 0, 0, ?);',
             [dayId, staffId, now],
           );
         }
@@ -134,8 +135,8 @@ class WeekRepository {
       addStaffToWeek(weekId, [staffId]);
       _db.raw.execute(
         '''
-        INSERT OR IGNORE INTO staff_day_off (day_id, staff_id)
-        SELECT wd.id, ? FROM work_days wd
+        INSERT OR IGNORE INTO staff_day_off (id, day_id, staff_id)
+        SELECT new_id(), wd.id, ? FROM work_days wd
         WHERE wd.week_id = ?
           AND EXISTS (SELECT 1 FROM client_counts cc
                       WHERE cc.day_id = wd.id AND cc.staff_id != ?)

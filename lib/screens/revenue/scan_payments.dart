@@ -186,6 +186,18 @@ Future<void> _review(
   }
 }
 
+/// The message's date, unless it can't be right (a misread year would file
+/// the payment in 2062 or 2016, where nobody would look for it).
+DateTime? _plausible(DateTime? t) {
+  if (t == null) return null;
+  final now = DateTime.now();
+  if (t.isAfter(now.add(const Duration(days: 1))) ||
+      t.isBefore(now.subtract(const Duration(days: 400)))) {
+    return null;
+  }
+  return t;
+}
+
 void _addChosen(
   BuildContext context,
   WidgetRef ref,
@@ -196,7 +208,7 @@ void _addChosen(
   var total = 0;
   final days = <DateTime>{};
   for (final p in chosen) {
-    final t = p.time;
+    final t = _plausible(p.time);
     final d = t == null ? day : DateTime(t.year, t.month, t.day);
     actions.addRevenue(d, p.amountCents, note: p.note);
     total += p.amountCents;
@@ -278,6 +290,9 @@ class _ReviewDialogState extends State<_ReviewDialog> {
                         [
                           p.time == null
                               ? '${DateFormat('d MMM').format(widget.fallbackDay)} (no date in message)'
+                              : _plausible(p.time) == null
+                              ? '${DateFormat('d MMM').format(widget.fallbackDay)} '
+                                    '(message says ${DateFormat('d MMM y').format(p.time!)} — looks misread)'
                               : DateFormat('d MMM, h:mm a').format(p.time!),
                           p.method,
                         ].join(' · '),
