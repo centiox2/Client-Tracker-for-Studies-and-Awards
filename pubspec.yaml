@@ -1,0 +1,60 @@
+name: client_tracker
+description: "Weekly client tracking application — replaces the weekly Excel tracking spreadsheet."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # State management
+  flutter_riverpod: ^3.0.3
+
+  # Local storage
+  sqlite3: ^2.9.0
+  sqlite3_flutter_libs: ^0.5.32
+  path_provider: ^2.1.5
+  path: ^1.9.1
+  intl: ^0.20.2
+  shared_preferences: ^2.5.3
+
+  # Password hashing for the local admin / boss logins
+  crypto: ^3.0.6
+
+  # Excel export
+  excel: ^4.0.6
+
+  # File pickers (export / backup / restore) — supports Windows, Android, iOS
+  file_picker: ^10.3.3
+
+  # Browser DOM bindings (web build: downloads, file input)
+  web: ^1.1.1
+  supabase: ^2.16.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/fonts/
+    - assets/branding/
+
+  fonts:
+    - family: Instrument Sans
+      fonts:
+        - asset: assets/fonts/InstrumentSans-400.ttf
+          weight: 400
+        - asset: assets/fonts/InstrumentSans-500.ttf
+          weight: 500
+        - asset: assets/fonts/InstrumentSans-600.ttf
+          weight: 600
+        - asset: assets/fonts/InstrumentSans-700.ttf
+          weight: 700
