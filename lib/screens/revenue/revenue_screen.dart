@@ -33,6 +33,9 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
   /// True while photos are being dragged over the page.
   bool _dragging = false;
 
+  /// The time for the next typed transaction; null means "now".
+  TimeOfDay? _time;
+
   @override
   void dispose() {
     _amount.dispose();
@@ -53,10 +56,22 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
       _amountFocus.requestFocus();
       return;
     }
-    ref.read(appActionsProvider).addRevenue(day, cents, note: _note.text);
+    final t = _time ?? TimeOfDay.now();
+    ref
+        .read(appActionsProvider)
+        .addRevenue(
+          day,
+          cents,
+          note: _note.text,
+          at: DateTime(day.year, day.month, day.day, t.hour, t.minute),
+        );
     _amount.clear();
     _note.clear();
-    setState(() => _error = null);
+    // Back to "now" for the next one.
+    setState(() {
+      _error = null;
+      _time = null;
+    });
     // Ready for the next one straight away.
     _amountFocus.requestFocus();
   }
@@ -82,7 +97,7 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
     final picked = await showDatePicker(
       context: context,
       initialDate: day,
-      firstDate: DateTime(2020),
+      firstDate: revenueEarliestDate,
       lastDate: _today(),
     );
     if (picked != null) ref.read(revenueDateProvider.notifier).set(picked);
@@ -149,6 +164,17 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
                         amountFocus: _amountFocus,
                         error: _error,
                         onSubmit: () => _add(day),
+                        day: day,
+                        time: _time,
+                        onPickDay: () => _pickDay(day),
+                        onPickTime: () async {
+                          final t = await showTimePicker(
+                            context: context,
+                            initialTime: _time ?? TimeOfDay.now(),
+                          );
+                          if (t != null) setState(() => _time = t);
+                        },
+                        onClearTime: () => setState(() => _time = null),
                         onScan: photoTextSupported
                             ? () => scanPaymentPhotos(context, ref, day)
                             : null,
@@ -429,7 +455,21 @@ class _AddPanel extends StatelessWidget {
     required this.onChanged,
     required this.onScan,
     required this.onPaste,
+    required this.day,
+    required this.time,
+    required this.onPickDay,
+    required this.onPickTime,
+    required this.onClearTime,
   });
+
+  /// The date the transaction goes on (the page's day).
+  final DateTime day;
+
+  /// Its time; null means "now".
+  final TimeOfDay? time;
+  final VoidCallback onPickDay;
+  final VoidCallback onPickTime;
+  final VoidCallback onClearTime;
   final bool phone;
   final String currency;
   final TextEditingController amount;
@@ -474,6 +514,23 @@ class _AddPanel extends StatelessWidget {
         counterText: '',
         isDense: true,
       ),
+    );
+    final dateBox = PickerBox(
+      key: const ValueKey('revenue-date'),
+      label: 'Date',
+      value: DateFormat(
+        day.year == DateTime.now().year ? 'EEE d MMM' : 'd MMM y',
+      ).format(day),
+      icon: Icons.calendar_today_outlined,
+      onTap: onPickDay,
+    );
+    final timeBox = PickerBox(
+      key: const ValueKey('revenue-time'),
+      label: 'Time',
+      value: time == null ? 'Now' : time!.format(context),
+      icon: Icons.schedule,
+      onTap: onPickTime,
+      onClear: time == null ? null : onClearTime,
     );
     final button = FilledButton.icon(
       onPressed: onSubmit,
@@ -522,6 +579,14 @@ class _AddPanel extends StatelessWidget {
                   const SizedBox(height: 8),
                   amountField,
                   const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(child: dateBox),
+                      const SizedBox(width: 10),
+                      Expanded(child: timeBox),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
                   noteField,
                   const SizedBox(height: 10),
                   button,
@@ -535,7 +600,16 @@ class _AddPanel extends StatelessWidget {
                     children: [
                       Expanded(flex: 2, child: amountField),
                       const SizedBox(width: 10),
-                      Expanded(flex: 3, child: noteField),
+                      Expanded(flex: 2, child: dateBox),
+                      const SizedBox(width: 10),
+                      Expanded(flex: 2, child: timeBox),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: noteField),
                       const SizedBox(width: 10),
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
@@ -550,6 +624,45 @@ class _AddPanel extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A date or time box: looks like the text fields beside it, opens a
+/// picker when tapped. [onClear] (optional) shows a clear button.
+class PickerBox extends StatelessWidget {
+  const PickerBox({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.onTap,
+    this.onClear,
+  });
+  final String label;
+  final String value;
+  final IconData icon;
+  final VoidCallback onTap;
+  final VoidCallback? onClear;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(Dt.rMd),
+    child: InputDecorator(
+      decoration: InputDecoration(
+        labelText: label,
+        isDense: true,
+        suffixIcon: onClear == null
+            ? Icon(icon, size: 16)
+            : IconButton(
+                tooltip: 'Back to now',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.close, size: 16),
+                onPressed: onClear,
+              ),
+      ),
+      child: Text(value, maxLines: 1, overflow: TextOverflow.ellipsis),
+    ),
+  );
 }
 
 class _EntryRow extends StatelessWidget {
@@ -744,6 +857,17 @@ Future<void> showEditRevenueDialog(
   );
   final note = TextEditingController(text: entry.note);
   String? error;
+  var at = entry.createdAt;
+  // Older entries kept the day separately from the time they were typed.
+  if (!DateUtils.isSameDay(at, entry.date)) {
+    at = DateTime(
+      entry.date.year,
+      entry.date.month,
+      entry.date.day,
+      at.hour,
+      at.minute,
+    );
+  }
   await showDialog<void>(
     context: context,
     builder: (context) => StatefulBuilder(
@@ -756,7 +880,14 @@ Future<void> showEditRevenueDialog(
           }
           ref
               .read(appActionsProvider)
-              .updateRevenue(entry.id, amountCents: cents, note: note.text);
+              .updateRevenue(
+                entry.id,
+                amountCents: cents,
+                note: note.text,
+                at: at,
+              );
+          // Follow the entry if it moved to another day.
+          ref.read(revenueDateProvider.notifier).set(at);
           Navigator.of(context).pop();
         }
 
@@ -782,6 +913,62 @@ Future<void> showEditRevenueDialog(
                     prefixText: '$currency ',
                     errorText: error,
                   ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: PickerBox(
+                        label: 'Date',
+                        value: DateFormat('d MMM y').format(at),
+                        icon: Icons.calendar_today_outlined,
+                        onTap: () async {
+                          final d = await showDatePicker(
+                            context: context,
+                            initialDate: at,
+                            firstDate: revenueEarliestDate,
+                            lastDate: DateTime.now(),
+                          );
+                          if (d != null) {
+                            setState(
+                              () => at = DateTime(
+                                d.year,
+                                d.month,
+                                d.day,
+                                at.hour,
+                                at.minute,
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: PickerBox(
+                        label: 'Time',
+                        value: TimeOfDay.fromDateTime(at).format(context),
+                        icon: Icons.schedule,
+                        onTap: () async {
+                          final t = await showTimePicker(
+                            context: context,
+                            initialTime: TimeOfDay.fromDateTime(at),
+                          );
+                          if (t != null) {
+                            setState(
+                              () => at = DateTime(
+                                at.year,
+                                at.month,
+                                at.day,
+                                t.hour,
+                                t.minute,
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 TextField(

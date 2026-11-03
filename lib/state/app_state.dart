@@ -511,10 +511,15 @@ class AppActions {
     return id;
   }
 
-  void updateRevenue(int id, {required int amountCents, required String note}) {
+  void updateRevenue(
+    int id, {
+    required int amountCents,
+    required String note,
+    DateTime? at,
+  }) {
     _ref
         .read(revenueRepositoryProvider)
-        .update(id, amountCents: amountCents, note: note);
+        .update(id, amountCents: amountCents, note: note, at: at);
     _touch();
   }
 

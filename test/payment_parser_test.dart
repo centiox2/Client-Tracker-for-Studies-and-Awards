@@ -123,4 +123,12 @@ JANE WANJIKU 254711000111. Account Number Brian New Utility balance is Ksh117,02
     expect(p.payer, 'ALICE K. MWANGI');
     expect(p.amountCents, 200000);
   });
+
+  test('older messages keep their own date', () {
+    final p = parsePayments(
+      'QF71ABC2XY Confirmed. on 14/2/23 at 9:05 AM Ksh3,500.00 received from '
+      'MARY W 254700111222. New Utility balance is Ksh10.00',
+    ).single;
+    expect(p.time, DateTime(2023, 2, 14, 9, 5));
+  });
 }
