@@ -21,6 +21,7 @@ class WindowsOcrException implements Exception {
 // script text, so no file name can change what runs.
 const _script = r'''
 $ErrorActionPreference = 'Stop'
+try {
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
   $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
@@ -68,6 +69,14 @@ $result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult]
 $stream.Dispose()
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 foreach ($line in $result.Lines) { [Console]::Out.WriteLine($line.Text) }
+} catch {
+  # Report the real reason as plain text (PowerShell would otherwise wrap
+  # it in CLIXML on stderr).
+  $e = $_.Exception
+  while ($e.InnerException) { $e = $e.InnerException }
+  [Console]::Out.WriteLine('OCR_ERROR: ' + $e.Message)
+  exit 4
+}
 ''';
 
 /// Reads the text in the image at [path], one line per text line.
@@ -87,6 +96,8 @@ Future<String> readTextOnWindows(String path) async {
         'Hidden',
         '-NoProfile',
         '-NonInteractive',
+        '-OutputFormat',
+        'Text',
         '-ExecutionPolicy',
         'Bypass',
         '-EncodedCommand',
@@ -109,12 +120,17 @@ Future<String> readTextOnWindows(String path) async {
       'Settings › Time & language › Language & region, then try again.',
     );
   }
+  final out = (result.stdout as String).trim();
   if (result.exitCode != 0) {
-    final detail = (result.stderr as String).trim().split('\n').first;
+    final reported = RegExp(r'OCR_ERROR: (.*)').firstMatch(out)?.group(1);
+    final detail = (reported ?? (result.stderr as String))
+        .trim()
+        .split('\n')
+        .first;
     throw WindowsOcrException(
       'Windows couldn’t read that image'
       '${detail.isEmpty ? '' : ' ($detail)'}.',
     );
   }
-  return (result.stdout as String).trim();
+  return out;
 }
