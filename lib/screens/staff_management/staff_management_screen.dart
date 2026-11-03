@@ -228,7 +228,12 @@ class _StaffTable extends ConsumerWidget {
             ),
           SizedBox(
             width: compact ? 52 : _weekW,
-            child: Text('This week', style: head, textAlign: TextAlign.right),
+            child: Text(
+              compact ? 'Week' : 'This week',
+              style: head,
+              maxLines: 1,
+              textAlign: TextAlign.right,
+            ),
           ),
           SizedBox(width: readOnly ? 6 : _actionsW),
         ],

@@ -97,6 +97,13 @@ abstract final class Dt {
     'monospace',
   ];
 
+  /// Segmented buttons on a phone: tighter, so several segments fit side by
+  /// side without wrapping.
+  static const ButtonStyle phoneSegments = ButtonStyle(
+    visualDensity: VisualDensity.compact,
+    padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 4)),
+  );
+
   /// Data text: monospace family + tabular figures so columns align.
   static TextStyle mono(
     BuildContext context, {
@@ -156,6 +163,7 @@ class MeaningDot extends StatelessWidget {
 /// Uppercase micro-label style ("cap" in the mockups): compact, medium weight,
 /// lightly tracked, and muted.
 TextStyle microLabel(ThemeData theme, {Color? color}) => TextStyle(
+  fontFamily: 'Instrument Sans',
   fontSize: 11,
   fontWeight: FontWeight.w600,
   letterSpacing: 0.2,
@@ -335,6 +343,7 @@ ThemeData buildAppTheme(Brightness brightness) {
   return ThemeData(
     useMaterial3: true,
     brightness: brightness,
+    fontFamily: 'Instrument Sans',
     colorScheme: scheme,
     textTheme: textTheme,
     scaffoldBackgroundColor: p.bg,
@@ -368,6 +377,7 @@ ThemeData buildAppTheme(Brightness brightness) {
         color: p.fg,
       ),
       contentTextStyle: TextStyle(
+        fontFamily: 'Instrument Sans',
         fontSize: 13.5,
         height: 1.5,
         color: p.secondary,
@@ -379,10 +389,15 @@ ThemeData buildAppTheme(Brightness brightness) {
       filled: true,
       fillColor: p.field,
       hintStyle: TextStyle(
+        fontFamily: 'Instrument Sans',
         fontSize: 13.5,
         color: p.secondary.withValues(alpha: 0.8),
       ),
-      labelStyle: TextStyle(fontSize: 13.5, color: p.secondary),
+      labelStyle: TextStyle(
+        fontFamily: 'Instrument Sans',
+        fontSize: 13.5,
+        color: p.secondary,
+      ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       border: fieldBorder(),
       enabledBorder: fieldBorder(),
@@ -401,7 +416,11 @@ ThemeData buildAppTheme(Brightness brightness) {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(Dt.rSm),
         ),
-        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+        textStyle: const TextStyle(
+          fontFamily: 'Instrument Sans',
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
         iconSize: 17,
       ),
     ),
@@ -415,7 +434,11 @@ ThemeData buildAppTheme(Brightness brightness) {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(Dt.rSm),
         ),
-        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+        textStyle: const TextStyle(
+          fontFamily: 'Instrument Sans',
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
         iconSize: 17,
       ),
     ),
@@ -426,7 +449,11 @@ ThemeData buildAppTheme(Brightness brightness) {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(Dt.rSm),
         ),
-        textStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500),
+        textStyle: const TextStyle(
+          fontFamily: 'Instrument Sans',
+          fontSize: 13.5,
+          fontWeight: FontWeight.w500,
+        ),
       ),
     ),
     iconButtonTheme: IconButtonThemeData(
@@ -452,7 +479,11 @@ ThemeData buildAppTheme(Brightness brightness) {
               states.contains(WidgetState.selected) ? onBrand : p.secondary,
         ),
         textStyle: const WidgetStatePropertyAll(
-          TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500),
+          TextStyle(
+            fontFamily: 'Instrument Sans',
+            fontSize: 13.5,
+            fontWeight: FontWeight.w500,
+          ),
         ),
         minimumSize: const WidgetStatePropertyAll(Size(0, 40)),
       ),
@@ -465,6 +496,7 @@ ThemeData buildAppTheme(Brightness brightness) {
       height: 62,
       labelTextStyle: WidgetStateProperty.resolveWith(
         (states) => TextStyle(
+          fontFamily: 'Instrument Sans',
           fontSize: 11,
           fontWeight: states.contains(WidgetState.selected)
               ? FontWeight.w600
@@ -489,6 +521,7 @@ ThemeData buildAppTheme(Brightness brightness) {
       surfaceTintColor: Colors.transparent,
       centerTitle: false,
       titleTextStyle: TextStyle(
+        fontFamily: 'Instrument Sans',
         fontSize: 15,
         fontWeight: FontWeight.w600,
         letterSpacing: -0.1,
@@ -513,14 +546,22 @@ ThemeData buildAppTheme(Brightness brightness) {
         borderRadius: BorderRadius.circular(Dt.rMd),
         side: BorderSide(color: p.borderStrong),
       ),
-      textStyle: TextStyle(fontSize: 13.5, color: p.fg),
+      textStyle: TextStyle(
+        fontFamily: 'Instrument Sans',
+        fontSize: 13.5,
+        color: p.fg,
+      ),
     ),
 
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
       elevation: 0,
       backgroundColor: p.fg,
-      contentTextStyle: TextStyle(fontSize: 13, color: p.bg),
+      contentTextStyle: TextStyle(
+        fontFamily: 'Instrument Sans',
+        fontSize: 13,
+        color: p.bg,
+      ),
       shape: const StadiumBorder(),
     ),
 
@@ -538,7 +579,11 @@ ThemeData buildAppTheme(Brightness brightness) {
         color: p.fg,
         borderRadius: BorderRadius.circular(Dt.rSm),
       ),
-      textStyle: TextStyle(fontSize: 11.5, color: p.bg),
+      textStyle: TextStyle(
+        fontFamily: 'Instrument Sans',
+        fontSize: 11.5,
+        color: p.bg,
+      ),
       waitDuration: const Duration(milliseconds: 400),
     ),
   );

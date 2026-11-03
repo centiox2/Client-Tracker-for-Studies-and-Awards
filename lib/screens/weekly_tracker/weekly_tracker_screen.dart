@@ -1713,28 +1713,30 @@ class _MobileWeekViewState extends State<_MobileWeekView> {
             horizontal: Dt.s16,
             vertical: Dt.s8,
           ),
-          // Horizontal scroll on very narrow screens so day labels never wrap.
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SegmentedButton<int>(
-              segments: [
-                for (var i = 0; i < days.length; i++)
-                  ButtonSegment(
-                    value: i,
-                    label: Text(
-                      DateFormat('EEE').format(days[i].day.date),
-                      maxLines: 1,
-                    ),
+          // Full width with equal segments so all five days always fit.
+          child: SegmentedButton<int>(
+            expandedInsets: EdgeInsets.zero,
+            showSelectedIcon: false,
+            style: MediaQuery.sizeOf(context).width < 600
+                ? Dt.phoneSegments
+                : null,
+            segments: [
+              for (var i = 0; i < days.length; i++)
+                ButtonSegment(
+                  value: i,
+                  label: Text(
+                    DateFormat('EEE').format(days[i].day.date),
+                    maxLines: 1,
                   ),
-              ],
-              selected: {index},
-              onSelectionChanged: (selection) {
-                setState(() {
-                  _resolvedDayId = days[selection.first].day.id;
-                });
-                widget.onSelectDay(days[selection.first].day.id);
-              },
-            ),
+                ),
+            ],
+            selected: {index},
+            onSelectionChanged: (selection) {
+              setState(() {
+                _resolvedDayId = days[selection.first].day.id;
+              });
+              widget.onSelectDay(days[selection.first].day.id);
+            },
           ),
         ),
         Expanded(
