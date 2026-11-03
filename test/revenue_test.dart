@@ -300,4 +300,70 @@ void main() {
     expect(find.textContaining('across 2 days'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('an older message lands on its own date, with the year shown', (
+    tester,
+  ) async {
+    await pumpApp(tester, admin: true);
+    await tester.tap(find.text('Revenue').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('paste-payment')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('paste-message')),
+      'QF71ABC2XY Confirmed. on 14/2/23 at 9:05 AM Ksh3,500.00 received from '
+      'MARY W 254700111222. New Utility balance is Ksh10.00',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Read'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('14 Feb 2023, 9:05 AM'), findsOneWidget);
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.widgetWithText(FilledButton, 'Add'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final e = RevenueRepository(db).entriesFor(DateTime(2023, 2, 14)).single;
+    expect(e.createdAt, DateTime(2023, 2, 14, 9, 5));
+  });
+
+  testWidgets('typed transactions take the date and time boxes', (
+    tester,
+  ) async {
+    await pumpApp(tester, admin: true);
+    await tester.tap(find.text('Revenue').last);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('revenue-date')), findsOneWidget);
+    expect(find.text('Now'), findsOneWidget);
+
+    // Pick 9:30 AM in the time picker (typing it in).
+    await tester.tap(find.byKey(const ValueKey('revenue-time')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.keyboard_outlined));
+    await tester.pumpAndSettle();
+    final fields = find.descendant(
+      of: find.byType(Dialog),
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(fields.at(0), '9');
+    await tester.enterText(fields.at(1), '30');
+    await tester.tap(find.text('AM'));
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(find.text('9:30 AM'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('revenue-amount')),
+      '2,000',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    final e = RevenueRepository(db).entriesFor(today()).single;
+    expect(e.createdAt.hour, 9);
+    expect(e.createdAt.minute, 30);
+    // Back to "now" for the next one.
+    expect(find.text('Now'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

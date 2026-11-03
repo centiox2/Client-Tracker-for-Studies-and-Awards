@@ -105,12 +105,27 @@ class RevenueRepository {
     return _db.raw.lastInsertRowId;
   }
 
-  void update(int id, {required int amountCents, required String note}) {
+  /// Changes an entry; [at] (when given) moves it to that date and time.
+  void update(
+    int id, {
+    required int amountCents,
+    required String note,
+    DateTime? at,
+  }) {
     _check(amountCents);
+    final now = DateTime.now().toIso8601String();
+    if (at == null) {
+      _db.raw.execute(
+        'UPDATE revenue_entries SET amount_cents = ?, note = ?, updated_at = ? '
+        'WHERE id = ?;',
+        [amountCents, _clean(note), now, id],
+      );
+      return;
+    }
     _db.raw.execute(
-      'UPDATE revenue_entries SET amount_cents = ?, note = ?, updated_at = ? '
-      'WHERE id = ?;',
-      [amountCents, _clean(note), DateTime.now().toIso8601String(), id],
+      'UPDATE revenue_entries SET amount_cents = ?, note = ?, date = ?, '
+      'created_at = ?, updated_at = ? WHERE id = ?;',
+      [amountCents, _clean(note), _key(at), at.toIso8601String(), now, id],
     );
   }
 

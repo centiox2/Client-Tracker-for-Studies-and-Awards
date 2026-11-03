@@ -209,13 +209,16 @@ class _Candidate {
   String? get key => payment.code?.toUpperCase().replaceAll('O', '0');
 }
 
-/// A date that can't be right (a misread year would file the payment in
-/// 2062 or 2016, where nobody would look for it) counts as no date.
+/// The earliest date a payment message can have (M-Pesa began in 2007).
+final revenueEarliestDate = DateTime(2007);
+
+/// A date that can't be right counts as no date: in the future (a misread
+/// year like "3/11/62"), or before payment messages existed. Older messages
+/// — last year's, or years back — keep their own date.
 DateTime? _plausible(DateTime? t) {
   if (t == null) return null;
-  final now = DateTime.now();
-  if (t.isAfter(now.add(const Duration(days: 1))) ||
-      t.isBefore(now.subtract(const Duration(days: 400)))) {
+  if (t.isAfter(DateTime.now().add(const Duration(days: 1))) ||
+      t.isBefore(revenueEarliestDate)) {
     return null;
   }
   return t;
@@ -363,15 +366,20 @@ class _ReviewDialogState extends State<_ReviewDialog> {
     });
   }
 
+  /// "3 Nov, 1:38 PM", with the year whenever it isn't this year, so an
+  /// older message's date is plain to check.
+  static String _at(DateTime t) => DateFormat(
+    t.year == DateTime.now().year ? 'd MMM, h:mm a' : 'd MMM y, h:mm a',
+  ).format(t);
+
   String _whenText(_Candidate c) {
-    final f = DateFormat('d MMM, h:mm a');
-    if (c.messageTime != null) return f.format(c.messageTime!);
+    if (c.messageTime != null) return _at(c.messageTime!);
     final misread = c.payment.time != null;
     if (c.when != null) {
-      return '${f.format(c.when!)} (photo’s time'
+      return '${_at(c.when!)} (photo’s time'
           '${misread ? '; the message’s date looks misread' : ''})';
     }
-    return '${DateFormat('d MMM').format(widget.fallbackDay)} '
+    return '${DateFormat('d MMM y').format(widget.fallbackDay)} '
         '(${misread ? 'the message’s date looks misread' : 'no date found'})';
   }
 
