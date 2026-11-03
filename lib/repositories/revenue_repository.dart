@@ -110,6 +110,19 @@ class RevenueRepository {
     );
   }
 
+  /// Which of [codes] (transaction codes) are already in a saved note —
+  /// so the same message can't be added twice.
+  Set<String> existingCodes(Iterable<String> codes) => {
+    for (final c in codes)
+      if (c.isNotEmpty &&
+          _db.raw.select(
+            'SELECT 1 FROM revenue_entries WHERE instr(upper(note), ?) > 0 '
+            'LIMIT 1;',
+            [c.toUpperCase()],
+          ).isNotEmpty)
+        c,
+  };
+
   void delete(int id) =>
       _db.raw.execute('DELETE FROM revenue_entries WHERE id = ?;', [id]);
 
