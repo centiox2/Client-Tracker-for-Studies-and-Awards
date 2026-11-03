@@ -1,0 +1,271 @@
+-- Client Tracker: online database setup for Supabase.
+-- Run this once in a new Supabase project (SQL Editor → New query → paste → Run).
+-- It is the same setup as the original project, in the order it was applied.
+
+-- ===== client_tracker_schema =====
+-- Mirrors the app's local SQLite tables exactly (same ids, dates as ISO text)
+-- so rows round-trip unchanged between devices.
+
+create table public.staff (
+  id            bigint primary key,
+  name          text not null,
+  active        integer not null default 1,
+  display_order integer not null default 0,
+  created_at    text not null
+);
+
+create table public.weeks (
+  id          bigint primary key,
+  start_date  text not null unique,
+  end_date    text not null,
+  created_at  text not null,
+  updated_at  text not null,
+  show_zeros  integer not null default 1
+);
+
+create table public.work_days (
+  id      bigint primary key,
+  week_id bigint not null references public.weeks(id) on delete cascade,
+  date    text not null unique,
+  weekday integer not null
+);
+create index work_days_week_idx on public.work_days(week_id);
+
+create table public.client_counts (
+  id               bigint primary key,
+  day_id           bigint not null references public.work_days(id) on delete cascade,
+  staff_id         bigint not null references public.staff(id) on delete cascade,
+  new_clients      integer not null default 0,
+  existing_clients integer not null default 0,
+  updated_at       text not null,
+  unique (day_id, staff_id)
+);
+create index client_counts_staff_idx on public.client_counts(staff_id);
+
+create table public.staff_day_off (
+  id       bigint primary key,
+  day_id   bigint not null references public.work_days(id) on delete cascade,
+  staff_id bigint not null references public.staff(id) on delete cascade,
+  unique (day_id, staff_id)
+);
+create index staff_day_off_staff_idx on public.staff_day_off(staff_id);
+
+create table public.day_notes (
+  day_id     bigint primary key references public.work_days(id) on delete cascade,
+  note       text not null,
+  updated_at text not null
+);
+
+create table public.app_settings (
+  key   text primary key,
+  value text not null
+);
+
+create table public.count_changes (
+  id           bigint primary key,
+  day_id       bigint not null references public.work_days(id) on delete cascade,
+  staff_id     bigint not null,
+  old_new      integer not null,
+  old_existing integer not null,
+  new_new      integer not null,
+  new_existing integer not null,
+  changed_at   text not null
+);
+create index count_changes_day_idx on public.count_changes(day_id);
+
+-- Anyone may read (the boss's view is open); nobody writes directly.
+-- All writes go through sync_push(), which checks the admin token.
+do $$
+declare t text;
+begin
+  foreach t in array array['staff','weeks','work_days','client_counts',
+    'staff_day_off','day_notes','app_settings','count_changes']
+  loop
+    execute format('alter table public.%I enable row level security', t);
+    execute format(
+      'create policy "Anyone can read" on public.%I for select to anon, authenticated using (true)', t);
+    -- Deletes in live updates must carry the row id.
+    execute format('alter table public.%I replica identity full', t);
+    execute format('alter publication supabase_realtime add table public.%I', t);
+  end loop;
+end $$;
+
+-- ===== admin_auth_and_sync =====
+-- The admin password (bcrypt hash) and the sign-in tokens devices use to
+-- push changes. Kept in a schema the API does not expose.
+create schema if not exists private;
+revoke all on schema private from public, anon, authenticated;
+
+create table private.admin_secret (
+  id   integer primary key default 1 check (id = 1),
+  hash text not null,
+  updated_at timestamptz not null default now()
+);
+
+create table private.admin_tokens (
+  token_hash text primary key,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default now() + interval '180 days'
+);
+
+create or replace function private.new_token()
+returns text language plpgsql security definer set search_path = '' as $$
+declare t text := encode(extensions.gen_random_bytes(32), 'hex');
+begin
+  delete from private.admin_tokens where expires_at < now();
+  insert into private.admin_tokens (token_hash)
+    values (encode(extensions.digest(t, 'sha256'), 'hex'));
+  return t;
+end $$;
+
+create or replace function private.check_token(p_token text)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if p_token is null or not exists (
+    select 1 from private.admin_tokens
+    where token_hash = encode(extensions.digest(p_token, 'sha256'), 'hex')
+      and expires_at > now()
+  ) then
+    raise exception 'not_signed_in' using errcode = '28000';
+  end if;
+end $$;
+
+-- 'unclaimed' until the first admin sign-in sets the password.
+create or replace function public.admin_status()
+returns text language sql security definer set search_path = '' as $$
+  select case when exists (select 1 from private.admin_secret)
+              then 'claimed' else 'unclaimed' end;
+$$;
+
+-- First sign-in: the admin's password becomes the online password.
+create or replace function public.admin_claim(p_password text)
+returns text language plpgsql security definer set search_path = '' as $$
+begin
+  if length(coalesce(p_password, '')) < 4 then
+    raise exception 'password_too_short' using errcode = '22023';
+  end if;
+  insert into private.admin_secret (id, hash)
+    values (1, extensions.crypt(p_password, extensions.gen_salt('bf', 10)))
+    on conflict (id) do nothing;
+  if not found then
+    raise exception 'already_claimed' using errcode = '42501';
+  end if;
+  return private.new_token();
+end $$;
+
+create or replace function public.admin_login(p_password text)
+returns text language plpgsql security definer set search_path = '' as $$
+declare h text;
+begin
+  select hash into h from private.admin_secret where id = 1;
+  if h is null then
+    raise exception 'unclaimed' using errcode = '42501';
+  end if;
+  if extensions.crypt(coalesce(p_password, ''), h) <> h then
+    perform pg_sleep(0.5);
+    raise exception 'wrong_password' using errcode = '28P01';
+  end if;
+  return private.new_token();
+end $$;
+
+create or replace function public.admin_set_password(p_token text, p_new text)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  perform private.check_token(p_token);
+  if length(coalesce(p_new, '')) < 4 then
+    raise exception 'password_too_short' using errcode = '22023';
+  end if;
+  update private.admin_secret
+    set hash = extensions.crypt(p_new, extensions.gen_salt('bf', 10)),
+        updated_at = now()
+    where id = 1;
+  -- Other devices must sign in again with the new password.
+  delete from private.admin_tokens
+    where token_hash <> encode(extensions.digest(p_token, 'sha256'), 'hex');
+end $$;
+
+create or replace function public.admin_logout(p_token text)
+returns void language sql security definer set search_path = '' as $$
+  delete from private.admin_tokens
+  where token_hash = encode(extensions.digest(p_token, 'sha256'), 'hex');
+$$;
+
+-- Upserts JSON rows into one table, matched on its primary key.
+create or replace function private.upsert_rows(p_table text, p_pk text, p_rows jsonb)
+returns void language plpgsql security definer set search_path = '' as $$
+declare sets text;
+begin
+  if p_rows is null or jsonb_array_length(p_rows) = 0 then return; end if;
+  select string_agg(format('%I = excluded.%I', column_name, column_name), ', ')
+    into sets
+    from information_schema.columns
+    where table_schema = 'public' and table_name = p_table
+      and column_name <> p_pk;
+  execute format(
+    'insert into public.%I select * from jsonb_populate_recordset(null::public.%I, $1) '
+    'on conflict (%I) do update set %s',
+    p_table, p_table, p_pk, sets) using p_rows;
+end $$;
+
+create or replace function private.delete_rows(p_table text, p_pk text, p_keys jsonb)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if p_keys is null or jsonb_array_length(p_keys) = 0 then return; end if;
+  execute format(
+    'delete from public.%I where %I::text in (select jsonb_array_elements_text($1))',
+    p_table, p_pk) using p_keys;
+end $$;
+
+-- Applies one batch of changes from the admin's device, all or nothing:
+-- {"deletes": {"weeks": [3]}, "upserts": {"staff": [{...}], ...}}
+create or replace function public.sync_push(p_token text, p_payload jsonb)
+returns timestamptz language plpgsql security definer set search_path = '' as $$
+declare
+  tables text[] := array['staff','weeks','work_days','client_counts',
+    'staff_day_off','day_notes','app_settings','count_changes'];
+  pks text[] := array['id','id','id','id','id','day_id','key','id'];
+  i int;
+begin
+  perform private.check_token(p_token);
+  -- Deletes first, children before parents (a week deleted and created
+  -- again must not collide with itself).
+  for i in reverse array_length(tables, 1)..1 loop
+    perform private.delete_rows(tables[i], pks[i], p_payload->'deletes'->tables[i]);
+  end loop;
+  for i in 1..array_length(tables, 1) loop
+    perform private.upsert_rows(tables[i], pks[i], p_payload->'upserts'->tables[i]);
+  end loop;
+  return now();
+end $$;
+
+-- Everything, in one call (no row limits), for a device starting up.
+create or replace function public.sync_snapshot()
+returns jsonb language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object(
+    'staff',         coalesce((select jsonb_agg(t order by t.id) from public.staff t), '[]'),
+    'weeks',         coalesce((select jsonb_agg(t order by t.id) from public.weeks t), '[]'),
+    'work_days',     coalesce((select jsonb_agg(t order by t.id) from public.work_days t), '[]'),
+    'client_counts', coalesce((select jsonb_agg(t order by t.id) from public.client_counts t), '[]'),
+    'staff_day_off', coalesce((select jsonb_agg(t order by t.id) from public.staff_day_off t), '[]'),
+    'day_notes',     coalesce((select jsonb_agg(t order by t.day_id) from public.day_notes t), '[]'),
+    'app_settings',  coalesce((select jsonb_agg(t order by t.key) from public.app_settings t), '[]'),
+    'count_changes', coalesce((select jsonb_agg(t order by t.id) from public.count_changes t), '[]')
+  );
+$$;
+
+revoke all on all functions in schema private from public, anon, authenticated;
+revoke all on function public.admin_status(), public.admin_claim(text),
+  public.admin_login(text), public.admin_set_password(text, text),
+  public.admin_logout(text), public.sync_push(text, jsonb),
+  public.sync_snapshot() from public;
+grant execute on function public.admin_status(), public.admin_claim(text),
+  public.admin_login(text), public.admin_set_password(text, text),
+  public.admin_logout(text), public.sync_push(text, jsonb),
+  public.sync_snapshot() to anon, authenticated;
+
+-- ===== snapshot_as_invoker =====
+-- Reading is already allowed by the tables' policies; no elevated rights needed.
+alter function public.sync_snapshot() security invoker;
+grant select on public.staff, public.weeks, public.work_days, public.client_counts,
+  public.staff_day_off, public.day_notes, public.app_settings, public.count_changes
+  to anon, authenticated;
