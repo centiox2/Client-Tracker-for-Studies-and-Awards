@@ -1,0 +1,27 @@
+name: Windows photo reading check
+
+# Reads a sample M-Pesa photo with Windows' built-in text reader, exactly as
+# Scan photo does in the Windows app. Separate from the full build so it's
+# quick to rerun while working on photo reading.
+on:
+  push:
+    paths:
+      - lib/services/windows_ocr.dart
+      - lib/services/payment_text_parser.dart
+      - tool/ocr_check.dart
+      - test/fixtures/**
+      - .github/workflows/windows-ocr-check.yml
+  workflow_dispatch:
+
+jobs:
+  ocr-check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Read the sample photo
+        run: dart run tool/ocr_check.dart test/fixtures/mpesa_sample.png

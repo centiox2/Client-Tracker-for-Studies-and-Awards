@@ -112,14 +112,16 @@ class RevenueRepository {
   }
 
   /// Which of [codes] (transaction codes) are already in a saved note —
-  /// so the same message can't be added twice.
+  /// so the same message can't be added twice. Letter O and zero count as
+  /// the same: text readers mix them up ("UK3JPO8PVA" vs "UK3JP08PVA"), and
+  /// the phone and the PC may read the same photo differently.
   Set<String> existingCodes(Iterable<String> codes) => {
     for (final c in codes)
       if (c.isNotEmpty &&
           _db.raw.select(
-            'SELECT 1 FROM revenue_entries WHERE instr(upper(note), ?) > 0 '
-            'LIMIT 1;',
-            [c.toUpperCase()],
+            "SELECT 1 FROM revenue_entries "
+            "WHERE instr(replace(upper(note), 'O', '0'), ?) > 0 LIMIT 1;",
+            [c.toUpperCase().replaceAll('O', '0')],
           ).isNotEmpty)
         c,
   };
