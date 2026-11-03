@@ -76,13 +76,19 @@ void main() {
     final other = openInMemoryDatabase();
     addTearDown(other.close);
     other.restoreFromJson(json);
-    expect(RevenueRepository(other).day(DateTime(2026, 11, 2)).totalCents, 5000);
+    expect(
+      RevenueRepository(other).day(DateTime(2026, 11, 2)).totalCents,
+      5000,
+    );
 
     // A backup made before revenue existed leaves revenue alone.
     final old = jsonDecode(json) as Map<String, Object?>;
     (old['tables']! as Map).remove('revenue_entries');
     other.restoreFromJson(jsonEncode(old));
-    expect(RevenueRepository(other).day(DateTime(2026, 11, 2)).totalCents, 5000);
+    expect(
+      RevenueRepository(other).day(DateTime(2026, 11, 2)).totalCents,
+      5000,
+    );
   });
 
   test('currency defaults to KSh and can be changed', () {
@@ -161,6 +167,55 @@ void main() {
     expect(find.text('Transactions'), findsOneWidget);
     expect(find.byKey(const ValueKey('revenue-amount')), findsNothing);
     expect(find.byIcon(Icons.delete_outline), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a pasted M-Pesa message is read, checked and added once', (
+    tester,
+  ) async {
+    await pumpApp(tester, admin: true);
+    await tester.tap(find.text('Revenue').last);
+    await tester.pumpAndSettle();
+    // The test runs on Linux: no photo reading, but paste is always there.
+    expect(find.byKey(const ValueKey('scan-photo')), findsNothing);
+
+    const sms =
+        'UK3JPO8PVA Confirmed. on 3/11/26 at 1:38 PM Ksh45,740.00 received '
+        'from DAVID KIMURKONG KANGOGO 254722699840. Account Number Leonorah '
+        'Cherop New Utility balance is Ksh106,520.00';
+    Future<void> paste() async {
+      await tester.tap(find.byKey(const ValueKey('paste-payment')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('paste-message')), sms);
+      await tester.tap(find.widgetWithText(FilledButton, 'Read'));
+      await tester.pumpAndSettle();
+    }
+
+    await paste();
+    expect(find.text('Payment found'), findsOneWidget);
+    expect(find.text('KSh 45,740'), findsOneWidget);
+    expect(find.textContaining('KSh 106,520'), findsNothing);
+    Finder dialogAdd() => find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.widgetWithText(FilledButton, 'Add'),
+    );
+    await tester.tap(dialogAdd());
+    await tester.pumpAndSettle();
+
+    final day = DateTime(2026, 11, 3);
+    final saved = RevenueRepository(db).entriesFor(day);
+    expect(saved.single.amountCents, 4574000);
+    expect(saved.single.note, contains('UK3JPO8PVA'));
+    expect(saved.single.note, isNot(contains('254722699840')));
+
+    // The same message again: flagged and not ticked.
+    await paste();
+    expect(find.text('Already added'), findsOneWidget);
+    final add = tester.widget<FilledButton>(dialogAdd());
+    expect(add.onPressed, isNull);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(RevenueRepository(db).entriesFor(day), hasLength(1));
     expect(tester.takeException(), isNull);
   });
 }

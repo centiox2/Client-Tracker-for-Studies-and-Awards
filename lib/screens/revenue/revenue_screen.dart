@@ -5,8 +5,10 @@ import 'package:intl/intl.dart';
 
 import '../../design/app_theme.dart';
 import '../../repositories/revenue_repository.dart';
+import '../../services/photo_text.dart';
 import '../../state/app_state.dart';
 import '../../widgets/panels.dart';
+import 'scan_payments.dart';
 
 /// Revenue for one day: the admin types in each transaction (e.g. from the
 /// WhatsApp payment photos) and the day's total adds itself up. Below: every
@@ -143,6 +145,10 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
                         amountFocus: _amountFocus,
                         error: _error,
                         onSubmit: () => _add(day),
+                        onScan: photoTextSupported
+                            ? () => scanPaymentPhoto(context, ref, day)
+                            : null,
+                        onPaste: () => pastePaymentMessage(context, ref, day),
                         onChanged: () {
                           if (_error != null) setState(() => _error = null);
                         },
@@ -363,6 +369,8 @@ class _AddPanel extends StatelessWidget {
     required this.error,
     required this.onSubmit,
     required this.onChanged,
+    required this.onScan,
+    required this.onPaste,
   });
   final bool phone;
   final String currency;
@@ -372,6 +380,10 @@ class _AddPanel extends StatelessWidget {
   final String? error;
   final VoidCallback onSubmit;
   final VoidCallback onChanged;
+
+  /// Read a photo of the payment message; null where not available.
+  final VoidCallback? onScan;
+  final VoidCallback onPaste;
 
   @override
   Widget build(BuildContext context) {
@@ -410,15 +422,44 @@ class _AddPanel extends StatelessWidget {
       icon: const Icon(Icons.add, size: 16),
       label: const Text('Add'),
     );
+    final theme = Theme.of(context);
+    final hint = theme.textTheme.labelSmall?.copyWith(
+      color: Dt.textMuted(theme),
+    );
+    final fromMessage = Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (onScan != null)
+          OutlinedButton.icon(
+            key: const ValueKey('scan-photo'),
+            onPressed: onScan,
+            icon: const Icon(Icons.document_scanner_outlined, size: 16),
+            label: const Text('Scan photo'),
+          ),
+        OutlinedButton.icon(
+          key: const ValueKey('paste-payment'),
+          onPressed: onPaste,
+          icon: const Icon(Icons.content_paste, size: 16),
+          label: const Text('Paste message'),
+        ),
+      ],
+    );
     return AppPanel(
       title: 'Add a transaction',
       icon: Icons.add_card_outlined,
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: phone
+            // On a phone, reading the message comes first: it's the quick way.
             ? Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  fromMessage,
+                  const SizedBox(height: 12),
+                  Text('Or type it in', style: hint),
+                  const SizedBox(height: 8),
                   amountField,
                   const SizedBox(height: 10),
                   noteField,
@@ -426,17 +467,24 @@ class _AddPanel extends StatelessWidget {
                   button,
                 ],
               )
-            : Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(flex: 2, child: amountField),
-                  const SizedBox(width: 10),
-                  Expanded(flex: 3, child: noteField),
-                  const SizedBox(width: 10),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: button,
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(flex: 2, child: amountField),
+                      const SizedBox(width: 10),
+                      Expanded(flex: 3, child: noteField),
+                      const SizedBox(width: 10),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: button,
+                      ),
+                    ],
                   ),
+                  const SizedBox(height: 10),
+                  fromMessage,
                 ],
               ),
       ),

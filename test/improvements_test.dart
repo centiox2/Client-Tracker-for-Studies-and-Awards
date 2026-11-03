@@ -311,10 +311,12 @@ void main() {
     // The Save beside the field (Settings has another for the currency).
     await tester.tap(
       find.descendant(
-        of: find.ancestor(
-          of: find.widgetWithText(TextField, 'Clients per day'),
-          matching: find.byType(Row),
-        ).first,
+        of: find
+            .ancestor(
+              of: find.widgetWithText(TextField, 'Clients per day'),
+              matching: find.byType(Row),
+            )
+            .first,
         matching: find.widgetWithText(OutlinedButton, 'Save'),
       ),
     );
