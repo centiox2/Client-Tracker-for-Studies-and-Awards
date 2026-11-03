@@ -9,6 +9,7 @@ import '../../repositories/revenue_repository.dart';
 import '../../services/photo_text.dart';
 import '../../state/app_state.dart';
 import '../../widgets/panels.dart';
+import 'revenue_insights.dart';
 import 'scan_payments.dart';
 
 /// Revenue for one day: the admin types in each transaction (e.g. from the
@@ -35,6 +36,9 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
 
   /// The time for the next typed transaction; null means "now".
   TimeOfDay? _time;
+
+  /// Day (enter and see one day) or Insights (charts and figures).
+  bool _insights = false;
 
   @override
   void dispose() {
@@ -126,6 +130,49 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
       builder: (context, viewport) {
         final phone = viewport.maxWidth < 600;
         final pad = phone ? 14.0 : 18.0;
+        final viewSwitch = Align(
+          alignment: Alignment.centerLeft,
+          child: SegmentedButton<bool>(
+            key: const ValueKey('revenue-view'),
+            segments: const [
+              ButtonSegment(
+                value: false,
+                icon: Icon(Icons.today_outlined, size: 16),
+                label: Text('Day'),
+              ),
+              ButtonSegment(
+                value: true,
+                icon: Icon(Icons.insights_outlined, size: 16),
+                label: Text('Insights'),
+              ),
+            ],
+            selected: {_insights},
+            showSelectedIcon: false,
+            onSelectionChanged: (s) => setState(() => _insights = s.first),
+          ),
+        );
+        if (_insights) {
+          return ListView(
+            padding: EdgeInsets.fromLTRB(pad, 16, pad, 28),
+            children: [
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: Dt.contentMaxWidth,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      viewSwitch,
+                      const SizedBox(height: 12),
+                      RevenueInsights(phone: phone),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        }
         return ListView(
           padding: EdgeInsets.fromLTRB(pad, 16, pad, 28),
           children: [
@@ -135,6 +182,8 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    viewSwitch,
+                    const SizedBox(height: 8),
                     _DayNavigator(
                       day: day,
                       isToday: isToday,

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -82,26 +84,42 @@ Future<void> importPaymentPhotos(
       ),
     ),
   );
-  List<PhotoText> results;
   try {
-    results = await readPhotoTexts(photos, onProgress: (n) => done.value = n);
-  } catch (e) {
+    List<PhotoText> results;
+    try {
+      results = await readPhotoTexts(photos, onProgress: (n) => done.value = n);
+    } catch (e) {
+      navigator.pop();
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
     navigator.pop();
-    messenger.showSnackBar(SnackBar(content: Text('$e')));
-    return;
+    if (!context.mounted) return;
+    await reviewPhotoTexts(context, ref, day, results);
+  } finally {
+    // The photos were only shown while reviewing; never kept.
+    await discardPickedPhotos();
   }
-  navigator.pop();
-  if (!context.mounted) return;
-  await _review(context, ref, day, [
-    for (final r in results)
-      _Source(
-        name: r.name,
-        text: r.text ?? '',
-        error: r.error,
-        fileTime: r.fileTime,
-      ),
-  ]);
 }
+
+/// The review for photos already read: each payment found, beside the
+/// photo it came from.
+@visibleForTesting
+Future<void> reviewPhotoTexts(
+  BuildContext context,
+  WidgetRef ref,
+  DateTime day,
+  List<PhotoText> results,
+) => _review(context, ref, day, [
+  for (final r in results)
+    _Source(
+      name: r.name,
+      path: r.path,
+      text: r.text ?? '',
+      error: r.error,
+      fileTime: r.fileTime,
+    ),
+]);
 
 /// Any device: paste the message text (from SMS, WhatsApp, or text copied
 /// out of a photo) and each payment found is offered for adding.
@@ -128,62 +146,153 @@ Future<void> pastePaymentMessage(
 }
 
 /// The message text, editable: pasted, or read from a photo and open for
-/// corrections (a misread digit, say) before it's checked again.
+/// corrections (a misread digit, say) before it's checked again. With
+/// [photoPath], the photo is shown beside the text to compare.
 Future<String?> _textDialog(
   BuildContext context, {
   required String title,
   required String help,
   String initial = '',
+  String? photoPath,
 }) {
   final controller = TextEditingController(text: initial);
   return showDialog<String>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: Text(title),
-      content: SizedBox(
-        width: 440,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              key: const ValueKey('paste-message'),
-              controller: controller,
-              autofocus: true,
-              minLines: 5,
-              maxLines: 12,
-              decoration: const InputDecoration(
-                hintText:
-                    'UK3JPO8PVA Confirmed. on 3/11/26 at 1:38 PM '
-                    'Ksh45,740.00 received from …',
+    builder: (context) {
+      final size = MediaQuery.sizeOf(context);
+      final wide = photoPath != null && size.width >= 900;
+      final field = TextField(
+        key: const ValueKey('paste-message'),
+        controller: controller,
+        autofocus: true,
+        minLines: wide ? null : 5,
+        maxLines: wide ? null : 12,
+        expands: wide,
+        textAlignVertical: TextAlignVertical.top,
+        decoration: const InputDecoration(
+          hintText:
+              'UK3JPO8PVA Confirmed. on 3/11/26 at 1:38 PM '
+              'Ksh45,740.00 received from …',
+        ),
+      );
+      final helpText = Text(
+        help,
+        style: Theme.of(context).textTheme.bodySmall
+            ?.copyWith(color: Dt.textMuted(Theme.of(context))),
+      );
+      return AlertDialog(
+        title: Text(title),
+        content: wide
+            ? SizedBox(
+                width: math.min(1000, size.width - 120),
+                height: math.min(560, size.height - 240),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(child: _ZoomPhoto(path: photoPath)),
+                    const SizedBox(width: 16),
+                    SizedBox(
+                      width: 380,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(child: field),
+                          const SizedBox(height: 10),
+                          helpText,
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            : SizedBox(
+                width: 440,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (photoPath != null) ...[
+                        SizedBox(
+                          height: 220,
+                          child: _ZoomPhoto(path: photoPath),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      field,
+                      const SizedBox(height: 10),
+                      helpText,
+                    ],
+                  ),
+                ),
               ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              help,
-              style: Theme.of(context).textTheme.bodySmall
-                  ?.copyWith(color: Dt.textMuted(Theme.of(context))),
-            ),
-          ],
-        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('Read'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+/// A photo you can zoom (pinch or scroll) and drag around, to check figures.
+class _ZoomPhoto extends StatelessWidget {
+  const _ZoomPhoto({required this.path});
+  final String path;
+
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: BorderRadius.circular(Dt.rMd),
+    child: ColoredBox(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: InteractiveViewer(
+        key: ValueKey(path),
+        maxScale: 6,
+        child: Center(child: photoView(path)),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(controller.text),
-          child: const Text('Read'),
-        ),
-      ],
     ),
   );
 }
 
+/// The photo full-screen (phones), zoomable.
+Future<void> _showPhoto(BuildContext context, _Source s) => showDialog<void>(
+  context: context,
+  builder: (context) => Dialog.fullscreen(
+    child: Scaffold(
+      appBar: AppBar(
+        title: Text(s.name ?? 'Photo', overflow: TextOverflow.ellipsis),
+        leading: IconButton(
+          tooltip: 'Close',
+          icon: const Icon(Icons.close),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ),
+      body: InteractiveViewer(
+        maxScale: 6,
+        child: Center(child: photoView(s.path!)),
+      ),
+    ),
+  ),
+);
+
 /// One photo (or a pasted text) and what was read from it.
 class _Source {
-  _Source({required this.name, required this.text, this.error, this.fileTime});
+  _Source({
+    required this.name,
+    required this.text,
+    this.path,
+    this.error,
+    this.fileTime,
+  });
+
+  /// The photo on disk (shown while reviewing); null for pasted text.
+  final String? path;
 
   /// The photo's file name; null for pasted text.
   final String? name;
@@ -292,10 +401,21 @@ class _ReviewDialogState extends State<_ReviewDialog> {
   final _dupeOf = <_Candidate, _Candidate>{};
   final _saved = <_Candidate>{};
 
+  /// The photo shown beside the list (wide screens).
+  _Source? _shown;
+
+  List<_Source> get _photos => [
+    for (final s in widget.sources)
+      if (s.path != null) s,
+  ];
+
   @override
   void initState() {
     super.initState();
     _rebuild();
+    _shown = _items.firstOrNull?.source.path != null
+        ? _items.first.source
+        : _photos.firstOrNull;
   }
 
   /// Re-reads every source's text and works out the flags.
@@ -358,6 +478,7 @@ class _ReviewDialogState extends State<_ReviewDialog> {
           : 'Correct anything that was misread (for example the amount), '
                 'then press Read.',
       initial: source.text,
+      photoPath: source.path,
     );
     if (fixed == null || !mounted) return;
     setState(() {
@@ -388,151 +509,294 @@ class _ReviewDialogState extends State<_ReviewDialog> {
     final theme = Theme.of(context);
     final muted = Dt.textMuted(theme);
     final error = theme.colorScheme.error;
+    final size = MediaQuery.sizeOf(context);
+    // Side by side when there's room and there are photos to compare.
+    final wide = size.width >= 960 && _photos.isNotEmpty;
     final chosen = [
       for (final c in _items)
         if (_ticked[c] ?? false) c,
     ];
     final total = chosen.fold<int>(0, (s, c) => s + c.payment.amountCents);
-    final photos = widget.sources.where((s) => s.name != null).length;
+    final photos = _photos.length;
     final empty = [
       for (final s in widget.sources)
         if (!_items.any((c) => c.source == s)) s,
     ];
 
-    return AlertDialog(
-      title: Text(
-        _items.isEmpty
-            ? 'No payments found'
-            : _items.length == 1
-            ? 'Payment found'
-            : '${_items.length} payments found'
-                  '${photos > 1 ? ' in $photos photos' : ''}',
+    final title = Text(
+      _items.isEmpty
+          ? 'No payments found'
+          : _items.length == 1
+          ? 'Payment found'
+          : '${_items.length} payments found'
+                '${photos > 1 ? ' in $photos photos' : ''}',
+      style: theme.textTheme.headlineSmall,
+    );
+
+    Widget thumb(_Source s) => InkWell(
+      onTap: () => _showPhoto(context, s),
+      borderRadius: BorderRadius.circular(6),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: SizedBox(
+          width: 44,
+          height: 56,
+          child: photoView(s.path!, fit: BoxFit.cover),
+        ),
       ),
-      contentPadding: const EdgeInsets.fromLTRB(12, 16, 12, 0),
-      content: SizedBox(
-        width: 520,
-        child: SingleChildScrollView(
+    );
+
+    Widget item(_Candidate c) {
+      final ticked = _ticked[c] ?? false;
+      return ListTile(
+        key: ValueKey(c),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+        selected: wide && c.source == _shown,
+        selectedTileColor: theme.colorScheme.primary.withValues(alpha: 0.08),
+        selectedColor: theme.colorScheme.onSurface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Dt.rMd),
+        ),
+        // Wide: a tap shows this payment's photo. Narrow: a tap ticks.
+        onTap: wide && c.source.path != null
+            ? () => setState(() => _shown = c.source)
+            : () => setState(() => _ticked[c] = !ticked),
+        leading: Checkbox(
+          value: ticked,
+          onChanged: (v) => setState(() => _ticked[c] = v ?? false),
+        ),
+        title: Text(
+          formatMoney(c.payment.amountCents, widget.currency),
+          style: Dt.tab(theme.textTheme.titleMedium!)
+              .copyWith(fontWeight: FontWeight.w700),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${_whenText(c)} · ${c.payment.method}'),
+            if (c.payment.payer != null)
+              Text(
+                'From ${c.payment.payer}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            if (c.payment.account != null)
+              Text(
+                'Account: ${c.payment.account}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            Text(
+              [?c.payment.code, ?c.source.name].join(' · '),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: muted),
+            ),
+            if (!c.payment.incoming)
+              Text(
+                'Money going out — not revenue',
+                style: TextStyle(color: error),
+              )
+            else if (_saved.contains(c))
+              Text('Already added', style: TextStyle(color: error))
+            else if (_dupeOf[c] case final first?)
+              Text(
+                'Same payment as above'
+                '${first.source.name != null && first.source != c.source ? ' (${first.source.name})' : ''}',
+                style: TextStyle(color: error),
+              ),
+          ],
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!wide && c.source.path != null) thumb(c.source),
+            IconButton(
+              tooltip: 'Edit text',
+              icon: const Icon(Icons.edit_note, size: 20),
+              onPressed: () => _edit(c.source),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final list = <Widget>[
+      for (final c in _items) item(c),
+      if (empty.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Text(
+            empty.length == 1
+                ? 'No payment found in this photo:'
+                : 'No payment found in these photos:',
+            style: theme.textTheme.labelMedium,
+          ),
+        ),
+        for (final s in empty)
+          ListTile(
+            dense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+            selected: wide && s == _shown,
+            onTap: wide && s.path != null
+                ? () => setState(() => _shown = s)
+                : null,
+            leading: !wide && s.path != null
+                ? thumb(s)
+                : Icon(Icons.image_not_supported_outlined, color: muted),
+            title: Text(
+              s.name ?? 'Pasted text',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text(
+              s.error ??
+                  (s.text.trim().isEmpty
+                      ? 'No text could be read'
+                      : 'Text read, but no payment in it'),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: TextButton(
+              onPressed: () => _edit(s),
+              child: const Text('Edit text'),
+            ),
+          ),
+      ],
+    ];
+    final hint = Text(
+      wide
+          ? 'Tap a payment to see its photo. Balances are ignored.'
+          : 'Check the amounts against the photos. Balances are ignored.',
+      style: theme.textTheme.bodySmall?.copyWith(color: muted),
+    );
+    final actions = [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: chosen.isEmpty
+            ? null
+            : () => Navigator.of(context).pop(chosen),
+        child: Text(
+          chosen.length <= 1
+              ? 'Add'
+              : 'Add ${chosen.length} · ${formatMoney(total, widget.currency)}',
+        ),
+      ),
+    ];
+
+    if (!wide) {
+      return AlertDialog(
+        title: title,
+        contentPadding: const EdgeInsets.fromLTRB(12, 16, 12, 0),
+        content: SizedBox(
+          width: 520,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [...list, const SizedBox(height: 8), hint],
+            ),
+          ),
+        ),
+        actions: actions,
+      );
+    }
+
+    // Wide: the photo on the left, what was read from it on the right.
+    final shown = _shown;
+    final index = shown == null ? -1 : _photos.indexOf(shown);
+    return Dialog(
+      insetPadding: const EdgeInsets.all(24),
+      child: SizedBox(
+        width: math.min(1240, size.width - 48),
+        height: size.height - 48,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (final c in _items)
-                CheckboxListTile(
-                  value: _ticked[c] ?? false,
-                  onChanged: (v) => setState(() => _ticked[c] = v ?? false),
-                  controlAffinity: ListTileControlAffinity.leading,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                  secondary: IconButton(
-                    tooltip: 'Edit text',
-                    icon: const Icon(Icons.edit_note, size: 20),
-                    onPressed: () => _edit(c.source),
-                  ),
-                  title: Text(
-                    formatMoney(c.payment.amountCents, widget.currency),
-                    style: Dt.tab(theme.textTheme.titleMedium!)
-                        .copyWith(fontWeight: FontWeight.w700),
-                  ),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('${_whenText(c)} · ${c.payment.method}'),
-                      if (c.payment.payer != null)
-                        Text(
-                          'From ${c.payment.payer}',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      if (c.payment.account != null)
-                        Text(
-                          'Account: ${c.payment.account}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      Text(
-                        [?c.payment.code, ?c.source.name].join(' · '),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: muted),
+              title,
+              const SizedBox(height: 14),
+              Expanded(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      flex: 6,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              IconButton(
+                                tooltip: 'Previous photo',
+                                onPressed: index > 0
+                                    ? () => setState(
+                                        () => _shown = _photos[index - 1],
+                                      )
+                                    : null,
+                                icon: const Icon(Icons.chevron_left),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  shown == null
+                                      ? ''
+                                      : '${shown.name}'
+                                            '${photos > 1 ? ' · photo ${index + 1} of $photos' : ''}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                  style: theme.textTheme.labelMedium,
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Next photo',
+                                onPressed: index >= 0 && index < photos - 1
+                                    ? () => setState(
+                                        () => _shown = _photos[index + 1],
+                                      )
+                                    : null,
+                                icon: const Icon(Icons.chevron_right),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Expanded(
+                            child: shown?.path == null
+                                ? const SizedBox()
+                                : _ZoomPhoto(path: shown!.path!),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Scroll or pinch to zoom, drag to move.',
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: muted,
+                            ),
+                          ),
+                        ],
                       ),
-                      if (!c.payment.incoming)
-                        Text(
-                          'Money going out — not revenue',
-                          style: TextStyle(color: error),
-                        )
-                      else if (_saved.contains(c))
-                        Text('Already added', style: TextStyle(color: error))
-                      else if (_dupeOf[c] case final first?)
-                        Text(
-                          'Same payment as above'
-                          '${first.source.name != null && first.source != c.source ? ' (${first.source.name})' : ''}',
-                          style: TextStyle(color: error),
-                        ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(flex: 5, child: ListView(children: list)),
+                  ],
                 ),
-              if (empty.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: Text(
-                    empty.length == 1
-                        ? 'No payment found in this photo:'
-                        : 'No payment found in these photos:',
-                    style: theme.textTheme.labelMedium,
-                  ),
-                ),
-                for (final s in empty)
-                  ListTile(
-                    dense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                    leading: Icon(
-                      Icons.image_not_supported_outlined,
-                      color: muted,
-                    ),
-                    title: Text(
-                      s.name ?? 'Pasted text',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      s.error ??
-                          (s.text.trim().isEmpty
-                              ? 'No text could be read'
-                              : 'Text read, but no payment in it'),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: TextButton(
-                      onPressed: () => _edit(s),
-                      child: const Text('Edit text'),
-                    ),
-                  ),
-              ],
-              const SizedBox(height: 8),
-              Text(
-                'Check the amounts against the photos. Balances are ignored.',
-                style: theme.textTheme.bodySmall?.copyWith(color: muted),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(child: hint),
+                  ...actions.expand((a) => [const SizedBox(width: 8), a]),
+                ],
               ),
             ],
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: chosen.isEmpty
-              ? null
-              : () => Navigator.of(context).pop(chosen),
-          child: Text(
-            chosen.length <= 1
-                ? 'Add'
-                : 'Add ${chosen.length} · ${formatMoney(total, widget.currency)}',
-          ),
-        ),
-      ],
     );
   }
 }
