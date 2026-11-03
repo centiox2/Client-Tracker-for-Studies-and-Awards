@@ -65,6 +65,10 @@ class _TrendsViewState extends ConsumerState<_TrendsView> {
       ],
       selected: {_range},
       showSelectedIcon: false,
+      expandedInsets: MediaQuery.sizeOf(context).width < 600
+          ? EdgeInsets.zero
+          : null,
+      style: MediaQuery.sizeOf(context).width < 600 ? Dt.phoneSegments : null,
       onSelectionChanged: (s) => setState(() => _range = s.first),
     );
 

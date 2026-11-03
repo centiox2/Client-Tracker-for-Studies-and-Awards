@@ -400,9 +400,14 @@ class _StartWeekBanner extends ConsumerWidget {
 /// "▲ 4 vs last week" under a metric. Muted on purpose: colour in this app
 /// is reserved for the New/Existing data pair.
 class _DeltaLabel extends StatelessWidget {
-  const _DeltaLabel({required this.current, required this.previous});
+  const _DeltaLabel({
+    required this.current,
+    required this.previous,
+    this.maxLines = 1,
+  });
   final int current;
   final int previous;
+  final int maxLines;
 
   @override
   Widget build(BuildContext context) {
@@ -432,7 +437,7 @@ class _DeltaLabel extends StatelessWidget {
           child: Text(
             text,
             style: style,
-            maxLines: 1,
+            maxLines: maxLines,
             overflow: TextOverflow.ellipsis,
           ),
         ),
@@ -450,8 +455,21 @@ class _MetricTile extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final compactHeight = MediaQuery.sizeOf(context).height < 920;
+    final phone = MediaQuery.sizeOf(context).width < 600;
+    final delta = data.current != null && data.previous != null
+        ? _DeltaLabel(
+            current: data.current!,
+            previous: data.previous!,
+            maxLines: phone ? 2 : 1,
+          )
+        : null;
+    final captionStyle = theme.textTheme.labelSmall?.copyWith(
+      fontSize: 10,
+      color: scheme.onSurfaceVariant,
+    );
     return Container(
-      height: compactHeight ? 100 : 108,
+      height: phone ? null : (compactHeight ? 100 : 108),
+      constraints: phone ? const BoxConstraints(minHeight: 112) : null,
       padding: EdgeInsets.all(compactHeight ? Dt.s12 : Dt.s16),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLow,
@@ -477,7 +495,7 @@ class _MetricTile extends StatelessWidget {
               ),
             ],
           ),
-          const Spacer(),
+          if (phone) const SizedBox(height: 8) else const Spacer(),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -504,32 +522,19 @@ class _MetricTile extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 4),
-          Row(
-            children: [
-              Text(
-                data.caption,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  fontSize: 10,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-              if (data.current != null && data.previous != null) ...[
-                Text(
-                  '  ·  ',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    fontSize: 10,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-                Flexible(
-                  child: _DeltaLabel(
-                    current: data.current!,
-                    previous: data.previous!,
-                  ),
-                ),
+          if (phone) ...[
+            Text(data.caption, style: captionStyle),
+            if (delta != null) ...[const SizedBox(height: 2), delta],
+          ] else
+            Row(
+              children: [
+                Text(data.caption, style: captionStyle),
+                if (delta != null) ...[
+                  Text('  ·  ', style: captionStyle),
+                  Flexible(child: delta),
+                ],
               ],
-            ],
-          ),
+            ),
         ],
       ),
     );
@@ -623,7 +628,10 @@ class _WeekTable extends StatelessWidget {
               ),
               Expanded(
                 child: Text(
-                  'EXISTING',
+                  MediaQuery.sizeOf(context).width < 600
+                      ? 'EXIST.'
+                      : 'EXISTING',
+                  maxLines: 1,
                   textAlign: TextAlign.right,
                   style: labelStyle,
                 ),
@@ -1099,6 +1107,12 @@ class _BackupBanner extends ConsumerWidget {
     final scheme = theme.colorScheme;
     final last = ref.watch(lastBackupProvider);
     final days = last == null ? null : DateTime.now().difference(last).inDays;
+    final phone = MediaQuery.sizeOf(context).width < 600;
+    final button = OutlinedButton.icon(
+      onPressed: () => backupToFile(context, ref),
+      icon: const Icon(Icons.download_outlined, size: 16),
+      label: const Text('Back up now'),
+    );
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 10, 10),
       decoration: BoxDecoration(
@@ -1107,6 +1121,9 @@ class _BackupBanner extends ConsumerWidget {
         borderRadius: BorderRadius.circular(Dt.rMd),
       ),
       child: Row(
+        crossAxisAlignment: phone
+            ? CrossAxisAlignment.start
+            : CrossAxisAlignment.center,
         children: [
           Icon(Icons.backup_outlined, size: 18, color: scheme.onSurface),
           const SizedBox(width: 12),
@@ -1129,15 +1146,11 @@ class _BackupBanner extends ConsumerWidget {
                     color: scheme.onSurfaceVariant,
                   ),
                 ),
+                if (phone) ...[const SizedBox(height: 8), button],
               ],
             ),
           ),
-          const SizedBox(width: 12),
-          OutlinedButton.icon(
-            onPressed: () => backupToFile(context, ref),
-            icon: const Icon(Icons.download_outlined, size: 16),
-            label: const Text('Back up now'),
-          ),
+          if (!phone) ...[const SizedBox(width: 12), button],
         ],
       ),
     );

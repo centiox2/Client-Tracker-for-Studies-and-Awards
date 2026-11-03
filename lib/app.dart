@@ -60,11 +60,17 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   );
 
   static const _adminTabs = <_AppTabInfo>[
-    _AppTabInfo(AppTab.home, 'Overview', Icons.space_dashboard_outlined),
+    _AppTabInfo(
+      AppTab.home,
+      'Overview',
+      Icons.space_dashboard_outlined,
+      shortLabel: 'Home',
+    ),
     _AppTabInfo(
       AppTab.week,
       'Weekly tracker',
       Icons.calendar_view_week_outlined,
+      shortLabel: 'Tracker',
     ),
     _AppTabInfo(AppTab.history, 'History', Icons.history),
     _AppTabInfo(AppTab.staff, 'Staff', Icons.groups_2_outlined),
@@ -226,7 +232,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
               NavigationDestination(
                 icon: Icon(item.icon),
                 selectedIcon: Icon(item.icon),
-                label: item.label,
+                label: item.shortLabel ?? item.label,
+                tooltip: item.label,
               ),
           ],
         ),
@@ -264,10 +271,13 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 }
 
 class _AppTabInfo {
-  const _AppTabInfo(this.tab, this.label, this.icon);
+  const _AppTabInfo(this.tab, this.label, this.icon, {this.shortLabel});
   final AppTab tab;
   final String label;
   final IconData icon;
+
+  /// Used in the phone's bottom bar, where six long labels don't fit.
+  final String? shortLabel;
 }
 
 class _AppSidebar extends StatelessWidget {

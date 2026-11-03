@@ -272,7 +272,8 @@ void main() {
     await pumpApp(tester, size: const Size(390, 844));
     expect(tester.takeException(), isNull, reason: 'mobile shell');
 
-    await tester.tap(find.text('Weekly tracker').last);
+    // The phone's bottom bar uses short labels.
+    await tester.tap(find.text('Tracker').last);
     await tester.pumpAndSettle();
     final trackerLayoutError = tester.takeException();
     expect(trackerLayoutError, isNull, reason: '$trackerLayoutError');
@@ -293,13 +294,8 @@ void main() {
     WeekRepository(db).createWeekFor(DateTime.now());
     await pumpApp(tester, size: const Size(800, 1000));
 
-    for (final screen in [
-      'Weekly tracker',
-      'History',
-      'Staff',
-      'Settings',
-      'Overview',
-    ]) {
+    // Tablet width still uses the bottom bar, with its short labels.
+    for (final screen in ['Tracker', 'History', 'Staff', 'Settings', 'Home']) {
       await tester.tap(find.text(screen).last);
       await tester.pumpAndSettle();
       expect(

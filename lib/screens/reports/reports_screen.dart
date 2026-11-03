@@ -178,6 +178,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     return LayoutBuilder(
       builder: (context, viewport) {
         final compact = viewport.maxWidth < 760;
+        final phone = viewport.maxWidth < 600;
         final pad = compact ? 14.0 : 18.0;
         return ListView(
           padding: EdgeInsets.fromLTRB(pad, 18, pad, 28),
@@ -196,24 +197,35 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                       children: [
                         SegmentedButton<_View>(
                           segments: [
-                            const ButtonSegment(
+                            ButtonSegment(
                               value: _View.quick,
-                              icon: Icon(Icons.bolt_outlined, size: 16),
-                              label: Text('Quick view'),
+                              icon: phone
+                                  ? null
+                                  : const Icon(Icons.bolt_outlined, size: 16),
+                              label: const Text('Quick view', maxLines: 1),
                             ),
-                            const ButtonSegment(
+                            ButtonSegment(
                               value: _View.details,
-                              icon: Icon(Icons.table_chart_outlined, size: 16),
-                              label: Text('Details'),
+                              icon: phone
+                                  ? null
+                                  : const Icon(
+                                      Icons.table_chart_outlined,
+                                      size: 16,
+                                    ),
+                              label: const Text('Details', maxLines: 1),
                             ),
                             ButtonSegment(
                               value: _View.trends,
-                              icon: const Icon(Icons.show_chart, size: 16),
-                              label: const Text('Trends'),
+                              icon: phone
+                                  ? null
+                                  : const Icon(Icons.show_chart, size: 16),
+                              label: const Text('Trends', maxLines: 1),
                             ),
                           ],
                           selected: {_view},
                           showSelectedIcon: false,
+                          expandedInsets: phone ? EdgeInsets.zero : null,
+                          style: phone ? Dt.phoneSegments : null,
                           onSelectionChanged: (s) =>
                               setState(() => _view = s.first),
                         ),
@@ -443,15 +455,11 @@ class _Toolbar extends ConsumerWidget {
       ],
       selected: {period},
       showSelectedIcon: false,
-      // Four segments must fit a phone.
-      style: MediaQuery.sizeOf(context).width < 600
-          ? const ButtonStyle(
-              visualDensity: VisualDensity.compact,
-              padding: WidgetStatePropertyAll(
-                EdgeInsets.symmetric(horizontal: 10),
-              ),
-            )
+      // Four segments must fit a phone: full width, equal segments.
+      expandedInsets: MediaQuery.sizeOf(context).width < 600
+          ? EdgeInsets.zero
           : null,
+      style: MediaQuery.sizeOf(context).width < 600 ? Dt.phoneSegments : null,
       onSelectionChanged: (s) => onPeriod(s.first),
     );
     final navigator = Row(
@@ -734,12 +742,16 @@ class _Tile extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            AnimatedValueText(
-              value,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Dt.tab(theme.textTheme.headlineSmall!)
-                  .copyWith(fontWeight: FontWeight.w700, color: color),
+            // Shrinks a long value ("Wednesday") rather than cutting it off.
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: AnimatedValueText(
+                value,
+                maxLines: 1,
+                style: Dt.tab(theme.textTheme.headlineSmall!)
+                    .copyWith(fontWeight: FontWeight.w700, color: color),
+              ),
             ),
             const SizedBox(height: 2),
             Text(

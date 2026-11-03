@@ -52,7 +52,8 @@ class _Delta extends StatelessWidget {
           child: Text(
             '${diff.abs()}$pct vs $against',
             style: style,
-            maxLines: 1,
+            // Wraps on a phone instead of cutting off "vs last week".
+            maxLines: MediaQuery.sizeOf(context).width < 600 ? 2 : 1,
             overflow: TextOverflow.ellipsis,
           ),
         ),
