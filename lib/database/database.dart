@@ -34,7 +34,7 @@ class AppDatabase {
   final String file;
   final common.CommonDatabase _db;
 
-  static const int schemaVersion = 7;
+  static const int schemaVersion = 8;
   static const int rollingBackupCount = 5;
 
   /// Runs [action] inside a transaction; rolls back on any error.
@@ -181,6 +181,25 @@ class AppDatabase {
           ON count_changes(changed_at);
       ''');
 
+      // v8: revenue — one row per transaction (e.g. from a WhatsApp
+      // payment photo). Keyed by calendar date, not working day, so money
+      // received on any day counts. Amounts are whole cents to avoid
+      // rounding; daily totals are derived, never stored.
+      db.execute('''
+        CREATE TABLE IF NOT EXISTS revenue_entries (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          date         TEXT NOT NULL,
+          amount_cents INTEGER NOT NULL,
+          note         TEXT NOT NULL DEFAULT '',
+          created_at   TEXT NOT NULL,
+          updated_at   TEXT NOT NULL
+        );
+      ''');
+      db.execute('''
+        CREATE INDEX IF NOT EXISTS idx_revenue_entries_date
+          ON revenue_entries(date);
+      ''');
+
       _createSyncTables(db);
 
       db.execute('''
@@ -217,6 +236,7 @@ class AppDatabase {
     'day_notes': 'day_id',
     'app_settings': 'key',
     'count_changes': 'id',
+    'revenue_entries': 'id',
   };
 
   /// v7: every change to a synced row is noted in `sync_outbox` by a
@@ -327,6 +347,7 @@ class AppDatabase {
       'day_notes': dump('SELECT * FROM day_notes ORDER BY day_id;'),
       'app_settings': dump('SELECT * FROM app_settings ORDER BY key;'),
       'count_changes': dump('SELECT * FROM count_changes ORDER BY id;'),
+      'revenue_entries': dump('SELECT * FROM revenue_entries ORDER BY id;'),
     };
     return const JsonEncoder.withIndent('  ').convert({
       'format': 'client-tracker-backup',
@@ -374,6 +395,14 @@ class AppDatabase {
       'new_existing',
       'changed_at',
     },
+    'revenue_entries': {
+      'id',
+      'date',
+      'amount_cents',
+      'note',
+      'created_at',
+      'updated_at',
+    },
   };
 
   void restoreFromJson(String json) {
@@ -392,6 +421,10 @@ class AppDatabase {
     }
 
     transaction(() {
+      // Older backups (before v8) carry no revenue — keep what's here.
+      if (tables['revenue_entries'] is List) {
+        _db.execute('DELETE FROM revenue_entries;');
+      }
       _db.execute('DELETE FROM count_changes;');
       _db.execute('DELETE FROM day_notes;');
       // Older backups (before v5) carry no settings — keep the current ones
@@ -413,6 +446,7 @@ class AppDatabase {
         'day_notes',
         'app_settings',
         'count_changes',
+        'revenue_entries',
       ];
       for (final name in order) {
         final rows = tables[name];

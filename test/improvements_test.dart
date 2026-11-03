@@ -308,7 +308,16 @@ void main() {
       find.widgetWithText(TextField, 'Clients per day'),
       '35',
     );
-    await tester.tap(find.widgetWithText(OutlinedButton, 'Save'));
+    // The Save beside the field (Settings has another for the currency).
+    await tester.tap(
+      find.descendant(
+        of: find.ancestor(
+          of: find.widgetWithText(TextField, 'Clients per day'),
+          matching: find.byType(Row),
+        ).first,
+        matching: find.widgetWithText(OutlinedButton, 'Save'),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(AppSettingsRepository(db).dailyTarget, 35);
   });

@@ -84,4 +84,33 @@ class AppSettingsRepository {
       [_dailyTargetKey, '$value'],
     );
   }
+
+  static const _currencyKey = 'currency';
+
+  /// Shown before revenue amounts. Kenyan shillings unless changed.
+  static const defaultCurrency = 'KSh';
+
+  String get currency {
+    final rows = _db.raw.select(
+      'SELECT value FROM app_settings WHERE key = ?;',
+      [_currencyKey],
+    );
+    final v = rows.isEmpty ? '' : (rows.first['value']! as String).trim();
+    return v.isEmpty ? defaultCurrency : v;
+  }
+
+  set currency(String value) {
+    final v = value.trim();
+    if (v.isEmpty || v == defaultCurrency) {
+      _db.raw.execute('DELETE FROM app_settings WHERE key = ?;', [
+        _currencyKey,
+      ]);
+      return;
+    }
+    _db.raw.execute(
+      'INSERT INTO app_settings (key, value) VALUES (?, ?) '
+      'ON CONFLICT(key) DO UPDATE SET value = excluded.value;',
+      [_currencyKey, v.length > 8 ? v.substring(0, 8) : v],
+    );
+  }
 }

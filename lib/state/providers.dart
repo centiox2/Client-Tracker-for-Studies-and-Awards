@@ -5,6 +5,7 @@ import '../repositories/auth_repository.dart';
 import '../repositories/client_count_repository.dart';
 import '../repositories/notes_settings_repository.dart';
 import '../repositories/report_repository.dart';
+import '../repositories/revenue_repository.dart';
 import '../repositories/staff_repository.dart';
 import '../repositories/time_off_repository.dart';
 import '../repositories/week_repository.dart';
@@ -43,6 +44,10 @@ final dayNotesRepositoryProvider = Provider<DayNotesRepository>(
 
 final appSettingsRepositoryProvider = Provider<AppSettingsRepository>(
   (ref) => AppSettingsRepository(ref.watch(databaseProvider)),
+);
+
+final revenueRepositoryProvider = Provider<RevenueRepository>(
+  (ref) => RevenueRepository(ref.watch(databaseProvider)),
 );
 
 final reportRepositoryProvider = Provider<ReportRepository>(

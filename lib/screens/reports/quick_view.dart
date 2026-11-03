@@ -35,6 +35,18 @@ class _QuickView extends ConsumerWidget {
     final tracked = today.days.isNotEmpty;
     final holiday = tracked && today.days.first.isHoliday;
 
+    // Revenue is by calendar day: today's money, even at the weekend.
+    final now = DateTime.now();
+    final revenueDay = DateTime(now.year, now.month, now.day);
+    final revenueLastWeek = revenueDay.subtract(const Duration(days: 7));
+    final revenue = ref.watch(revenueDaysProvider((revenueDay, revenueDay)));
+    final revenuePrev = ref.watch(
+      revenueDaysProvider((revenueLastWeek, revenueLastWeek)),
+    );
+    final currency = ref.watch(currencyProvider);
+    final revenueToday = revenue.single;
+    final revenueBefore = revenuePrev.single;
+
     final target = ref.watch(dailyTargetProvider);
     // A tile footer: the comparison line and/or progress toward the target.
     Widget? footer(Widget? delta, double? goal, int value) {
@@ -64,6 +76,31 @@ class _QuickView extends ConsumerWidget {
                 ),
           holiday ? null : target?.toDouble(),
           today.total,
+        ),
+      ),
+      // Tapping opens the Revenue page on today.
+      InkWell(
+        key: const ValueKey('quick-revenue'),
+        borderRadius: BorderRadius.circular(Dt.rMd),
+        onTap: () {
+          ref.read(revenueDateProvider.notifier).set(revenueDay);
+          ref.read(navTabProvider.notifier).set(AppTab.revenue);
+        },
+        child: _Tile(
+          label: 'Revenue today',
+          value: formatMoney(revenueToday.totalCents, currency),
+          caption: revenueToday.count == 0
+              ? 'No transactions yet'
+              : '${revenueToday.count} '
+                    '${revenueToday.count == 1 ? 'transaction' : 'transactions'}',
+          footer: revenueBefore.count == 0
+              ? null
+              : _Delta(
+                  current: revenueToday.totalCents,
+                  previous: revenueBefore.totalCents,
+                  against: 'last ${DateFormat('EEEE').format(revenueDay)}',
+                  format: (c) => formatMoney(c, currency),
+                ),
         ),
       ),
       _Tile(

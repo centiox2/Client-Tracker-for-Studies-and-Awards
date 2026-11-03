@@ -282,7 +282,10 @@ void main() {
     expect(find.text('Exist.'), findsWidgets);
     expect(find.byType(TextField), findsWidgets);
 
-    await tester.tap(find.byIcon(Icons.groups_2_outlined).last);
+    // Staff is under "More" in the phone's bottom bar.
+    await tester.tap(find.text('More'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Staff').last);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.text('Beatrice'), findsOneWidget);
@@ -294,8 +297,20 @@ void main() {
     WeekRepository(db).createWeekFor(DateTime.now());
     await pumpApp(tester, size: const Size(800, 1000));
 
-    // Tablet width still uses the bottom bar, with its short labels.
-    for (final screen in ['Tracker', 'History', 'Staff', 'Settings', 'Home']) {
+    // Tablet width still uses the bottom bar: short labels, and the pages
+    // that don't fit are under "More".
+    for (final screen in [
+      'Tracker',
+      'Revenue',
+      'History',
+      'Staff',
+      'Settings',
+      'Home',
+    ]) {
+      if (const {'History', 'Staff', 'Settings'}.contains(screen)) {
+        await tester.tap(find.byTooltip('More pages'));
+        await tester.pumpAndSettle();
+      }
       await tester.tap(find.text(screen).last);
       await tester.pumpAndSettle();
       expect(
