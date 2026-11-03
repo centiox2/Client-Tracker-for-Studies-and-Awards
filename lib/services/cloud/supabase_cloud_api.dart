@@ -22,6 +22,7 @@ class SupabaseCloudApi implements CloudApi {
     'already_claimed',
     'unclaimed',
     'password_too_short',
+    'wrong_recovery_code',
   ];
 
   Future<T> _call<T>(String fn, [Map<String, Object?>? params]) async {
@@ -96,6 +97,18 @@ class SupabaseCloudApi implements CloudApi {
 
   @override
   Stream<bool> connection() => _connection.stream;
+
+  @override
+  Future<String> createRecoveryCode(String token) =>
+      _call<String>('admin_create_recovery_code', {'p_token': token});
+
+  @override
+  Future<bool> hasRecoveryCode(String token) =>
+      _call<bool>('admin_has_recovery', {'p_token': token});
+
+  @override
+  Future<String> recover(String code, String newPassword) =>
+      _call<String>('admin_recover', {'p_code': code, 'p_new': newPassword});
 
   @override
   void dispose() {

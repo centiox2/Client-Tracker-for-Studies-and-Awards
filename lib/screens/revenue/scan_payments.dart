@@ -8,6 +8,7 @@ import '../../design/app_theme.dart';
 import '../../repositories/revenue_repository.dart';
 import '../../services/payment_text_parser.dart';
 import '../../services/photo_text.dart';
+import '../../services/share_receiver.dart';
 import '../../state/app_state.dart';
 import 'revenue_screen.dart' show PurposeField;
 
@@ -46,8 +47,9 @@ Future<void> importPaymentPhotos(
   BuildContext context,
   WidgetRef ref,
   DateTime day,
-  List<String> paths,
-) async {
+  List<String> paths, {
+  bool shared = false,
+}) async {
   final messenger = ScaffoldMessenger.of(context);
   final photos = paths.where(isPhotoFile).toList();
   if (photos.isEmpty) {
@@ -100,7 +102,25 @@ Future<void> importPaymentPhotos(
   } finally {
     // The photos were only shown while reviewing; never kept.
     await discardPickedPhotos();
+    if (shared) await deleteSharedCopies(paths);
   }
+}
+
+/// A message's text shared into the app (Messages → Share): straight to the
+/// review, as if pasted.
+Future<void> reviewSharedText(
+  BuildContext context,
+  WidgetRef ref,
+  DateTime day,
+  String text,
+) async {
+  if (parsePayments(text).isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('No payment found in the shared text.')),
+    );
+    return;
+  }
+  await _review(context, ref, day, [_Source(name: null, text: text)]);
 }
 
 /// The review for photos already read: each payment found, beside the

@@ -1283,12 +1283,12 @@ Future<void> showRevenueHistory(BuildContext context, WidgetRef ref) {
                     final what = <String>[
                       if (c.oldAmountCents != null &&
                           c.oldAmountCents != c.amountCents)
-                        '${formatMoney(c.oldAmountCents!, currency)} → '
-                            '${formatMoney(c.amountCents, currency)}'
+                        'from ${formatMoney(c.oldAmountCents!, currency)} '
+                            'to ${formatMoney(c.amountCents, currency)}'
                       else
                         formatMoney(c.amountCents, currency),
                       if (c.oldDate != null && c.oldDate != c.date)
-                        '${day(c.oldDate!)} → ${day(c.date)}'
+                        'moved from ${day(c.oldDate!)} to ${day(c.date)}'
                       else
                         'on ${day(c.date)}',
                     ];
@@ -1304,7 +1304,7 @@ Future<void> showRevenueHistory(BuildContext context, WidgetRef ref) {
                           if (c.note.isNotEmpty || noteChanged)
                             Text(
                               noteChanged
-                                  ? 'Note: “${c.oldNote}” → “${c.note}”'
+                                  ? 'Note was “${c.oldNote}”, now “${c.note}”'
                                   : c.note,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
@@ -1447,7 +1447,10 @@ class _SearchDialogState extends ConsumerState<_SearchDialog> {
                     ),
                     subtitle: Text(
                       [
-                        DateFormat('EEE d MMM y, HH:mm').format(e.createdAt),
+                        // The payment's own date (the time can be when it
+                        // was typed, for one added to an earlier day).
+                        '${DateFormat('EEE d MMM y').format(e.date)}, '
+                            '${DateFormat('HH:mm').format(e.createdAt)}',
                         if (e.isRefund) 'Refund',
                         if (e.purpose.isNotEmpty) e.purpose,
                       ].join(' · '),

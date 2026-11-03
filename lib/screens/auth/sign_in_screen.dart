@@ -217,8 +217,135 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
           onPressed: _busy ? null : _submit,
           child: _spinnerOr(_busy, 'Sign in to workspace'),
         ),
+        if (ref.read(cloudSyncProvider.notifier).enabled) ...[
+          const SizedBox(height: Dt.s8),
+          TextButton(
+            key: const ValueKey('forgot-password'),
+            onPressed: _busy ? null : _forgot,
+            child: const Text('Forgot password?'),
+          ),
+        ],
       ],
     );
+  }
+
+  /// A new password with the recovery code made in Settings › Online sync.
+  Future<void> _forgot() async {
+    final code = TextEditingController();
+    final pw = TextEditingController();
+    final pw2 = TextEditingController();
+    String? error;
+    var busy = false;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setState) {
+          Future<void> submit() async {
+            if (pw.text.length < 4) {
+              setState(() => error = 'Use at least 4 characters.');
+              return;
+            }
+            if (pw.text != pw2.text) {
+              setState(() => error = 'The two passwords don’t match.');
+              return;
+            }
+            setState(() {
+              busy = true;
+              error = null;
+            });
+            final result = await ref
+                .read(cloudSyncProvider.notifier)
+                .recoverAdmin(code.text, pw.text);
+            if (!dialogContext.mounted) return;
+            if (result == CloudLink.linked) {
+              // This device's own password follows the new one.
+              ref.read(authRepositoryProvider).setAdminPassword(pw.text);
+              Navigator.pop(dialogContext, true);
+              return;
+            }
+            setState(() {
+              busy = false;
+              error = result == CloudLink.wrongPassword
+                  ? 'That recovery code isn’t right (or was already used).'
+                  : 'Couldn’t reach the online database. Check the '
+                        'connection and try again.';
+            });
+          }
+
+          return AlertDialog(
+            title: const Text('Set a new admin password'),
+            content: SizedBox(
+              width: 400,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Enter the recovery code made in Settings › Online sync, '
+                    'then the new password. Every device will need to sign '
+                    'in again with it.',
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: const ValueKey('recovery-code-field'),
+                    controller: code,
+                    autofocus: true,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Recovery code',
+                      hintText: 'ABCD-EFGH-JKLM-NPQR',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    key: const ValueKey('recovery-new-password'),
+                    controller: pw,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'New admin password',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    key: const ValueKey('recovery-new-password2'),
+                    controller: pw2,
+                    obscureText: true,
+                    onSubmitted: (_) => submit(),
+                    decoration: InputDecoration(
+                      labelText: 'New password again',
+                      errorText: error,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: busy ? null : () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: busy ? null : submit,
+                child: _spinnerOr(busy, 'Set password'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (ok == true && mounted) {
+      ref.read(adminSessionProvider.notifier).signInAfterSetup();
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.of(context).pop();
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'New admin password set. Make a new recovery code in Settings › '
+            'Online sync — the old one has been used.',
+          ),
+          duration: Duration(seconds: 6),
+        ),
+      );
+    }
   }
 }
 
