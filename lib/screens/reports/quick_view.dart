@@ -46,6 +46,34 @@ class _QuickView extends ConsumerWidget {
     final currency = ref.watch(currencyProvider);
     final revenueToday = revenue.single;
     final revenueBefore = revenuePrev.single;
+    // This week (Monday on) and this month, by calendar day.
+    final revenueMonday = revenueDay.subtract(
+      Duration(days: revenueDay.weekday - 1),
+    );
+    int sum(List<RevenueDay> ds) => ds.fold(0, (s, d) => s + d.totalCents);
+    int count(List<RevenueDay> ds) => ds.fold(0, (s, d) => s + d.count);
+    final revenueWeek = ref.watch(
+      revenueDaysProvider((revenueMonday, revenueDay)),
+    );
+    final revenueMonth = ref.watch(
+      revenueDaysProvider((
+        DateTime(revenueDay.year, revenueDay.month, 1),
+        revenueDay,
+      )),
+    );
+    Widget revenueTile(String label, List<RevenueDay> days) => InkWell(
+      borderRadius: BorderRadius.circular(Dt.rMd),
+      onTap: () {
+        ref.read(revenueDateProvider.notifier).set(revenueDay);
+        ref.read(navTabProvider.notifier).set(AppTab.revenue);
+      },
+      child: _Tile(
+        label: label,
+        unit: currency,
+        value: formatMoney(sum(days), '').trim(),
+        caption: '${count(days)} ${count(days) == 1 ? 'payment' : 'payments'}',
+      ),
+    );
 
     final target = ref.watch(dailyTargetProvider);
     // A tile footer: the comparison line and/or progress toward the target.
@@ -133,10 +161,15 @@ class _QuickView extends ConsumerWidget {
           weekSoFar.total,
         ),
       ),
+      revenueTile('Revenue this week', revenueWeek),
       _Tile(
         label: '${DateFormat('MMMM').format(day)} so far',
         value: '${monthSoFar.total}',
         caption: '${_avg(monthSoFar.dailyAverage)} / day avg',
+      ),
+      revenueTile(
+        'Revenue in ${DateFormat('MMMM').format(revenueDay)}',
+        revenueMonth,
       ),
     ];
 
@@ -201,7 +234,8 @@ class _QuickView extends ConsumerWidget {
           ),
         ],
         const SizedBox(height: 12),
-        _TileGrid(perRow: compact ? 2 : tiles.length, children: tiles),
+        // Clients beside revenue: today, new/existing, week, month.
+        _TileGrid(perRow: compact ? 2 : 4, children: tiles),
         const SizedBox(height: 12),
         if (compact) ...[
           whoPanel,

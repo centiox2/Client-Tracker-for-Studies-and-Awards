@@ -1,4 +1,5 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -8,6 +9,7 @@ import 'app.dart';
 import 'config/cloud_config.dart';
 import 'database/database_bootstrap.dart';
 import 'design/app_theme.dart';
+import 'repositories/revenue_repository.dart';
 import 'state/providers.dart';
 
 Future<void> main() async {
@@ -15,6 +17,18 @@ Future<void> main() async {
   // Sync with the online database (Supabase) when this build was given its
   // details. Tests leave this off.
   CloudConfig.active = CloudConfig.configured;
+  // Recorded with each revenue change, so the history says where it came
+  // from.
+  RevenueRepository.deviceLabel = kIsWeb
+      ? 'Web browser'
+      : switch (defaultTargetPlatform) {
+          TargetPlatform.windows => 'Windows PC',
+          TargetPlatform.android => 'Android phone',
+          TargetPlatform.iOS => 'iPhone',
+          TargetPlatform.macOS => 'Mac',
+          TargetPlatform.linux => 'Linux PC',
+          TargetPlatform.fuchsia => 'This device',
+        };
 
   // path_provider has no web implementation; the browser backend stores its
   // database in IndexedDB and ignores the directory entirely.

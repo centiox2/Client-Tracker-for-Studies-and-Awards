@@ -61,7 +61,15 @@ Future<void> exportWeekToFile(
   WidgetRef ref,
   Week week,
 ) async {
-  final result = ref.read(exportServiceProvider).exportWeek(week);
+  final result = ref
+      .read(exportServiceProvider)
+      .exportWeek(
+        week,
+        revenue: ref
+            .read(revenueRepositoryProvider)
+            .entriesBetween(week.startDate, week.endDate),
+        currency: ref.read(currencyProvider),
+      );
   await deliverFile(
     context,
     dialogTitle: 'Export week to Excel',

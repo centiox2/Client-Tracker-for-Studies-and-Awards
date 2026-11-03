@@ -9,6 +9,8 @@ String buildDailySummary({
   required Report weekSoFar,
   required Report monthSoFar,
   int? target,
+  ({int today, int todayCount, int week, int month})? revenue,
+  String currency = 'KSh',
 }) {
   String avg(double v) => _QuickView._avg(v);
   String plural(int n, String one, String many) => n == 1 ? one : many;
@@ -81,6 +83,21 @@ String buildDailySummary({
       '${plural(monthSoFar.total, 'client', 'clients')} '
       '(${avg(monthSoFar.dailyAverage)} a day)',
     );
+  if (revenue != null) {
+    b
+      ..writeln()
+      ..writeln()
+      ..writeln(
+        'Revenue $dayName: ${formatMoney(revenue.today, currency)} '
+        '(${revenue.todayCount} '
+        '${plural(revenue.todayCount, 'payment', 'payments')})',
+      )
+      ..writeln('This week: ${formatMoney(revenue.week, currency)}')
+      ..write(
+        '${DateFormat('MMMM').format(day)} so far: '
+        '${formatMoney(revenue.month, currency)}',
+      );
+  }
   return b.toString();
 }
 
@@ -108,6 +125,21 @@ class _DailySummaryDialog extends ConsumerWidget {
         reportProvider((DateTime(day.year, day.month, 1), day)),
       ),
       target: ref.watch(dailyTargetProvider),
+      revenue: () {
+        int sum(List<RevenueDay> ds) => ds.fold(0, (s, d) => s + d.totalCents);
+        final dayRevenue = ref.watch(revenueDaysProvider((day, day))).single;
+        return (
+          today: dayRevenue.totalCents,
+          todayCount: dayRevenue.count,
+          week: sum(ref.watch(revenueDaysProvider((monday, day)))),
+          month: sum(
+            ref.watch(
+              revenueDaysProvider((DateTime(day.year, day.month, 1), day)),
+            ),
+          ),
+        );
+      }(),
+      currency: ref.watch(currencyProvider),
     );
     return AlertDialog(
       title: const Text('Daily summary'),

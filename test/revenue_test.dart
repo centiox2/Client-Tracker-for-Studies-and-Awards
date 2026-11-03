@@ -167,7 +167,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(amount, '250.50');
     await tester.enterText(find.byKey(const ValueKey('revenue-note')), 'Cash');
-    await tester.tap(find.widgetWithText(FilledButton, 'Add'));
+    // Enter in the note field adds it too.
+    await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
 
     expect(RevenueRepository(db).day(today()).totalCents, 175050);
@@ -194,8 +195,9 @@ void main() {
 
     expect(find.text('Revenue today'), findsOneWidget);
     // The currency is a small label before the number, like a unit.
-    expect(find.text('12,300'), findsOneWidget);
-    expect(find.text('KSh'), findsOneWidget);
+    // Today, this week and this month all show it.
+    expect(find.text('12,300'), findsNWidgets(3));
+    expect(find.text('KSh'), findsNWidgets(3));
 
     await tester.tap(find.byKey(const ValueKey('quick-revenue')));
     await tester.pumpAndSettle();
@@ -387,8 +389,16 @@ void main() {
     expect(find.text('KSh 13,000'), findsWidgets); // month so far, best day
     expect(find.text('Average payment'), findsOneWidget);
     expect(find.text('KSh 6,500'), findsOneWidget);
-    expect(find.text('Last 30 days'), findsOneWidget);
-    expect(find.text('Last 12 months'), findsOneWidget);
+    expect(find.text('By day'), findsOneWidget);
+    expect(find.textContaining('12 months to'), findsOneWidget);
+    // The same numbers as a table.
+    await tester.tap(find.byTooltip('Show as table').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Payments'), findsOneWidget);
+    // A year: monthly bars instead of daily.
+    await tester.tap(find.text('Year'));
+    await tester.pumpAndSettle();
+    expect(find.text('By month'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('M-Pesa'), 300);
     expect(find.text('Cash'), findsWidgets);
     expect(tester.takeException(), isNull);

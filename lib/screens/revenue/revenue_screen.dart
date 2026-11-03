@@ -37,6 +37,12 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
   /// The time for the next typed transaction; null means "now".
   TimeOfDay? _time;
 
+  /// What the next typed transaction is for ('' = not set).
+  String _purpose = '';
+
+  /// The next typed transaction is money paid back.
+  bool _refund = false;
+
   /// Day (enter and see one day) or Insights (charts and figures).
   bool _insights = false;
 
@@ -65,19 +71,30 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
         .read(appActionsProvider)
         .addRevenue(
           day,
-          cents,
+          _refund ? -cents : cents,
           note: _note.text,
           at: DateTime(day.year, day.month, day.day, t.hour, t.minute),
+          purpose: _purpose,
         );
     _amount.clear();
     _note.clear();
-    // Back to "now" for the next one.
+    // Back to "now" for the next one; a refund is a one-off.
     setState(() {
       _error = null;
       _time = null;
+      _refund = false;
     });
     // Ready for the next one straight away.
     _amountFocus.requestFocus();
+  }
+
+  /// Search (or a payer's history, when [query] is their name); picking a
+  /// result opens its day.
+  Future<void> _openSearch(String query) async {
+    final picked = await showRevenueSearch(context, ref, initial: query);
+    if (picked == null || !mounted) return;
+    ref.read(revenueDateProvider.notifier).set(picked.date);
+    setState(() => _insights = false);
   }
 
   void _delete(RevenueEntry entry) {
@@ -130,26 +147,45 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
       builder: (context, viewport) {
         final phone = viewport.maxWidth < 600;
         final pad = phone ? 14.0 : 18.0;
-        final viewSwitch = Align(
-          alignment: Alignment.centerLeft,
-          child: SegmentedButton<bool>(
-            key: const ValueKey('revenue-view'),
-            segments: const [
-              ButtonSegment(
-                value: false,
-                icon: Icon(Icons.today_outlined, size: 16),
-                label: Text('Day'),
+        final switchButton = SegmentedButton<bool>(
+          key: const ValueKey('revenue-view'),
+          segments: const [
+            ButtonSegment(
+              value: false,
+              icon: Icon(Icons.today_outlined, size: 16),
+              label: Text('Day'),
+            ),
+            ButtonSegment(
+              value: true,
+              icon: Icon(Icons.insights_outlined, size: 16),
+              label: Text('Insights'),
+            ),
+          ],
+          selected: {_insights},
+          showSelectedIcon: false,
+          onSelectionChanged: (s) => setState(() => _insights = s.first),
+        );
+        final viewSwitch = Row(
+          children: [
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: switchButton,
               ),
-              ButtonSegment(
-                value: true,
-                icon: Icon(Icons.insights_outlined, size: 16),
-                label: Text('Insights'),
-              ),
-            ],
-            selected: {_insights},
-            showSelectedIcon: false,
-            onSelectionChanged: (s) => setState(() => _insights = s.first),
-          ),
+            ),
+            IconButton(
+              key: const ValueKey('revenue-search'),
+              tooltip: 'Search payments',
+              onPressed: () => _openSearch(''),
+              icon: const Icon(Icons.search),
+            ),
+            IconButton(
+              key: const ValueKey('revenue-history'),
+              tooltip: 'Revenue history',
+              onPressed: () => showRevenueHistory(context, ref),
+              icon: const Icon(Icons.history),
+            ),
+          ],
         );
         if (_insights) {
           return ListView(
@@ -224,6 +260,11 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
                           if (t != null) setState(() => _time = t);
                         },
                         onClearTime: () => setState(() => _time = null),
+                        purposes: ref.watch(revenuePurposesProvider),
+                        purpose: _purpose,
+                        onPurpose: (p) => setState(() => _purpose = p),
+                        refund: _refund,
+                        onRefund: (r) => setState(() => _refund = r),
                         onScan: photoTextSupported
                             ? () => scanPaymentPhotos(context, ref, day)
                             : null,
@@ -270,6 +311,9 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
                                     onDelete: widget.readOnly
                                         ? null
                                         : () => _delete(e),
+                                    onPayer: payerOf(e.note) == null
+                                        ? null
+                                        : () => _openSearch(payerOf(e.note)!),
                                   ),
                               ],
                             ),
@@ -296,7 +340,7 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
                       '${DateFormat('MMMM').format(day)} '
                       '${isToday ? 'so far' : 'up to ${DateFormat('d MMM').format(day)}'}: '
                       '${formatMoney(monthTotal, currency)}'
-                      '${monthDays == 0 ? '' : ' · ${formatMoney(monthTotal ~/ monthDays, currency)} a day on average '
+                      '${monthDays == 0 ? '' : ' · ${formatMoney((monthTotal / monthDays / 100).round() * 100, currency)} a day on average '
                                 '($monthDays ${monthDays == 1 ? 'day' : 'days'} with revenue)'}',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: Dt.textMuted(theme),
@@ -509,7 +553,18 @@ class _AddPanel extends StatelessWidget {
     required this.onPickDay,
     required this.onPickTime,
     required this.onClearTime,
+    required this.purposes,
+    required this.purpose,
+    required this.onPurpose,
+    required this.refund,
+    required this.onRefund,
   });
+
+  final List<String> purposes;
+  final String purpose;
+  final ValueChanged<String> onPurpose;
+  final bool refund;
+  final ValueChanged<bool> onRefund;
 
   /// The date the transaction goes on (the page's day).
   final DateTime day;
@@ -564,6 +619,13 @@ class _AddPanel extends StatelessWidget {
         isDense: true,
       ),
     );
+    final purposeBox = PurposeField(
+      key: const ValueKey('revenue-purpose'),
+      purposes: purposes,
+      value: purpose,
+      onChanged: onPurpose,
+    );
+    final refundSwitch = RefundSwitch(value: refund, onChanged: onRefund);
     final dateBox = PickerBox(
       key: const ValueKey('revenue-date'),
       label: 'Date',
@@ -636,8 +698,11 @@ class _AddPanel extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  noteField,
+                  purposeBox,
                   const SizedBox(height: 10),
+                  noteField,
+                  refundSwitch,
+                  const SizedBox(height: 4),
                   button,
                 ],
               )
@@ -658,7 +723,9 @@ class _AddPanel extends StatelessWidget {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(child: noteField),
+                      Expanded(flex: 2, child: purposeBox),
+                      const SizedBox(width: 10),
+                      Expanded(flex: 4, child: noteField),
                       const SizedBox(width: 10),
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
@@ -666,10 +733,92 @@ class _AddPanel extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
-                  fromMessage,
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Expanded(child: fromMessage),
+                      refundSwitch,
+                    ],
+                  ),
                 ],
               ),
+      ),
+    );
+  }
+}
+
+/// What a payment was for: a dropdown of the purposes set in Settings,
+/// plus "Not set". A purpose no longer in the list still shows.
+class PurposeField extends StatelessWidget {
+  const PurposeField({
+    super.key,
+    required this.purposes,
+    required this.value,
+    required this.onChanged,
+  });
+  final List<String> purposes;
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final options = [
+      '',
+      ...purposes,
+      if (value.isNotEmpty && !purposes.contains(value)) value,
+    ];
+    return DropdownButtonFormField<String>(
+      initialValue: value,
+      // The same size as the text fields beside it.
+      style: Theme.of(context).textTheme.bodyLarge,
+      isExpanded: true,
+      decoration: const InputDecoration(labelText: 'For', isDense: true),
+      items: [
+        for (final o in options)
+          DropdownMenuItem(
+            value: o,
+            child: Text(
+              o.isEmpty ? 'Not set' : o,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+      ],
+      onChanged: (v) => onChanged(v ?? ''),
+    );
+  }
+}
+
+/// "Refund — money paid back": the amount is saved as negative and
+/// subtracted from the totals.
+class RefundSwitch extends StatelessWidget {
+  const RefundSwitch({super.key, required this.value, required this.onChanged});
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      key: const ValueKey('revenue-refund'),
+      borderRadius: BorderRadius.circular(Dt.rMd),
+      onTap: () => onChanged(!value),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Checkbox(value: value, onChanged: (v) => onChanged(v ?? false)),
+            Flexible(
+              child: Text(
+                'Refund (money paid back)',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: value ? theme.colorScheme.error : null,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -721,7 +870,11 @@ class _EntryRow extends StatelessWidget {
     required this.currency,
     required this.onEdit,
     required this.onDelete,
+    this.onPayer,
   });
+
+  /// Shows every payment from this entry's payer.
+  final VoidCallback? onPayer;
   final int index;
   final RevenueEntry entry;
   final String currency;
@@ -766,8 +919,14 @@ class _EntryRow extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    DateFormat('HH:mm').format(entry.createdAt),
-                    style: theme.textTheme.labelSmall?.copyWith(color: muted),
+                    [
+                      DateFormat('HH:mm').format(entry.createdAt),
+                      if (entry.isRefund) 'Refund',
+                      if (entry.purpose.isNotEmpty) entry.purpose,
+                    ].join(' · '),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: entry.isRefund ? theme.colorScheme.error : muted,
+                    ),
                   ),
                 ],
               ),
@@ -775,9 +934,18 @@ class _EntryRow extends StatelessWidget {
             const SizedBox(width: 8),
             Text(
               formatMoney(entry.amountCents, currency),
-              style: Dt.tab(theme.textTheme.bodyMedium!)
-                  .copyWith(fontWeight: FontWeight.w600),
+              style: Dt.tab(theme.textTheme.bodyMedium!).copyWith(
+                fontWeight: FontWeight.w600,
+                color: entry.isRefund ? theme.colorScheme.error : null,
+              ),
             ),
+            if (onPayer != null)
+              IconButton(
+                tooltip: 'All payments from this payer',
+                visualDensity: VisualDensity.compact,
+                onPressed: onPayer,
+                icon: const Icon(Icons.person_search_outlined, size: 18),
+              ),
             if (onDelete != null)
               IconButton(
                 tooltip: 'Remove',
@@ -856,7 +1024,9 @@ class _WeekBars extends StatelessWidget {
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(3),
                         child: LinearProgressIndicator(
-                          value: max == 0 ? 0 : d.totalCents / max,
+                          value: max <= 0
+                              ? 0
+                              : (d.totalCents / max).clamp(0.0, 1.0),
                           minHeight: 10,
                           backgroundColor: scheme.outline.withValues(
                             alpha: 0.35,
@@ -906,6 +1076,9 @@ Future<void> showEditRevenueDialog(
   );
   final note = TextEditingController(text: entry.note);
   String? error;
+  var purpose = entry.purpose;
+  var refund = entry.isRefund;
+  final purposes = ref.read(revenuePurposesProvider);
   var at = entry.createdAt;
   // Older entries kept the day separately from the time they were typed.
   if (!DateUtils.isSameDay(at, entry.date)) {
@@ -931,9 +1104,10 @@ Future<void> showEditRevenueDialog(
               .read(appActionsProvider)
               .updateRevenue(
                 entry.id,
-                amountCents: cents,
+                amountCents: refund ? -cents : cents,
                 note: note.text,
                 at: at,
+                purpose: purpose,
               );
           // Follow the entry if it moved to another day.
           ref.read(revenueDateProvider.notifier).set(at);
@@ -1020,6 +1194,12 @@ Future<void> showEditRevenueDialog(
                   ],
                 ),
                 const SizedBox(height: 12),
+                PurposeField(
+                  purposes: purposes,
+                  value: purpose,
+                  onChanged: (p) => setState(() => purpose = p),
+                ),
+                const SizedBox(height: 12),
                 TextField(
                   controller: note,
                   maxLength: RevenueRepository.maxNoteLength,
@@ -1027,6 +1207,13 @@ Future<void> showEditRevenueDialog(
                   decoration: const InputDecoration(
                     labelText: 'Note (optional)',
                     counterText: '',
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: RefundSwitch(
+                    value: refund,
+                    onChanged: (r) => setState(() => refund = r),
                   ),
                 ),
               ],
@@ -1045,4 +1232,263 @@ Future<void> showEditRevenueDialog(
   );
   // The controllers are left to the garbage collector: the dialog's closing
   // animation still uses them after showDialog returns.
+}
+
+/// Every change to the revenue, newest first: what was added, edited,
+/// deleted or put back, from which device and when.
+Future<void> showRevenueHistory(BuildContext context, WidgetRef ref) {
+  final changes = ref.read(revenueRepositoryProvider).changes();
+  final currency = ref.read(currencyProvider);
+  return showDialog<void>(
+    context: context,
+    builder: (context) {
+      final theme = Theme.of(context);
+      final muted = Dt.textMuted(theme);
+      String day(DateTime d) =>
+          DateFormat(d.year == DateTime.now().year ? 'd MMM' : 'd MMM y')
+              .format(d);
+      return AlertDialog(
+        title: const Text('Revenue history'),
+        contentPadding: const EdgeInsets.fromLTRB(12, 16, 12, 0),
+        content: SizedBox(
+          width: 520,
+          height: 480,
+          child: changes.isEmpty
+              ? Center(
+                  child: Text(
+                    'No changes yet.',
+                    style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                  ),
+                )
+              : ListView.separated(
+                  itemCount: changes.length,
+                  separatorBuilder: (_, _) =>
+                      Divider(height: 1, color: theme.colorScheme.outline),
+                  itemBuilder: (context, i) {
+                    final c = changes[i];
+                    final (icon, verb, color) = switch (c.action) {
+                      'added' => (
+                        Icons.add_circle_outline,
+                        'Added',
+                        Dt.statusGreen(theme.brightness),
+                      ),
+                      'deleted' => (
+                        Icons.remove_circle_outline,
+                        'Deleted',
+                        theme.colorScheme.error,
+                      ),
+                      'restored' => (Icons.undo, 'Put back', muted),
+                      _ => (Icons.edit_outlined, 'Edited', muted),
+                    };
+                    final what = <String>[
+                      if (c.oldAmountCents != null &&
+                          c.oldAmountCents != c.amountCents)
+                        '${formatMoney(c.oldAmountCents!, currency)} → '
+                            '${formatMoney(c.amountCents, currency)}'
+                      else
+                        formatMoney(c.amountCents, currency),
+                      if (c.oldDate != null && c.oldDate != c.date)
+                        '${day(c.oldDate!)} → ${day(c.date)}'
+                      else
+                        'on ${day(c.date)}',
+                    ];
+                    final noteChanged =
+                        c.oldNote != null && c.oldNote != c.note;
+                    return ListTile(
+                      dense: true,
+                      leading: Icon(icon, color: color, size: 20),
+                      title: Text('$verb · ${what.join(' · ')}'),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (c.note.isNotEmpty || noteChanged)
+                            Text(
+                              noteChanged
+                                  ? 'Note: “${c.oldNote}” → “${c.note}”'
+                                  : c.note,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          Text(
+                            '${DateFormat('d MMM y, HH:mm').format(c.changedAt)}'
+                            '${c.device.isEmpty ? '' : ' · ${c.device}'}',
+                            style: TextStyle(color: muted),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+/// The payer's name in a scanned payment's note ("M-Pesa · David Kangogo ·
+/// Acc: … · CODE" → "David Kangogo"); null for notes without one.
+String? payerOf(String note) {
+  final parts = note.split(' · ');
+  if (parts.length < 2) return null;
+  const methods = {'M-Pesa', 'Airtel Money', 'Bank', 'Payment'};
+  if (!methods.contains(parts[0])) return null;
+  final name = parts[1].trim();
+  if (name.isEmpty || name.startsWith('Acc:')) return null;
+  // A transaction code, not a name.
+  if (RegExp(r'^[A-Z0-9]{8,}$').hasMatch(name)) return null;
+  return name;
+}
+
+/// Search every payment, on any date, by name, M-Pesa code, amount, note or
+/// purpose. Shows how many match and their total — so a payer's name gives
+/// their full payment history. Returns the payment picked, if any.
+Future<RevenueEntry?> showRevenueSearch(
+  BuildContext context,
+  WidgetRef ref, {
+  String initial = '',
+}) => showDialog<RevenueEntry>(
+  context: context,
+  builder: (_) => _SearchDialog(initial: initial),
+);
+
+class _SearchDialog extends ConsumerStatefulWidget {
+  const _SearchDialog({required this.initial});
+  final String initial;
+
+  @override
+  ConsumerState<_SearchDialog> createState() => _SearchDialogState();
+}
+
+class _SearchDialogState extends ConsumerState<_SearchDialog> {
+  late final _query = TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.watch(dataVersionProvider);
+    final theme = Theme.of(context);
+    final muted = Dt.textMuted(theme);
+    final currency = ref.watch(currencyProvider);
+    final results = ref.read(revenueRepositoryProvider).search(_query.text);
+    final total = results.fold<int>(0, (s, e) => s + e.amountCents);
+    final first = results.isEmpty ? null : results.last.date;
+    final last = results.isEmpty ? null : results.first.date;
+    String day(DateTime d) =>
+        DateFormat(d.year == DateTime.now().year ? 'd MMM' : 'd MMM y')
+            .format(d);
+
+    return AlertDialog(
+      title: Text(widget.initial.isEmpty ? 'Search payments' : widget.initial),
+      contentPadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      content: SizedBox(
+        width: 540,
+        height: 520,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              key: const ValueKey('revenue-search-field'),
+              controller: _query,
+              autofocus: true,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.search, size: 18),
+                hintText: 'Name, M-Pesa code, amount, purpose…',
+                isDense: true,
+                suffixIcon: _query.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Clear',
+                        icon: const Icon(Icons.close, size: 16),
+                        onPressed: () => setState(_query.clear),
+                      ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            if (_query.text.trim().isNotEmpty)
+              Text(
+                results.isEmpty
+                    ? 'Nothing found.'
+                    : '${results.length} '
+                          '${results.length == 1 ? 'payment' : 'payments'} · '
+                          '${formatMoney(total, currency)}'
+                          '${first == null || first == last ? '' : ' · ${day(first)} – ${day(last!)}'}'
+                          '${results.length == 200 ? ' (first 200 shown)' : ''}',
+                style: theme.textTheme.labelMedium,
+              ),
+            const SizedBox(height: 6),
+            Expanded(
+              child: ListView.separated(
+                itemCount: results.length,
+                separatorBuilder: (_, _) =>
+                    Divider(height: 1, color: theme.colorScheme.outline),
+                itemBuilder: (context, i) {
+                  final e = results[i];
+                  final payer = payerOf(e.note);
+                  return ListTile(
+                    dense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                    onTap: () => Navigator.of(context).pop(e),
+                    title: Text(
+                      e.note.isEmpty ? 'Transaction' : e.note,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      [
+                        DateFormat('EEE d MMM y, HH:mm').format(e.createdAt),
+                        if (e.isRefund) 'Refund',
+                        if (e.purpose.isNotEmpty) e.purpose,
+                      ].join(' · '),
+                      style: TextStyle(color: muted),
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          formatMoney(e.amountCents, currency),
+                          style: Dt.tab(theme.textTheme.bodyMedium!).copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: e.isRefund ? theme.colorScheme.error : null,
+                          ),
+                        ),
+                        if (payer != null && payer != _query.text)
+                          IconButton(
+                            tooltip: 'All payments from $payer',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(
+                              Icons.person_search_outlined,
+                              size: 18,
+                            ),
+                            onPressed: () =>
+                                setState(() => _query.text = payer),
+                          ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+      ],
+    );
+  }
 }

@@ -4,84 +4,99 @@ import 'package:intl/intl.dart';
 
 import '../../design/app_theme.dart';
 import '../../repositories/revenue_repository.dart';
+import '../../services/export_actions.dart' show deliverFile;
+import '../../services/revenue_export.dart';
 import '../../state/app_state.dart';
 import '../../widgets/motion.dart';
 import '../../widgets/panels.dart';
 
-/// Everything worked out for the Insights view, from one read of the data.
+/// The period Insights looks at.
+enum InsightsPeriod { week, month, year, custom }
+
+/// Everything worked out for one period, from one read of the data.
 class RevenueInsightsData {
   RevenueInsightsData({
-    required this.today,
-    required this.last30,
+    required this.from,
+    required this.to,
+    required this.days,
     required this.months,
-    required this.monthEntries,
-    required this.prevMonthToDateCents,
-    required this.prevMonthCents,
+    required this.entries,
+    required this.previousCents,
+    required this.lastYearCents,
+    required this.months12,
     required this.weekdayAverages,
+    required this.weekdaySpanWeeks,
   });
 
-  final DateTime today;
+  /// The period (inclusive), never past today.
+  final DateTime from;
+  final DateTime to;
 
-  /// The last 30 days, oldest first.
-  final List<RevenueDay> last30;
+  /// Every day of the period, oldest first.
+  final List<RevenueDay> days;
 
-  /// The last 12 months including this one, oldest first.
+  /// Every month the period touches, oldest first.
   final List<RevenueDay> months;
 
-  /// This month's transactions.
-  final List<RevenueEntry> monthEntries;
+  /// The period's transactions (refunds included, as negatives).
+  final List<RevenueEntry> entries;
 
-  /// Last month up to the same day of the month (a fair comparison).
-  final int prevMonthToDateCents;
+  /// The same length of time just before, and the same dates last year.
+  final int previousCents;
+  final int lastYearCents;
 
-  /// All of last month.
-  final int prevMonthCents;
+  /// The 12 months up to the period's end.
+  final List<RevenueDay> months12;
 
-  /// Average revenue on each weekday (1 = Monday) over the last 13 weeks.
+  /// Average revenue on each weekday (1 = Monday).
   final Map<int, int> weekdayAverages;
+  final int weekdaySpanWeeks;
 
-  int get monthCents => monthEntries.fold(0, (s, e) => s + e.amountCents);
-  int get monthDaysWithPayments =>
-      {for (final e in monthEntries) e.date}.length;
+  /// Net revenue: payments minus refunds.
+  int get totalCents => entries.fold(0, (s, e) => s + e.amountCents);
+  List<RevenueEntry> get payments => entries.where((e) => !e.isRefund).toList();
+  List<RevenueEntry> get refunds => entries.where((e) => e.isRefund).toList();
+  int get daysWithPayments => {for (final e in payments) e.date}.length;
+  int get lengthInDays => to.difference(from).inDays + 1;
 }
 
 final revenueInsightsProvider = Provider.autoDispose
-    .family<RevenueInsightsData, DateTime>((ref, today) {
+    .family<RevenueInsightsData, (DateTime, DateTime)>((ref, range) {
       ref.watch(dataVersionProvider);
       final repo = ref.read(revenueRepositoryProvider);
-      final firstOfMonth = DateTime(today.year, today.month, 1);
-      final prevFirst = DateTime(today.year, today.month - 1, 1);
-      final prevLast = DateTime(today.year, today.month, 0);
-      // Same day of last month, or its last day if shorter (31 Mar → 28 Feb).
-      final prevSameDay = DateTime(
-        prevFirst.year,
-        prevFirst.month,
-        today.day.clamp(1, prevLast.day),
-      );
+      final (from, to) = range;
+      final length = to.difference(from).inDays + 1;
       int sum(List<RevenueDay> ds) =>
           ds.fold<int>(0, (s, d) => s + d.totalCents);
-
-      final weeks = repo.daysBetween(
-        today.subtract(const Duration(days: 91)),
-        today,
+      DateTime yearBack(DateTime d) => DateTime(
+        d.year - 1,
+        d.month,
+        // 29 Feb → 28 Feb.
+        d.day.clamp(1, DateTime(d.year - 1, d.month + 1, 0).day),
       );
+
+      // Weekdays: over the period, or the last 13 weeks for short periods.
+      final wdFrom = length >= 28
+          ? from
+          : to.subtract(const Duration(days: 90));
       final byWeekday = <int, List<int>>{};
-      for (final d in weeks) {
+      for (final d in repo.daysBetween(wdFrom, to)) {
         byWeekday.putIfAbsent(d.date.weekday, () => []).add(d.totalCents);
       }
       return RevenueInsightsData(
-        today: today,
-        last30: repo.daysBetween(
-          today.subtract(const Duration(days: 29)),
-          today,
+        from: from,
+        to: to,
+        days: repo.daysBetween(from, to),
+        months: repo.monthsBetween(from, to),
+        entries: repo.entriesBetween(from, to),
+        previousCents: sum(
+          repo.daysBetween(
+            from.subtract(Duration(days: length)),
+            from.subtract(const Duration(days: 1)),
+          ),
         ),
-        months: repo.monthsBetween(
-          DateTime(today.year, today.month - 11, 1),
-          today,
-        ),
-        monthEntries: repo.entriesBetween(firstOfMonth, today),
-        prevMonthToDateCents: sum(repo.daysBetween(prevFirst, prevSameDay)),
-        prevMonthCents: sum(repo.daysBetween(prevFirst, prevLast)),
+        lastYearCents: sum(repo.daysBetween(yearBack(from), yearBack(to))),
+        months12: repo.monthsBetween(DateTime(to.year, to.month - 11, 1), to),
         weekdayAverages: {
           for (final MapEntry(:key, :value) in byWeekday.entries)
             key: value.isEmpty
@@ -90,165 +105,352 @@ final revenueInsightsProvider = Provider.autoDispose
                 : (value.reduce((a, b) => a + b) / value.length / 100).round() *
                       100,
         },
+        weekdaySpanWeeks: ((to.difference(wdFrom).inDays + 1) / 7).round(),
       );
     });
 
-/// Charts and figures for revenue: this month against last, the last 30
-/// days, the last 12 months, how people pay, the busiest weekdays, the
-/// largest payments, and revenue per client.
-class RevenueInsights extends ConsumerWidget {
+/// Charts and figures for revenue over a chosen period (week, month, year
+/// or any dates): the total against the period before and the same period
+/// last year, the money by day or month, how people pay, what payments are
+/// for, the busiest weekdays, the largest payments, refunds, and revenue
+/// per client. Every chart can be shown as a table.
+class RevenueInsights extends ConsumerStatefulWidget {
   const RevenueInsights({super.key, required this.phone});
   final bool phone;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final data = ref.watch(revenueInsightsProvider(today));
-    final currency = ref.watch(currencyProvider);
-    final clients = ref.watch(
-      reportProvider((DateTime(today.year, today.month, 1), today)),
+  ConsumerState<RevenueInsights> createState() => _RevenueInsightsState();
+}
+
+class _RevenueInsightsState extends ConsumerState<RevenueInsights> {
+  InsightsPeriod _period = InsightsPeriod.month;
+
+  /// 0 = the current week/month/year; -1 the one before, and so on.
+  int _offset = 0;
+  DateTimeRange? _custom;
+
+  static DateTime _today() {
+    final n = DateTime.now();
+    return DateTime(n.year, n.month, n.day);
+  }
+
+  /// The chosen period, cut off at today.
+  (DateTime, DateTime, String) _range() {
+    final today = _today();
+    DateTime cap(DateTime d) => d.isAfter(today) ? today : d;
+    switch (_period) {
+      case InsightsPeriod.week:
+        final monday = today.subtract(Duration(days: today.weekday - 1));
+        final from = monday.add(Duration(days: 7 * _offset));
+        final to = cap(from.add(const Duration(days: 6)));
+        return (
+          from,
+          to,
+          _offset == 0
+              ? 'This week'
+              : 'Week of ${DateFormat('d MMM y').format(from)}',
+        );
+      case InsightsPeriod.month:
+        final from = DateTime(today.year, today.month + _offset, 1);
+        final to = cap(DateTime(from.year, from.month + 1, 0));
+        return (from, to, DateFormat('MMMM y').format(from));
+      case InsightsPeriod.year:
+        final from = DateTime(today.year + _offset, 1, 1);
+        final to = cap(DateTime(from.year, 12, 31));
+        return (from, to, '${from.year}');
+      case InsightsPeriod.custom:
+        final r =
+            _custom ??
+            DateTimeRange(
+              start: today.subtract(const Duration(days: 29)),
+              end: today,
+            );
+        final from = DateTime(r.start.year, r.start.month, r.start.day);
+        final to = cap(DateTime(r.end.year, r.end.month, r.end.day));
+        String f(DateTime d) => DateFormat('d MMM y').format(d);
+        return (from, to, '${f(from)} – ${f(to)}');
+    }
+  }
+
+  Future<void> _pickCustom() async {
+    final today = _today();
+    final r = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2007),
+      lastDate: today,
+      initialDateRange:
+          _custom ??
+          DateTimeRange(
+            start: today.subtract(const Duration(days: 29)),
+            end: today,
+          ),
     );
+    if (r != null) {
+      setState(() {
+        _custom = r;
+        _period = InsightsPeriod.custom;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final phone = widget.phone;
+    final theme = Theme.of(context);
+    final today = _today();
+    final (from, to, periodLabel) = _range();
+    final data = ref.watch(revenueInsightsProvider((from, to)));
+    final currency = ref.watch(currencyProvider);
+    final clients = ref.watch(reportProvider((from, to)));
     String money(int c) => formatMoney(c, currency);
     // Averages to the whole shilling: cents on an average are just noise.
     String avgMoney(int c) => formatMoney((c / 100).round() * 100, currency);
-    final monthName = DateFormat('MMMM').format(today);
-    final prevMonthName = DateFormat('MMMM')
-        .format(DateTime(today.year, today.month - 1, 1));
-
-    final monthDays = data.last30
-        .where((d) => d.date.month == today.month && d.date.year == today.year)
-        .toList();
-    final best = monthDays.where((d) => d.totalCents > 0).isEmpty
+    final payments = data.payments;
+    final paidCents = payments.fold<int>(0, (s, e) => s + e.amountCents);
+    final refunds = data.refunds;
+    final refundCents = refunds.fold<int>(0, (s, e) => -e.amountCents + s);
+    final previousName = switch (_period) {
+      InsightsPeriod.week => 'the week before',
+      InsightsPeriod.month => 'the month before',
+      InsightsPeriod.year => 'the year before',
+      InsightsPeriod.custom => 'the ${data.lengthInDays} days before',
+    };
+    final best = data.days.where((d) => d.totalCents > 0).isEmpty
         ? null
-        : monthDays.reduce((a, b) => b.totalCents > a.totalCents ? b : a);
+        : data.days.reduce((a, b) => b.totalCents > a.totalCents ? b : a);
+
+    // ---- Period picker ---------------------------------------------------
+    final picker = Wrap(
+      spacing: 10,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        SegmentedButton<InsightsPeriod>(
+          key: const ValueKey('insights-period'),
+          segments: const [
+            ButtonSegment(value: InsightsPeriod.week, label: Text('Week')),
+            ButtonSegment(value: InsightsPeriod.month, label: Text('Month')),
+            ButtonSegment(value: InsightsPeriod.year, label: Text('Year')),
+            ButtonSegment(value: InsightsPeriod.custom, label: Text('Dates')),
+          ],
+          selected: {_period},
+          showSelectedIcon: false,
+          style: phone ? Dt.phoneSegments : null,
+          onSelectionChanged: (s) {
+            if (s.first == InsightsPeriod.custom) {
+              _pickCustom();
+              return;
+            }
+            setState(() {
+              _period = s.first;
+              _offset = 0;
+            });
+          },
+        ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_period != InsightsPeriod.custom)
+              IconButton(
+                tooltip: 'Earlier',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => setState(() => _offset--),
+                icon: const Icon(Icons.chevron_left, size: 20),
+              ),
+            if (_period == InsightsPeriod.custom)
+              TextButton.icon(
+                onPressed: _pickCustom,
+                icon: const Icon(Icons.date_range, size: 16),
+                label: Text(periodLabel),
+              )
+            else
+              Text(
+                periodLabel,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            if (_period != InsightsPeriod.custom)
+              IconButton(
+                tooltip: 'Later',
+                visualDensity: VisualDensity.compact,
+                onPressed: _offset < 0 ? () => setState(() => _offset++) : null,
+                icon: const Icon(Icons.chevron_right, size: 20),
+              ),
+          ],
+        ),
+        OutlinedButton.icon(
+          key: const ValueKey('insights-download'),
+          onPressed: () => deliverFile(
+            context,
+            dialogTitle: 'Save revenue as Excel',
+            fileName:
+                'revenue_${DateFormat('yyyyMMdd').format(from)}_'
+                '${DateFormat('yyyyMMdd').format(to)}.xlsx',
+            extension: 'xlsx',
+            bytes: revenueToExcel(
+              data.entries,
+              from: from,
+              to: to,
+              currency: currency,
+              title: 'Revenue · $periodLabel',
+            ),
+          ),
+          icon: const Icon(Icons.download_outlined, size: 16),
+          label: const Text('Download'),
+        ),
+      ],
+    );
+
+    // ---- Tiles -----------------------------------------------------------
     final tiles = <Widget>[
       _Stat(
-        label: '$monthName so far',
-        value: money(data.monthCents),
-        caption: _change(
-          data.monthCents,
-          data.prevMonthToDateCents,
-          'same days of $prevMonthName',
-        ),
-      ),
-      _Stat(
-        label: prevMonthName,
-        value: money(data.prevMonthCents),
-        caption: 'Whole month',
+        label: 'Revenue',
+        value: money(data.totalCents),
+        caption: [
+          _change(data.totalCents, data.previousCents, previousName),
+          _change(data.totalCents, data.lastYearCents, 'same dates last year'),
+        ].join('\n'),
       ),
       _Stat(
         label: 'Average per day',
-        value: data.monthDaysWithPayments == 0
+        value: data.daysWithPayments == 0
             ? '–'
-            : avgMoney(data.monthCents ~/ data.monthDaysWithPayments),
+            : avgMoney(data.totalCents ~/ data.daysWithPayments),
         caption:
-            '${data.monthDaysWithPayments} '
-            '${data.monthDaysWithPayments == 1 ? 'day' : 'days'} with '
-            'payments this month',
+            '${data.daysWithPayments} '
+            '${data.daysWithPayments == 1 ? 'day' : 'days'} with payments',
       ),
       _Stat(
         label: 'Average payment',
-        value: data.monthEntries.isEmpty
-            ? '–'
-            : avgMoney(data.monthCents ~/ data.monthEntries.length),
+        value: payments.isEmpty ? '–' : avgMoney(paidCents ~/ payments.length),
         caption:
-            '${data.monthEntries.length} '
-            '${data.monthEntries.length == 1 ? 'payment' : 'payments'} '
-            'this month',
+            '${payments.length} '
+            '${payments.length == 1 ? 'payment' : 'payments'}',
       ),
       _Stat(
-        label: 'Best day this month',
+        label: 'Best day',
         value: best == null ? '–' : money(best.totalCents),
         caption: best == null
-            ? 'No payments this month yet'
-            : DateFormat('EEEE d MMMM').format(best.date),
+            ? 'No payments yet'
+            : DateFormat('EEE d MMM y').format(best.date),
       ),
       _Stat(
         label: 'Revenue per client',
-        value: clients.total == 0 || data.monthCents == 0
+        value: clients.total == 0 || data.totalCents <= 0
             ? '–'
-            : avgMoney(data.monthCents ~/ clients.total),
-        caption: '${clients.total} clients seen in $monthName',
+            : avgMoney(data.totalCents ~/ clients.total),
+        caption: '${clients.total} clients seen',
+      ),
+      _Stat(
+        label: 'Refunds',
+        value: refunds.isEmpty ? 'None' : money(refundCents),
+        caption: refunds.isEmpty
+            ? 'Money paid back'
+            : '${refunds.length} ${refunds.length == 1 ? 'refund' : 'refunds'}'
+                  ' · already taken off the revenue',
       ),
     ];
 
-    final last30 = AppPanel(
-      title: 'Last 30 days',
+    // ---- Charts ----------------------------------------------------------
+    final byDay = data.lengthInDays <= 62;
+    final mainChart = _ChartPanel(
+      title: byDay ? 'By day' : 'By month',
       icon: Icons.bar_chart,
-      trailing: money(data.last30.fold(0, (s, d) => s + d.totalCents)),
-      child: MoneyBars(
-        bars: [
-          for (final d in data.last30)
-            MoneyBar(
-              label: '${d.date.day}',
-              tooltip:
-                  '${DateFormat('EEE d MMM').format(d.date)}\n'
-                  '${money(d.totalCents)} · ${d.count} '
-                  '${d.count == 1 ? 'payment' : 'payments'}',
-              cents: d.totalCents,
-              highlight: d.date == today,
-            ),
-        ],
-        currency: currency,
-        showAverage: true,
-        averageLabel: 'average day with payments',
-      ),
+      trailing: money(data.totalCents),
+      currency: currency,
+      showAverage: byDay,
+      averageLabel: 'average day with payments',
+      bars: byDay
+          ? [
+              for (final d in data.days)
+                MoneyBar(
+                  label: data.days.length <= 7
+                      ? DateFormat('EEE').format(d.date)
+                      : '${d.date.day}',
+                  name: DateFormat('EEE d MMM y').format(d.date),
+                  tooltip:
+                      '${DateFormat('EEE d MMM').format(d.date)}\n'
+                      '${money(d.totalCents)} · ${d.count} '
+                      '${d.count == 1 ? 'payment' : 'payments'}',
+                  cents: d.totalCents,
+                  count: d.count,
+                  highlight: d.date == today,
+                ),
+            ]
+          : [
+              for (final m in data.months)
+                MoneyBar(
+                  label: DateFormat(phone ? 'MMMMM' : 'MMM').format(m.date),
+                  name: DateFormat('MMMM y').format(m.date),
+                  tooltip:
+                      '${DateFormat('MMMM y').format(m.date)}\n'
+                      '${money(m.totalCents)} · ${m.count} '
+                      '${m.count == 1 ? 'payment' : 'payments'}',
+                  cents: m.totalCents,
+                  count: m.count,
+                  highlight:
+                      m.date.year == today.year && m.date.month == today.month,
+                ),
+            ],
     );
-
-    final months = AppPanel(
-      title: 'Last 12 months',
+    final yearChart = _ChartPanel(
+      title: '12 months to ${DateFormat('MMM y').format(data.to)}',
       icon: Icons.calendar_view_month_outlined,
-      trailing: money(data.months.fold(0, (s, d) => s + d.totalCents)),
-      child: MoneyBars(
-        bars: [
-          for (final m in data.months)
-            MoneyBar(
-              label: DateFormat(phone ? 'MMMMM' : 'MMM').format(m.date),
-              tooltip:
-                  '${DateFormat('MMMM y').format(m.date)}\n'
-                  '${money(m.totalCents)} · ${m.count} '
-                  '${m.count == 1 ? 'payment' : 'payments'}',
-              cents: m.totalCents,
-              highlight:
-                  m.date.year == today.year && m.date.month == today.month,
-            ),
-        ],
-        currency: currency,
-      ),
+      trailing: money(data.months12.fold(0, (s, d) => s + d.totalCents)),
+      currency: currency,
+      bars: [
+        for (final m in data.months12)
+          MoneyBar(
+            label: DateFormat(phone ? 'MMMMM' : 'MMM').format(m.date),
+            name: DateFormat('MMMM y').format(m.date),
+            tooltip:
+                '${DateFormat('MMMM y').format(m.date)}\n'
+                '${money(m.totalCents)} · ${m.count} '
+                '${m.count == 1 ? 'payment' : 'payments'}',
+            cents: m.totalCents,
+            count: m.count,
+            highlight: m.date.year == today.year && m.date.month == today.month,
+          ),
+      ],
     );
 
-    // How people pay: share of this month's money by method.
-    final byMethod = <String, (int cents, int count)>{};
-    for (final e in data.monthEntries) {
-      final m = paymentMethodOf(e.note);
-      final (c, n) = byMethod[m] ?? (0, 0);
-      byMethod[m] = (c + e.amountCents, n + 1);
+    List<_HBarRow> shareRows(String Function(RevenueEntry) key) {
+      final by = <String, (int, int)>{};
+      for (final e in payments) {
+        final k = key(e);
+        final (c, n) = by[k] ?? (0, 0);
+        by[k] = (c + e.amountCents, n + 1);
+      }
+      final rows = by.entries.toList()
+        ..sort((a, b) => b.value.$1.compareTo(a.value.$1));
+      return [
+        for (final r in rows)
+          _HBarRow(
+            label: r.key,
+            cents: r.value.$1,
+            detail:
+                '${paidCents == 0 ? 0 : (r.value.$1 * 100 / paidCents).round()}% · '
+                '${r.value.$2} ${r.value.$2 == 1 ? 'payment' : 'payments'}',
+          ),
+      ];
     }
-    final methods = byMethod.entries.toList()
-      ..sort((a, b) => b.value.$1.compareTo(a.value.$1));
-    final methodPanel = AppPanel(
-      title: 'How people pay · $monthName',
+
+    final methodPanel = _HBarPanel(
+      title: 'How people pay',
       icon: Icons.account_balance_wallet_outlined,
-      child: methods.isEmpty
-          ? const _Empty('No payments this month yet.')
-          : _HBars(
-              rows: [
-                for (final m in methods)
-                  _HBarRow(
-                    label: m.key,
-                    cents: m.value.$1,
-                    detail:
-                        '${(m.value.$1 * 100 / data.monthCents).round()}% · '
-                        '${m.value.$2} ${m.value.$2 == 1 ? 'payment' : 'payments'}',
-                  ),
-              ],
-              currency: currency,
-            ),
+      rows: shareRows((e) => paymentMethodOf(e.note)),
+      currency: currency,
+      empty: 'No payments in this period.',
+    );
+    final purposePanel = _HBarPanel(
+      title: 'What payments are for',
+      icon: Icons.sell_outlined,
+      rows: shareRows((e) => e.purpose.isEmpty ? 'Not set' : e.purpose),
+      currency: currency,
+      empty: 'No payments in this period.',
     );
 
-    // Busiest weekdays (weekend only if money came in then).
     final weekdays = [
       for (var w = 1; w <= 7; w++)
         if (w <= 5 || (data.weekdayAverages[w] ?? 0) > 0) w,
@@ -261,32 +463,31 @@ class RevenueInsights extends ConsumerWidget {
                 ? b
                 : a,
           );
-    final weekdayPanel = AppPanel(
-      title: 'Busiest weekdays · last 13 weeks',
+    final weekdayPanel = _HBarPanel(
+      title: 'Busiest weekdays · ${data.weekdaySpanWeeks} weeks',
       icon: Icons.view_week_outlined,
-      child: data.weekdayAverages.values.every((v) => v == 0)
-          ? const _Empty('Not enough payments yet to compare weekdays.')
-          : _HBars(
-              rows: [
-                for (final w in weekdays)
-                  _HBarRow(
-                    label: DateFormat('EEEE').format(DateTime(2024, 1, w)),
-                    cents: data.weekdayAverages[w] ?? 0,
-                    detail: 'average',
-                    bold: w == bestWeekday,
-                  ),
-              ],
-              currency: currency,
-            ),
+      rows: data.weekdayAverages.values.every((v) => v == 0)
+          ? const []
+          : [
+              for (final w in weekdays)
+                _HBarRow(
+                  label: DateFormat('EEEE').format(DateTime(2024, 1, w)),
+                  cents: data.weekdayAverages[w] ?? 0,
+                  detail: 'average',
+                  bold: w == bestWeekday,
+                ),
+            ],
+      currency: currency,
+      empty: 'Not enough payments yet to compare weekdays.',
     );
 
-    final top = [...data.monthEntries]
+    final top = [...payments]
       ..sort((a, b) => b.amountCents.compareTo(a.amountCents));
     final largestPanel = AppPanel(
-      title: 'Largest payments · $monthName',
+      title: 'Largest payments',
       icon: Icons.emoji_events_outlined,
       child: top.isEmpty
-          ? const _Empty('No payments this month yet.')
+          ? const _Empty('No payments in this period.')
           : Column(
               children: [
                 for (final (i, e) in top.take(5).indexed)
@@ -305,9 +506,11 @@ class RevenueInsights extends ConsumerWidget {
                     child: Row(
                       children: [
                         SizedBox(
-                          width: 64,
+                          width: 74,
                           child: Text(
-                            DateFormat('d MMM').format(e.date),
+                            DateFormat(
+                              e.date.year == today.year ? 'd MMM' : 'd MMM yy',
+                            ).format(e.date),
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: Dt.textMuted(theme),
                             ),
@@ -315,7 +518,10 @@ class RevenueInsights extends ConsumerWidget {
                         ),
                         Expanded(
                           child: Text(
-                            e.note.isEmpty ? 'Transaction' : e.note,
+                            [
+                              if (e.note.isNotEmpty) e.note,
+                              if (e.purpose.isNotEmpty) e.purpose,
+                            ].join(' · ').ifEmpty('Transaction'),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall,
@@ -348,9 +554,11 @@ class RevenueInsights extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        picker,
+        const SizedBox(height: 12),
         LayoutBuilder(
           builder: (context, c) {
-            final perRow = phone ? 2 : tiles.length;
+            final perRow = phone ? 2 : 3;
             final w = ((c.maxWidth - 10 * (perRow - 1)) / perRow).clamp(
               0.0,
               double.infinity,
@@ -363,24 +571,250 @@ class RevenueInsights extends ConsumerWidget {
           },
         ),
         const SizedBox(height: 12),
-        last30,
+        mainChart,
+        if (byDay) ...[const SizedBox(height: 12), yearChart],
         const SizedBox(height: 12),
-        months,
+        pair(methodPanel, purposePanel),
         const SizedBox(height: 12),
-        pair(methodPanel, weekdayPanel),
-        const SizedBox(height: 12),
-        largestPanel,
+        pair(weekdayPanel, largestPanel),
       ],
     );
   }
 
   static String _change(int now, int before, String against) {
     if (before == 0) {
-      return now == 0 ? 'Nothing yet' : 'vs nothing on the $against';
+      return now == 0 ? 'Nothing vs $against' : 'Nothing on $against';
     }
     final pct = ((now - before) * 100 / before).round();
-    if (pct == 0) return 'Same as the $against';
-    return '${pct > 0 ? '+' : '−'}${pct.abs()}% vs the $against';
+    if (pct == 0) return 'Same as $against';
+    return '${pct > 0 ? '+' : '−'}${pct.abs()}% vs $against';
+  }
+}
+
+extension on String {
+  String ifEmpty(String other) => isEmpty ? other : this;
+}
+
+/// A chart panel with a "Table" switch: the same numbers as rows, to read
+/// or copy exactly.
+class _ChartPanel extends StatefulWidget {
+  const _ChartPanel({
+    required this.title,
+    required this.icon,
+    required this.trailing,
+    required this.bars,
+    required this.currency,
+    this.showAverage = false,
+    this.averageLabel = 'average',
+  });
+  final String title;
+  final IconData icon;
+  final String trailing;
+  final List<MoneyBar> bars;
+  final String currency;
+  final bool showAverage;
+  final String averageLabel;
+
+  @override
+  State<_ChartPanel> createState() => _ChartPanelState();
+}
+
+class _ChartPanelState extends State<_ChartPanel> {
+  bool _table = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AppPanel(
+      title: widget.title,
+      icon: widget.icon,
+      trailingWidget: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            widget.trailing,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(width: 4),
+          IconButton(
+            tooltip: _table ? 'Show as chart' : 'Show as table',
+            visualDensity: VisualDensity.compact,
+            iconSize: 16,
+            onPressed: () => setState(() => _table = !_table),
+            icon: Icon(_table ? Icons.bar_chart : Icons.table_rows_outlined),
+          ),
+        ],
+      ),
+      child: _table
+          ? _MoneyTable(bars: widget.bars, currency: widget.currency)
+          : MoneyBars(
+              bars: widget.bars,
+              currency: widget.currency,
+              showAverage: widget.showAverage,
+              averageLabel: widget.averageLabel,
+            ),
+    );
+  }
+}
+
+/// The bars of a chart as a table: period, revenue, payments.
+class _MoneyTable extends StatelessWidget {
+  const _MoneyTable({required this.bars, required this.currency});
+  final List<MoneyBar> bars;
+  final String currency;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = Dt.textMuted(theme);
+    final head = theme.textTheme.labelSmall?.copyWith(color: muted);
+    Widget row(List<Widget> cells, {bool top = true}) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+      decoration: BoxDecoration(
+        border: Border(
+          top: top
+              ? BorderSide(color: theme.colorScheme.outline)
+              : BorderSide.none,
+        ),
+      ),
+      child: Row(children: cells),
+    );
+    return SelectionArea(
+      child: Column(
+        children: [
+          row(top: false, [
+            Expanded(child: Text('Period', style: head)),
+            SizedBox(
+              width: 140,
+              child: Text('Revenue', style: head, textAlign: TextAlign.right),
+            ),
+            SizedBox(
+              width: 80,
+              child: Text('Payments', style: head, textAlign: TextAlign.right),
+            ),
+          ]),
+          for (final b in bars.reversed)
+            row([
+              Expanded(
+                child: Text(
+                  b.name ?? b.label,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: b.highlight ? FontWeight.w700 : null,
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 140,
+                child: Text(
+                  b.cents == 0 ? '–' : formatMoney(b.cents, currency),
+                  textAlign: TextAlign.right,
+                  style: Dt.tab(theme.textTheme.bodySmall!),
+                ),
+              ),
+              SizedBox(
+                width: 80,
+                child: Text(
+                  '${b.count}',
+                  textAlign: TextAlign.right,
+                  style: Dt.tab(theme.textTheme.bodySmall!)
+                      .copyWith(color: muted),
+                ),
+              ),
+            ]),
+        ],
+      ),
+    );
+  }
+}
+
+/// A panel of labelled horizontal bars, with a table switch too.
+class _HBarPanel extends StatefulWidget {
+  const _HBarPanel({
+    required this.title,
+    required this.icon,
+    required this.rows,
+    required this.currency,
+    required this.empty,
+  });
+  final String title;
+  final IconData icon;
+  final List<_HBarRow> rows;
+  final String currency;
+  final String empty;
+
+  @override
+  State<_HBarPanel> createState() => _HBarPanelState();
+}
+
+class _HBarPanelState extends State<_HBarPanel> {
+  bool _table = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AppPanel(
+      title: widget.title,
+      icon: widget.icon,
+      trailingWidget: widget.rows.isEmpty
+          ? null
+          : IconButton(
+              tooltip: _table ? 'Show as chart' : 'Show as table',
+              visualDensity: VisualDensity.compact,
+              iconSize: 16,
+              onPressed: () => setState(() => _table = !_table),
+              icon: Icon(_table ? Icons.bar_chart : Icons.table_rows_outlined),
+            ),
+      child: widget.rows.isEmpty
+          ? _Empty(widget.empty)
+          : _table
+          ? SelectionArea(
+              child: Column(
+                children: [
+                  for (final (i, r) in widget.rows.indexed)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        border: Border(
+                          top: i == 0
+                              ? BorderSide.none
+                              : BorderSide(color: theme.colorScheme.outline),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              r.label,
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ),
+                          Text(
+                            formatMoney(r.cents, widget.currency),
+                            style: Dt.tab(theme.textTheme.bodySmall!),
+                          ),
+                          SizedBox(
+                            width: 150,
+                            child: Text(
+                              r.detail,
+                              textAlign: TextAlign.right,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: Dt.textMuted(theme),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            )
+          : _HBars(rows: widget.rows, currency: widget.currency),
+    );
   }
 }
 
@@ -431,7 +865,7 @@ class _Stat extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             caption,
-            maxLines: 2,
+            maxLines: 3,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.labelSmall?.copyWith(
               fontSize: 10.5,
@@ -466,10 +900,18 @@ class MoneyBar {
     required this.tooltip,
     required this.cents,
     this.highlight = false,
+    this.name,
+    this.count = 0,
   });
   final String label;
   final String tooltip;
   final int cents;
+
+  /// The full name of the period, for the table view ("Tue 3 Nov 2026").
+  final String? name;
+
+  /// How many payments made it.
+  final int count;
 
   /// Today / this month: label in bold ink.
   final bool highlight;

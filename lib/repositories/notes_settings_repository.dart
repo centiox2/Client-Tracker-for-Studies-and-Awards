@@ -113,4 +113,43 @@ class AppSettingsRepository {
       [_currencyKey, v.length > 8 ? v.substring(0, 8) : v],
     );
   }
+
+  static const _purposesKey = 'revenue_purposes';
+
+  /// Suggested purposes until the admin sets their own.
+  static const defaultPurposes = [
+    'Application fee',
+    'Consultation',
+    'Visa fee',
+    'Tuition fee',
+    'Other',
+  ];
+
+  /// What payments can be for, in the order shown.
+  List<String> get revenuePurposes {
+    final rows = _db.raw.select(
+      'SELECT value FROM app_settings WHERE key = ?;',
+      [_purposesKey],
+    );
+    if (rows.isEmpty) return defaultPurposes;
+    final list = (rows.first['value']! as String)
+        .split('\n')
+        .map((p) => p.trim())
+        .where((p) => p.isNotEmpty)
+        .toList();
+    return list.isEmpty ? defaultPurposes : list;
+  }
+
+  set revenuePurposes(List<String> value) {
+    final seen = <String>{};
+    final clean = [
+      for (final p in value.map((p) => p.trim()))
+        if (p.isNotEmpty && p.length <= 40 && seen.add(p.toLowerCase())) p,
+    ];
+    _db.raw.execute(
+      'INSERT INTO app_settings (key, value) VALUES (?, ?) '
+      'ON CONFLICT(key) DO UPDATE SET value = excluded.value;',
+      [_purposesKey, clean.join('\n')],
+    );
+  }
 }

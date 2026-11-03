@@ -31,6 +31,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   final _target = TextEditingController();
   final _currency = TextEditingController();
+  final _purposes = TextEditingController();
 
   // Shared by the Scrollbar and the list: on desktop a list doesn't attach
   // to the primary controller, so a scrollbar without one can't paint.
@@ -41,6 +42,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void dispose() {
     _target.dispose();
     _currency.dispose();
+    _purposes.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -56,6 +58,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               : 'Daily target set to $v clients',
         ),
       ),
+    );
+  }
+
+  void _savePurposes() {
+    ref.read(appActionsProvider).setRevenuePurposes(_purposes.text.split('\n'));
+    final saved = ref.read(revenuePurposesProvider);
+    _purposes.text = saved.join('\n');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${saved.length} payment purposes saved')),
     );
   }
 
@@ -77,6 +88,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (!_targetSeeded) {
       _target.text = target?.toString() ?? '';
       _currency.text = ref.read(currencyProvider);
+      _purposes.text = ref.read(revenuePurposesProvider).join('\n');
       _targetSeeded = true;
     }
     // The export dropdown follows the week list until the user picks one.
@@ -161,6 +173,33 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
             const SizedBox(width: 10),
             OutlinedButton(onPressed: _saveCurrency, child: const Text('Save')),
+          ],
+        ),
+      ),
+      _Section(
+        title: 'Payment purposes',
+        icon: Icons.sell_outlined,
+        description:
+            'What payments can be for, one per line. Chosen when adding '
+            'revenue; Insights shows the money by purpose.',
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            SizedBox(
+              width: 280,
+              child: TextField(
+                key: const ValueKey('purposes-field'),
+                controller: _purposes,
+                minLines: 3,
+                maxLines: 8,
+                decoration: const InputDecoration(
+                  labelText: 'Purposes',
+                  isDense: true,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            OutlinedButton(onPressed: _savePurposes, child: const Text('Save')),
           ],
         ),
       ),

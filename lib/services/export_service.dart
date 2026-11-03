@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 
 import '../models/staff.dart';
 import '../repositories/client_count_repository.dart';
+import '../repositories/revenue_repository.dart';
+import 'revenue_export.dart';
 
 /// Result of a successful export: the file bytes plus a label used for
 /// default file names and snackbars.
@@ -27,7 +29,12 @@ class ExportService {
   /// database layer (easy to unit-test with fake data).
   final WeekWithDays Function(Week week) getWeekWithDays;
 
-  ExportResult exportWeek(Week week) {
+  /// [revenue] (the week's transactions) adds the Revenue sheets.
+  ExportResult exportWeek(
+    Week week, {
+    List<RevenueEntry>? revenue,
+    String currency = 'KSh',
+  }) {
     final data = getWeekWithDays(week);
     final excel = Excel.createExcel();
 
@@ -160,6 +167,15 @@ class ExportService {
       '',
     ], style: totalStyle);
 
+    if (revenue != null) {
+      addRevenueSheets(
+        excel,
+        revenue,
+        from: week.startDate,
+        to: week.endDate,
+        currency: currency,
+      );
+    }
     final bytes = excel.save(fileName: 'weekly.xlsx');
     if (bytes == null) {
       throw StateError('Excel export failed to produce a file.');
