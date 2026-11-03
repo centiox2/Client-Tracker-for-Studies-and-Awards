@@ -88,7 +88,8 @@ class _QuickView extends ConsumerWidget {
         },
         child: _Tile(
           label: 'Revenue today',
-          value: formatMoney(revenueToday.totalCents, currency),
+          unit: currency,
+          value: formatMoney(revenueToday.totalCents, '').trim(),
           caption: revenueToday.count == 0
               ? 'No transactions yet'
               : '${revenueToday.count} '
@@ -200,20 +201,7 @@ class _QuickView extends ConsumerWidget {
           ),
         ],
         const SizedBox(height: 12),
-        LayoutBuilder(
-          builder: (context, c) {
-            final perRow = compact ? 2 : tiles.length;
-            final w = ((c.maxWidth - 10 * (perRow - 1)) / perRow).clamp(
-              0.0,
-              double.infinity,
-            );
-            return Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [for (final t in tiles) SizedBox(width: w, child: t)],
-            );
-          },
-        ),
+        _TileGrid(perRow: compact ? 2 : tiles.length, children: tiles),
         const SizedBox(height: 12),
         if (compact) ...[
           whoPanel,

@@ -664,38 +664,60 @@ class _Kpis extends StatelessWidget {
         null,
       ),
     ];
-    return LayoutBuilder(
-      builder: (context, c) {
-        final perRow = compact ? 2 : tiles.length;
-        final w = ((c.maxWidth - 10 * (perRow - 1)) / perRow).clamp(
-          0.0,
-          double.infinity,
-        );
-        return Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            for (final (label, value, caption, color, footer) in tiles)
-              SizedBox(
-                width: w,
-                child: _Tile(
-                  label: label,
-                  value: value,
-                  caption: caption,
-                  color: color,
-                  footer: footer,
-                  // Keeps a row of tiles level when only some compare.
-                  reserveFooter: previous != null,
-                ),
-              ),
-          ],
-        );
-      },
+    return _TileGrid(
+      perRow: compact ? 2 : tiles.length,
+      children: [
+        for (final (label, value, caption, color, footer) in tiles)
+          _Tile(
+            label: label,
+            value: value,
+            caption: caption,
+            color: color,
+            footer: footer,
+          ),
+      ],
     );
   }
 
   static String _share(int part, int total) =>
       total == 0 ? '–' : '${(part * 100 / total).round()}% of all clients';
+}
+
+/// Tiles in rows of [perRow], every tile in a row the same height (one
+/// with a comparison line doesn't stand taller than its neighbour). A short
+/// last row keeps the same column widths.
+class _TileGrid extends StatelessWidget {
+  const _TileGrid({required this.perRow, required this.children});
+  final int perRow;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final n = perRow < 1 ? 1 : perRow;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var start = 0; start < children.length; start += n) ...[
+          if (start > 0) const SizedBox(height: 10),
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < n; i++) ...[
+                  if (i > 0) const SizedBox(width: 10),
+                  Expanded(
+                    child: start + i < children.length
+                        ? children[start + i]
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
 }
 
 class _Tile extends StatelessWidget {
@@ -705,7 +727,7 @@ class _Tile extends StatelessWidget {
     required this.caption,
     this.color,
     this.footer,
-    this.reserveFooter = false,
+    this.unit,
   });
 
   final String label;
@@ -716,8 +738,9 @@ class _Tile extends StatelessWidget {
   /// Optional extra line, e.g. a "vs last week" comparison.
   final Widget? footer;
 
-  /// Leave room for a footer even when this tile has none.
-  final bool reserveFooter;
+  /// Shown small before the value (e.g. "KSh"), so a money figure reads at
+  /// the same weight as the plain numbers beside it.
+  final String? unit;
 
   @override
   Widget build(BuildContext context) {
@@ -747,11 +770,28 @@ class _Tile extends StatelessWidget {
             FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
-              child: AnimatedValueText(
-                value,
-                maxLines: 1,
-                style: Dt.tab(theme.textTheme.headlineSmall!)
-                    .copyWith(fontWeight: FontWeight.w700, color: color),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  if (unit != null) ...[
+                    Text(
+                      unit!,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  AnimatedValueText(
+                    value,
+                    maxLines: 1,
+                    style: Dt.tab(theme.textTheme.headlineSmall!)
+                        .copyWith(fontWeight: FontWeight.w700, color: color),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 2),
@@ -764,7 +804,7 @@ class _Tile extends StatelessWidget {
                 color: scheme.onSurfaceVariant,
               ),
             ),
-            if (footer != null || reserveFooter)
+            if (footer != null)
               ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: 18),
                 child: footer,
