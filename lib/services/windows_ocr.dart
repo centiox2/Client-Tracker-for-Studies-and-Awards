@@ -103,7 +103,11 @@ Future<String> readTextOnWindows(String path) async {
         '-EncodedCommand',
         base64.encode(bytes),
       ],
-      environment: {'CT_OCR_IMAGE': File(path).absolute.path},
+      // Windows' file API rejects paths that mix / and \ ("The specified
+      // path is invalid"), so hand it a clean absolute Windows path.
+      environment: {
+        'CT_OCR_IMAGE': File(path).absolute.path.replaceAll('/', r'\'),
+      },
       stdoutEncoding: utf8,
       stderrEncoding: utf8,
     ).timeout(const Duration(seconds: 60));
