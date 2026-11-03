@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 
 import 'photo_text_types.dart';
@@ -63,13 +64,26 @@ Future<List<PhotoText>> readPhotoTexts(
     return await _readOnPhone(recognizer, paths, out, onProgress);
   } finally {
     await recognizer.close();
-    // The phone's file picker hands over *copies* of the chosen photos, kept
-    // in the app's cache. Photos are never kept: delete the copies as soon
-    // as they've been read. (The originals in the gallery aren't touched.)
-    try {
-      await FilePicker.platform.clearTemporaryFiles();
-    } catch (_) {}
   }
+}
+
+/// Shows the photo at [path] (while reviewing what was read from it).
+Widget photoView(String path, {BoxFit fit = BoxFit.contain}) => Image.file(
+  File(path),
+  fit: fit,
+  errorBuilder: (context, _, _) =>
+      const Center(child: Icon(Icons.broken_image_outlined, size: 32)),
+);
+
+/// Photos are never kept. The phone's file picker hands over *copies* of
+/// the chosen photos, in the app's cache; delete them once the review is
+/// done. (The originals in the gallery aren't touched; Windows reads photos
+/// where they are and makes no copies.)
+Future<void> discardPickedPhotos() async {
+  if (!Platform.isAndroid && !Platform.isIOS) return;
+  try {
+    await FilePicker.platform.clearTemporaryFiles();
+  } catch (_) {}
 }
 
 Future<List<PhotoText>> _readOnPhone(

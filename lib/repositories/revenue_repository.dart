@@ -49,11 +49,15 @@ class RevenueRepository {
 
   static DateTime _parse(String s) => DateTime.parse(s);
 
-  /// The day's transactions, oldest first (the order they were entered).
-  List<RevenueEntry> entriesFor(DateTime day) => [
+  /// The day's transactions, in time order.
+  List<RevenueEntry> entriesFor(DateTime day) => entriesBetween(day, day);
+
+  /// Every transaction from [from] to [to] (inclusive), in time order.
+  List<RevenueEntry> entriesBetween(DateTime from, DateTime to) => [
     for (final r in _db.raw.select(
-      'SELECT * FROM revenue_entries WHERE date = ? ORDER BY created_at, id;',
-      [_key(day)],
+      'SELECT * FROM revenue_entries WHERE date BETWEEN ? AND ? '
+      'ORDER BY date, created_at, id;',
+      [_key(from), _key(to)],
     ))
       RevenueEntry(
         id: r['id']! as int,
@@ -63,6 +67,34 @@ class RevenueRepository {
         createdAt: DateTime.parse(r['created_at']! as String),
       ),
   ];
+
+  /// Monthly totals from [from]'s month to [to]'s month, every month
+  /// included (0 when nothing came in), oldest first.
+  List<RevenueDay> monthsBetween(DateTime from, DateTime to) {
+    final rows = _db.raw.select(
+      'SELECT substr(date, 1, 7) AS m, SUM(amount_cents) AS total, '
+      'COUNT(*) AS n FROM revenue_entries WHERE date BETWEEN ? AND ? '
+      'GROUP BY m;',
+      [
+        _key(DateTime(from.year, from.month, 1)),
+        _key(DateTime(to.year, to.month + 1, 0)),
+      ],
+    );
+    final byMonth = {
+      for (final r in rows)
+        r['m']! as String: (r['total']! as int, r['n']! as int),
+    };
+    final out = <RevenueDay>[];
+    var m = DateTime(from.year, from.month, 1);
+    final end = DateTime(to.year, to.month, 1);
+    while (!m.isAfter(end)) {
+      final k = _key(m).substring(0, 7);
+      final (total, n) = byMonth[k] ?? (0, 0);
+      out.add(RevenueDay(m, total, n));
+      m = DateTime(m.year, m.month + 1, 1);
+    }
+    return out;
+  }
 
   /// Totals for every day from [from] to [to] (inclusive), including days
   /// with nothing (total 0), oldest first.
@@ -201,4 +233,34 @@ String formatMoney(int cents, String currency) {
   final sign = cents < 0 ? '-' : '';
   final tail = frac == 0 ? '' : '.${frac.toString().padLeft(2, '0')}';
   return '$currency $sign$grouped$tail';
+}
+
+/// "KSh 45.7k", "KSh 1.2M" — for chart labels where space is short.
+String formatMoneyShort(int cents, String currency) {
+  final v = cents / 100;
+  String trim(double x) {
+    final s = x.toStringAsFixed(x >= 100 ? 0 : 1);
+    return s.endsWith('.0') ? s.substring(0, s.length - 2) : s;
+  }
+
+  if (v >= 1000000) return '$currency ${trim(v / 1000000)}M';
+  if (v >= 1000) return '$currency ${trim(v / 1000)}k';
+  return '$currency ${v.round()}';
+}
+
+/// How a payment came in, from its note ("M-Pesa · …" from a scanned
+/// message, or whatever was typed): M-Pesa, Bank, Airtel Money, Cash, Card,
+/// or Not noted.
+String paymentMethodOf(String note) {
+  final n = note.toLowerCase();
+  if (n.contains('m-pesa') || n.contains('mpesa')) return 'M-Pesa';
+  if (n.contains('airtel')) return 'Airtel Money';
+  if (RegExp(r'\b(bank|equity|kcb|co-?op|ncba|absa|stanbic|family|transfer)\b')
+      .hasMatch(n)) {
+    return 'Bank';
+  }
+  if (RegExp(r'\bcash\b').hasMatch(n)) return 'Cash';
+  if (RegExp(r'\b(card|visa|mastercard|pdq)\b').hasMatch(n)) return 'Card';
+  if (n.startsWith('payment')) return 'Other';
+  return 'Not noted';
 }

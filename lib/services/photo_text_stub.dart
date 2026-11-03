@@ -1,3 +1,5 @@
+import 'package:flutter/widgets.dart';
+
 import 'photo_text_types.dart';
 
 export 'photo_text_types.dart';
@@ -18,3 +20,10 @@ Future<List<PhotoText>> readPhotoTexts(
   for (final p in paths)
     PhotoText(p, error: 'Photos can’t be read on this device'),
 ];
+
+/// Shows the photo at [path] (nothing where photos can't be read).
+Widget photoView(String path, {BoxFit fit = BoxFit.contain}) =>
+    const SizedBox.shrink();
+
+/// Deletes any temporary copies of picked photos (none here).
+Future<void> discardPickedPhotos() async {}

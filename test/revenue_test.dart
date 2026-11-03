@@ -10,6 +10,11 @@ import 'package:client_tracker/repositories/notes_settings_repository.dart';
 import 'package:client_tracker/repositories/revenue_repository.dart';
 import 'package:client_tracker/repositories/staff_repository.dart';
 import 'package:client_tracker/services/photo_text.dart';
+import 'package:client_tracker/screens/revenue/scan_payments.dart';
+import 'package:client_tracker/screens/revenue/revenue_screen.dart';
+
+import 'dart:io';
+
 import 'package:client_tracker/state/app_state.dart';
 
 import 'test_helpers.dart';
@@ -365,5 +370,71 @@ void main() {
     // Back to "now" for the next one.
     expect(find.text('Now'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Insights: this month, charts and how people pay', (
+    tester,
+  ) async {
+    final repo = RevenueRepository(db);
+    repo.add(today(), 1000000, note: 'M-Pesa · Jane · AB12CD34EF');
+    repo.add(today(), 300000, note: 'Cash');
+    await pumpApp(tester, admin: false);
+    await tester.tap(find.text('Revenue').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Insights'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('KSh 13,000'), findsWidgets); // month so far, best day
+    expect(find.text('Average payment'), findsOneWidget);
+    expect(find.text('KSh 6,500'), findsOneWidget);
+    expect(find.text('Last 30 days'), findsOneWidget);
+    expect(find.text('Last 12 months'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('M-Pesa'), 300);
+    expect(find.text('Cash'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('wide screens show the photo beside what was read', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          adminSessionProvider.overrideWith(SignedInSession.new),
+        ],
+        child: const ClientTrackerApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Revenue').last);
+    await tester.pumpAndSettle();
+    final screen = tester.state<ConsumerState<RevenueScreen>>(
+      find.byType(RevenueScreen),
+    );
+    final path = File('test/fixtures/mpesa_sample.png').absolute.path;
+    // ignore: invalid_use_of_visible_for_testing_member
+    reviewPhotoTexts(screen.context, screen.ref, today(), [
+      PhotoText(
+        path,
+        text:
+            'UK3JPO8PVA Confirmed. on 3/11/26 at 1:38 PM Ksh45,740.00 '
+            'received from JOHN PAYER 254700000000. New Utility balance is '
+            'Ksh1.00',
+      ),
+      PhotoText('${path}2', error: 'Unreadable'),
+    ]);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('mpesa_sample.png · photo 1 of 2'), findsOneWidget);
+    expect(find.byType(InteractiveViewer), findsOneWidget);
+    await tester.tap(find.byTooltip('Next photo'));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('mpesa_sample.png2 · photo 2 of 2'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pump(const Duration(milliseconds: 400));
   });
 }
