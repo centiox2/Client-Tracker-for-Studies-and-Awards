@@ -35,6 +35,37 @@ class FakeCloud implements CloudApi {
     if (offline) throw Exception('offline');
   }
 
+  String? recoveryCode;
+
+  @override
+  Future<String> createRecoveryCode(String token) async {
+    _online();
+    if (!tokens.contains(token)) throw CloudException('not_signed_in');
+    return recoveryCode = 'ABCD-EFGH-JKLM-NPQR';
+  }
+
+  @override
+  Future<bool> hasRecoveryCode(String token) async {
+    _online();
+    if (!tokens.contains(token)) throw CloudException('not_signed_in');
+    return recoveryCode != null;
+  }
+
+  @override
+  Future<String> recover(String code, String newPassword) async {
+    _online();
+    final given = code.toUpperCase().replaceAll(RegExp('[^A-Z0-9]'), '');
+    if (recoveryCode == null || given != recoveryCode!.replaceAll('-', '')) {
+      throw CloudException('wrong_recovery_code');
+    }
+    password = newPassword;
+    recoveryCode = null;
+    tokens.clear();
+    final t = 'token-${DateTime.now().microsecondsSinceEpoch}';
+    tokens.add(t);
+    return t;
+  }
+
   @override
   Future<Map<String, List<Map<String, Object?>>>> snapshot() async {
     _online();
@@ -314,6 +345,51 @@ void main() {
     await tester.pumpAndSettle();
     expect(cloud.tables['staff'], isNotEmpty);
     container.dispose(); // stops sync's timers, as closing the app would
+  });
+
+  testWidgets('a forgotten password is reset with the recovery code', (
+    tester,
+  ) async {
+    cloud.password = 'old-secret';
+    cloud.tokens.add('t1');
+    cloud.recoveryCode = 'ABCD-EFGH-JKLM-NPQR';
+    final container = await pumpApp(tester, boss);
+    await tester.tap(find.text('Admin'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('forgot-password')));
+    await tester.pumpAndSettle();
+
+    // A wrong code is refused.
+    await tester.enterText(
+      find.byKey(const ValueKey('recovery-code-field')),
+      'WRONG-CODE',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('recovery-new-password')),
+      'new-secret',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('recovery-new-password2')),
+      'new-secret',
+    );
+    await tester.tap(find.text('Set password'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('isn’t right'), findsOneWidget);
+    expect(cloud.password, 'old-secret');
+
+    // The right code (dashes or not) sets it, everywhere.
+    await tester.enterText(
+      find.byKey(const ValueKey('recovery-code-field')),
+      'abcd efgh jklm npqr',
+    );
+    await tester.tap(find.text('Set password'));
+    await tester.pumpAndSettle();
+    expect(cloud.password, 'new-secret');
+    expect(cloud.recoveryCode, isNull); // one use only
+    expect(cloud.tokens, isNot(contains('t1'))); // other devices signed out
+    expect(container.read(adminSessionProvider), isTrue);
+    expect(AuthRepository(boss).verifyAdmin('new-secret'), isTrue);
+    container.dispose();
   });
 
   testWidgets('a new device signs in with the online password', (tester) async {

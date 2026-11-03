@@ -170,7 +170,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Changes this week'), findsOneWidget);
       expect(find.text('Collins'), findsWidgets);
-      expect(find.textContaining('0 → 4', findRichText: true), findsOneWidget);
+      expect(find.textContaining('0 to 4', findRichText: true), findsOneWidget);
     });
   });
 

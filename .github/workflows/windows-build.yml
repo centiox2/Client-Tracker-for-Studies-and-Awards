@@ -57,3 +57,22 @@ jobs:
           name: client_tracker-windows-x64
           path: build/windows/x64/runner/Release/
           if-no-files-found: error
+
+      # A proper installer: per-user, Start menu + desktop shortcuts, an
+      # uninstaller, and in-place upgrades (Inno Setup).
+      - name: Build installer
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9.]+)').Matches[0].Groups[1].Value
+          & $iscc "/DAppVersion=$version" installer\client_tracker.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: client_tracker-windows-installer
+          path: installer/Output/ClientTrackerSetup.exe
+          if-no-files-found: error

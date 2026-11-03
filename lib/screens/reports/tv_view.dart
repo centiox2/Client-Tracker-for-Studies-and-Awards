@@ -55,6 +55,8 @@ class _TvViewState extends ConsumerState<_TvView> {
       reportProvider((DateTime(day.year, day.month, 1), day)),
     );
     final target = ref.watch(dailyTargetProvider);
+    final revenueToday = ref.watch(revenueDaysProvider((day, day))).single;
+    final currency = ref.watch(currencyProvider);
     final seen = today.staff.where((s) => s.total > 0).toList();
     final holiday = today.days.isNotEmpty && today.days.first.isHoliday;
 
@@ -119,6 +121,12 @@ class _TvViewState extends ConsumerState<_TvView> {
             ),
             stat('This week', '${weekSoFar.total}'),
             stat(DateFormat('MMMM').format(day), '${month.total}'),
+            stat(
+              isToday
+                  ? 'Revenue today'
+                  : 'Revenue ${DateFormat('EEEE').format(day)}',
+              formatMoney(revenueToday.totalCents, currency),
+            ),
           ],
         ),
         if (fill) const Spacer() else const SizedBox(height: 24),

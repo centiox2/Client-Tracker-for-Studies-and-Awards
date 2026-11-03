@@ -1329,6 +1329,10 @@ class _DownloadMenu extends ConsumerWidget {
       position: PopupMenuPosition.under,
       onSelected: (kind) {
         final target = ref.read(dailyTargetProvider);
+        final revenue = ref
+            .read(revenueRepositoryProvider)
+            .entriesBetween(report.from, report.to);
+        final currency = ref.read(currencyProvider);
         if (kind == 'xlsx') {
           deliverFile(
             context,
@@ -1340,6 +1344,8 @@ class _DownloadMenu extends ConsumerWidget {
               title: title,
               target: target,
               previous: previous?.days.isEmpty ?? true ? null : previous,
+              revenue: revenue,
+              currency: currency,
             ),
           );
         } else {
@@ -1353,6 +1359,8 @@ class _DownloadMenu extends ConsumerWidget {
               title: title,
               target: target,
               previous: previous?.days.isEmpty ?? true ? null : previous,
+              revenue: revenue,
+              currency: currency,
             ),
           );
         }

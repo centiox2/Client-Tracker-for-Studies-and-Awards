@@ -293,6 +293,51 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     }
   }
 
+  /// A new recovery code for a forgotten password; null when this device
+  /// isn't signed in online (or is offline).
+  Future<String?> createRecoveryCode() async {
+    final api = _api;
+    final token = _token;
+    if (api == null || token == null) return null;
+    try {
+      return await api.createRecoveryCode(token);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Whether a recovery code exists; null when unknown.
+  Future<bool?> hasRecoveryCode() async {
+    final api = _api;
+    final token = _token;
+    if (api == null || token == null) return null;
+    try {
+      return await api.hasRecoveryCode(token);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Sets a new online password with a recovery code, and signs this device
+  /// in with it. wrongPassword means the code was wrong (or already used).
+  Future<CloudLink> recoverAdmin(String code, String newPassword) async {
+    final api = _api;
+    if (api == null) return CloudLink.off;
+    try {
+      final token = await api.recover(code, newPassword);
+      _setToken(token);
+      state = state.copyWith(adminLinked: true, claimed: true);
+      unawaited(_connect());
+      return CloudLink.linked;
+    } on CloudException catch (e) {
+      return e.code == 'wrong_recovery_code'
+          ? CloudLink.wrongPassword
+          : CloudLink.offline;
+    } catch (_) {
+      return CloudLink.offline;
+    }
+  }
+
   /// Throws away waiting local changes and downloads the cloud's data.
   Future<void> resetFromCloud() async {
     final engine = _engine;

@@ -5,6 +5,8 @@ import 'package:excel/excel.dart';
 import 'package:intl/intl.dart';
 
 import '../repositories/report_repository.dart';
+import '../repositories/revenue_repository.dart';
+import 'revenue_export.dart';
 
 /// Turns a Reports period (a day, week or month) into files: a full Excel
 /// workbook, and a printable page (print → "Save as PDF" makes the PDF).
@@ -34,6 +36,8 @@ Uint8List reportToExcel(
   required String title,
   int? target,
   Report? previous,
+  List<RevenueEntry>? revenue,
+  String currency = 'KSh',
 }) {
   final excel = Excel.createExcel();
   final header = CellStyle(
@@ -75,6 +79,7 @@ Uint8List reportToExcel(
     ('Working days so far', report.staffedDaysSoFar),
     ('Staff who saw clients', report.staffWithClients),
     if (target != null) ('Daily target', target),
+    if (revenue != null) ...revenueSummaryRows(revenue, currency),
   ]) {
     row(summary, r++, [label, value]);
   }
@@ -220,6 +225,15 @@ Uint8List reportToExcel(
     s.setColumnWidth(0, 24);
   }
 
+  if (revenue != null) {
+    addRevenueSheets(
+      excel,
+      revenue,
+      from: report.from,
+      to: report.to,
+      currency: currency,
+    );
+  }
   final bytes = excel.save(fileName: 'report.xlsx');
   if (bytes == null) throw StateError('Excel export failed.');
   return Uint8List.fromList(bytes);
@@ -232,6 +246,8 @@ Uint8List reportToPrintableHtml(
   required String title,
   int? target,
   Report? previous,
+  List<RevenueEntry>? revenue,
+  String currency = 'KSh',
 }) {
   String esc(String s) => const HtmlEscape().convert(s);
   final staff = report.staff;
@@ -272,6 +288,13 @@ Uint8List reportToPrintableHtml(
   kpi('Average per day', _avg(report.dailyAverage));
   kpi('Staff who saw clients', '${report.staffWithClients}');
   if (target != null) kpi('Daily target', '$target');
+  if (revenue != null) {
+    kpi(
+      'Revenue',
+      formatMoney(revenue.fold<int>(0, (s, e) => s + e.amountCents), currency),
+    );
+    kpi('Payments', '${revenue.where((e) => !e.isRefund).length}');
+  }
   b.writeln('</div>');
   if (previous != null) {
     b.writeln(

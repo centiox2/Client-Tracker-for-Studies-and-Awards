@@ -187,7 +187,7 @@ class _ChangeRow extends StatelessWidget {
           children: [
             TextSpan(text: '$label '),
             TextSpan(
-              text: changed ? '$from → $to' : '$to',
+              text: changed ? '$from to $to' : '$to',
               style: TextStyle(
                 color: changed ? color : muted,
                 fontWeight: changed ? FontWeight.w600 : FontWeight.w400,

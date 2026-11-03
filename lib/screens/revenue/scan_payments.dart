@@ -8,7 +8,9 @@ import '../../design/app_theme.dart';
 import '../../repositories/revenue_repository.dart';
 import '../../services/payment_text_parser.dart';
 import '../../services/photo_text.dart';
+import '../../services/share_receiver.dart';
 import '../../state/app_state.dart';
+import 'revenue_screen.dart' show PurposeField;
 
 /// Image files that can be dropped or picked.
 const photoExtensions = {
@@ -45,8 +47,9 @@ Future<void> importPaymentPhotos(
   BuildContext context,
   WidgetRef ref,
   DateTime day,
-  List<String> paths,
-) async {
+  List<String> paths, {
+  bool shared = false,
+}) async {
   final messenger = ScaffoldMessenger.of(context);
   final photos = paths.where(isPhotoFile).toList();
   if (photos.isEmpty) {
@@ -99,7 +102,25 @@ Future<void> importPaymentPhotos(
   } finally {
     // The photos were only shown while reviewing; never kept.
     await discardPickedPhotos();
+    if (shared) await deleteSharedCopies(paths);
   }
+}
+
+/// A message's text shared into the app (Messages → Share): straight to the
+/// review, as if pasted.
+Future<void> reviewSharedText(
+  BuildContext context,
+  WidgetRef ref,
+  DateTime day,
+  String text,
+) async {
+  if (parsePayments(text).isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('No payment found in the shared text.')),
+    );
+    return;
+  }
+  await _review(context, ref, day, [_Source(name: null, text: text)]);
 }
 
 /// The review for photos already read: each payment found, beside the
@@ -307,6 +328,9 @@ class _Candidate {
   final ParsedPayment payment;
   final _Source source;
 
+  /// What it was for (chosen in the review for the whole batch).
+  String purpose = '';
+
   /// The message's date, unless it can't be right (a misread year).
   DateTime? get messageTime => _plausible(payment.time);
 
@@ -345,6 +369,7 @@ Future<void> _review(
       sources: sources,
       currency: ref.read(currencyProvider),
       fallbackDay: day,
+      purposes: ref.read(revenuePurposesProvider),
       existing: (codes) =>
           ref.read(revenueRepositoryProvider).existingCodes(codes),
     ),
@@ -354,10 +379,19 @@ Future<void> _review(
   final actions = ref.read(appActionsProvider);
   var total = 0;
   final days = <DateTime>{};
+  final added = <int>[];
   for (final c in chosen) {
     final t = c.when;
     final d = t == null ? day : DateTime(t.year, t.month, t.day);
-    actions.addRevenue(d, c.payment.amountCents, note: c.payment.note, at: t);
+    added.add(
+      actions.addRevenue(
+        d,
+        c.payment.amountCents,
+        note: c.payment.note,
+        at: t,
+        purpose: c.purpose,
+      ),
+    );
     total += c.payment.amountCents;
     days.add(d);
   }
@@ -372,6 +406,12 @@ Future<void> _review(
         '${formatMoney(total, currency)}'
         '${days.length > 1 ? ' across ${days.length} days' : ''}',
       ),
+      // The whole batch comes back out in one tap.
+      duration: const Duration(seconds: 8),
+      action: SnackBarAction(
+        label: 'Undo',
+        onPressed: () => actions.removeRevenue(added),
+      ),
     ),
   );
 }
@@ -385,7 +425,9 @@ class _ReviewDialog extends StatefulWidget {
     required this.currency,
     required this.fallbackDay,
     required this.existing,
+    required this.purposes,
   });
+  final List<String> purposes;
   final List<_Source> sources;
   final String currency;
   final DateTime fallbackDay;
@@ -403,6 +445,9 @@ class _ReviewDialogState extends State<_ReviewDialog> {
 
   /// The photo shown beside the list (wide screens).
   _Source? _shown;
+
+  /// What the ticked payments are for ('' = not set).
+  String _purpose = '';
 
   List<_Source> get _photos => [
     for (final s in widget.sources)
@@ -665,6 +710,14 @@ class _ReviewDialogState extends State<_ReviewDialog> {
           ),
       ],
     ];
+    final purposeBox = SizedBox(
+      width: 260,
+      child: PurposeField(
+        purposes: widget.purposes,
+        value: _purpose,
+        onChanged: (p) => setState(() => _purpose = p),
+      ),
+    );
     final hint = Text(
       wide
           ? 'Tap a payment to see its photo. Balances are ignored.'
@@ -679,7 +732,12 @@ class _ReviewDialogState extends State<_ReviewDialog> {
       FilledButton(
         onPressed: chosen.isEmpty
             ? null
-            : () => Navigator.of(context).pop(chosen),
+            : () {
+                for (final c in chosen) {
+                  c.purpose = _purpose;
+                }
+                Navigator.of(context).pop(chosen);
+              },
         child: Text(
           chosen.length <= 1
               ? 'Add'
@@ -698,7 +756,15 @@ class _ReviewDialogState extends State<_ReviewDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [...list, const SizedBox(height: 8), hint],
+              children: [
+                ...list,
+                const SizedBox(height: 8),
+                hint,
+                if (_items.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  purposeBox,
+                ],
+              ],
             ),
           ),
         ),
@@ -790,6 +856,10 @@ class _ReviewDialogState extends State<_ReviewDialog> {
               Row(
                 children: [
                   Expanded(child: hint),
+                  if (_items.isNotEmpty) ...[
+                    purposeBox,
+                    const SizedBox(width: 12),
+                  ],
                   ...actions.expand((a) => [const SizedBox(width: 8), a]),
                 ],
               ),

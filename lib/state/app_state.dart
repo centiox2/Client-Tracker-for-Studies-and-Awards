@@ -256,6 +256,12 @@ final revenueDaysProvider =
           .daysBetween(range.$1, range.$2);
     });
 
+/// What payments can be for ("Application fee", …), editable in Settings.
+final revenuePurposesProvider = Provider<List<String>>((ref) {
+  ref.watch(dataVersionProvider);
+  return ref.read(appSettingsRepositoryProvider).revenuePurposes;
+});
+
 /// The currency label shown before amounts ("KSh" unless changed).
 final currencyProvider = Provider<String>((ref) {
   ref.watch(dataVersionProvider);
@@ -503,12 +509,22 @@ class AppActions {
     int amountCents, {
     String note = '',
     DateTime? at,
+    String purpose = '',
   }) {
     final id = _ref
         .read(revenueRepositoryProvider)
-        .add(day, amountCents, note: note, at: at);
+        .add(day, amountCents, note: note, at: at, purpose: purpose);
     _touch();
     return id;
+  }
+
+  /// Takes back a batch just added (Undo after adding from photos).
+  void removeRevenue(Iterable<int> ids) {
+    final repo = _ref.read(revenueRepositoryProvider);
+    for (final id in ids) {
+      repo.delete(id);
+    }
+    _touch();
   }
 
   void updateRevenue(
@@ -516,10 +532,17 @@ class AppActions {
     required int amountCents,
     required String note,
     DateTime? at,
+    String? purpose,
   }) {
     _ref
         .read(revenueRepositoryProvider)
-        .update(id, amountCents: amountCents, note: note, at: at);
+        .update(
+          id,
+          amountCents: amountCents,
+          note: note,
+          at: at,
+          purpose: purpose,
+        );
     _touch();
   }
 
@@ -530,6 +553,11 @@ class AppActions {
 
   void restoreRevenue(RevenueEntry entry) {
     _ref.read(revenueRepositoryProvider).restore(entry);
+    _touch();
+  }
+
+  void setRevenuePurposes(List<String> purposes) {
+    _ref.read(appSettingsRepositoryProvider).revenuePurposes = purposes;
     _touch();
   }
 

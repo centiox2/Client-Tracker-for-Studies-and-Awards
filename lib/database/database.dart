@@ -58,11 +58,13 @@ class AppDatabase {
   final String file;
   final common.CommonDatabase _db;
 
-  static const int schemaVersion = 8;
+  static const int schemaVersion = 9;
   static const int rollingBackupCount = 5;
 
   /// Runs [action] inside a transaction; rolls back on any error.
+  /// Inside an outer transaction, [action] simply joins it.
   T transaction<T>(T Function() action) {
+    if (!_db.autocommit) return action();
     _db.execute('BEGIN');
     try {
       final result = action();
@@ -224,6 +226,33 @@ class AppDatabase {
           ON revenue_entries(date);
       ''');
 
+      // v9: what a payment was for ("Application fee"), and the revenue
+      // change history (added / edited / deleted / restored, by which
+      // device). A refund is simply a negative amount.
+      final revenueColumns = db.select('PRAGMA table_info(revenue_entries);');
+      if (!revenueColumns.any((c) => c['name'] == 'purpose')) {
+        db.execute('ALTER TABLE revenue_entries ADD COLUMN purpose TEXT;');
+      }
+      db.execute('''
+        CREATE TABLE IF NOT EXISTS revenue_changes (
+          id               INTEGER PRIMARY KEY AUTOINCREMENT,
+          entry_id         INTEGER NOT NULL,
+          action           TEXT NOT NULL,
+          amount_cents     INTEGER NOT NULL,
+          date             TEXT NOT NULL,
+          note             TEXT NOT NULL DEFAULT '',
+          old_amount_cents INTEGER,
+          old_date         TEXT,
+          old_note         TEXT,
+          device           TEXT NOT NULL DEFAULT '',
+          changed_at       TEXT NOT NULL
+        );
+      ''');
+      db.execute('''
+        CREATE INDEX IF NOT EXISTS idx_revenue_changes_at
+          ON revenue_changes(changed_at);
+      ''');
+
       _createSyncTables(db);
 
       db.execute('''
@@ -261,6 +290,7 @@ class AppDatabase {
     'app_settings': 'key',
     'count_changes': 'id',
     'revenue_entries': 'id',
+    'revenue_changes': 'id',
   };
 
   /// v7: every change to a synced row is noted in `sync_outbox` by a
@@ -372,6 +402,7 @@ class AppDatabase {
       'app_settings': dump('SELECT * FROM app_settings ORDER BY key;'),
       'count_changes': dump('SELECT * FROM count_changes ORDER BY id;'),
       'revenue_entries': dump('SELECT * FROM revenue_entries ORDER BY id;'),
+      'revenue_changes': dump('SELECT * FROM revenue_changes ORDER BY id;'),
     };
     return const JsonEncoder.withIndent('  ').convert({
       'format': 'client-tracker-backup',
@@ -426,6 +457,20 @@ class AppDatabase {
       'note',
       'created_at',
       'updated_at',
+      'purpose',
+    },
+    'revenue_changes': {
+      'id',
+      'entry_id',
+      'action',
+      'amount_cents',
+      'date',
+      'note',
+      'old_amount_cents',
+      'old_date',
+      'old_note',
+      'device',
+      'changed_at',
     },
   };
 
@@ -449,6 +494,9 @@ class AppDatabase {
       if (tables['revenue_entries'] is List) {
         _db.execute('DELETE FROM revenue_entries;');
       }
+      if (tables['revenue_changes'] is List) {
+        _db.execute('DELETE FROM revenue_changes;');
+      }
       _db.execute('DELETE FROM count_changes;');
       _db.execute('DELETE FROM day_notes;');
       // Older backups (before v5) carry no settings — keep the current ones
@@ -471,6 +519,7 @@ class AppDatabase {
         'app_settings',
         'count_changes',
         'revenue_entries',
+        'revenue_changes',
       ];
       for (final name in order) {
         final rows = tables[name];

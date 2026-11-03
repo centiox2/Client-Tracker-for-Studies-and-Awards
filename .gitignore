@@ -63,3 +63,6 @@ cloud.json
 /ios/Flutter/flutter_export_environment.sh
 /ios/Runner/GeneratedPluginRegistrant.*
 /windows/flutter/ephemeral/
+
+# Windows installer output (built by CI)
+/installer/Output/

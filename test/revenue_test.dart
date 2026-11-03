@@ -167,7 +167,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(amount, '250.50');
     await tester.enterText(find.byKey(const ValueKey('revenue-note')), 'Cash');
-    await tester.tap(find.widgetWithText(FilledButton, 'Add'));
+    // Enter in the note field adds it too.
+    await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
 
     expect(RevenueRepository(db).day(today()).totalCents, 175050);
@@ -194,8 +195,9 @@ void main() {
 
     expect(find.text('Revenue today'), findsOneWidget);
     // The currency is a small label before the number, like a unit.
-    expect(find.text('12,300'), findsOneWidget);
-    expect(find.text('KSh'), findsOneWidget);
+    // Today, this week and this month all show it.
+    expect(find.text('12,300'), findsNWidgets(3));
+    expect(find.text('KSh'), findsNWidgets(3));
 
     await tester.tap(find.byKey(const ValueKey('quick-revenue')));
     await tester.pumpAndSettle();
@@ -387,8 +389,16 @@ void main() {
     expect(find.text('KSh 13,000'), findsWidgets); // month so far, best day
     expect(find.text('Average payment'), findsOneWidget);
     expect(find.text('KSh 6,500'), findsOneWidget);
-    expect(find.text('Last 30 days'), findsOneWidget);
-    expect(find.text('Last 12 months'), findsOneWidget);
+    expect(find.text('By day'), findsOneWidget);
+    expect(find.textContaining('12 months to'), findsOneWidget);
+    // The same numbers as a table.
+    await tester.tap(find.byTooltip('Show as table').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Payments'), findsOneWidget);
+    // A year: monthly bars instead of daily.
+    await tester.tap(find.text('Year'));
+    await tester.pumpAndSettle();
+    expect(find.text('By month'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('M-Pesa'), 300);
     expect(find.text('Cash'), findsWidgets);
     expect(tester.takeException(), isNull);
@@ -436,5 +446,82 @@ void main() {
     expect(find.text('mpesa_sample.png2 · photo 2 of 2'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pump(const Duration(milliseconds: 400));
+  });
+
+  test('refunds, purposes, history and search', () {
+    final repo = RevenueRepository(db);
+    final day = DateTime(2026, 11, 2);
+    final a = repo.add(
+      day,
+      4574000,
+      note: 'M-Pesa · David Kangogo · Acc: Leonorah · UK3JPO8PVA',
+      purpose: 'Visa fee',
+    );
+    repo.add(day, 150000, note: 'Cash', purpose: 'Consultation');
+    final refund = repo.add(day, -50000, note: 'Refund to David');
+    // Totals are net of refunds.
+    expect(repo.day(day).totalCents, 4574000 + 150000 - 50000);
+    expect(repo.entry(refund)!.isRefund, isTrue);
+    expect(repo.entry(a)!.purpose, 'Visa fee');
+
+    repo.update(
+      a,
+      amountCents: 4500000,
+      note: 'M-Pesa · David Kangogo · Acc: Leonorah · UK3JPO8PVA',
+      at: DateTime(2026, 11, 3, 9),
+    );
+    final gone = repo.entry(refund)!;
+    repo.delete(refund);
+    repo.restore(gone);
+    final history = repo.changes();
+    expect(history.map((c) => c.action).take(4), [
+      'restored',
+      'deleted',
+      'edited',
+      'added',
+    ]);
+    final edit = history[2];
+    expect(edit.oldAmountCents, 4574000);
+    expect(edit.amountCents, 4500000);
+    expect(edit.oldDate, day);
+    expect(edit.date, DateTime(2026, 11, 3));
+
+    // Search: names, codes (O or 0), amounts and purposes, on any date.
+    expect(repo.search('david kangogo').single.id, a); // every word
+    expect(repo.search('david').length, 2); // the payment and the refund
+    expect(repo.search('UK3JP08PVA').single.id, a);
+    expect(repo.search('45,000').single.id, a);
+    expect(repo.search('consultation').single.note, 'Cash');
+    expect(repo.search('nobody'), isEmpty);
+  });
+
+  testWidgets('a batch from photos can be undone in one tap', (tester) async {
+    await pumpApp(tester, admin: true);
+    await tester.tap(find.text('Revenue').last);
+    await tester.pumpAndSettle();
+    final now = DateTime.now();
+    String d(DateTime t) => '${t.day}/${t.month}/${t.year % 100}';
+    await tester.tap(find.byKey(const ValueKey('paste-payment')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('paste-message')),
+      'UK3JPO8PVA Confirmed. on ${d(now)} at 1:38 AM Ksh1,000.00 received '
+      'from A B 254700000000. New Utility balance is Ksh1.00\n'
+      'TJ2AB34CDE Confirmed. on ${d(now)} at 2:05 AM Ksh2,000.00 received '
+      'from C D 254711000111. New Utility balance is Ksh1.00',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Read'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.widgetWithText(FilledButton, 'Add 2 · KSh 3,000'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(RevenueRepository(db).day(today()).count, 2);
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+    expect(RevenueRepository(db).day(today()).count, 0);
   });
 }

@@ -20,6 +20,17 @@ abstract class CloudApi {
 
   Future<void> setPassword(String token, String newPassword);
 
+  /// Makes a one-time recovery code for a forgotten password (signed-in
+  /// admins only). Only its hash is stored online; returns the code.
+  Future<String> createRecoveryCode(String token);
+
+  /// Whether a recovery code has been made (and not used yet).
+  Future<bool> hasRecoveryCode(String token);
+
+  /// Sets a new password with a recovery code; the code then stops
+  /// working and every device must sign in again. Returns a token.
+  Future<String> recover(String code, String newPassword);
+
   /// Live changes made by any device, as they happen.
   Stream<CloudChange> changes();
 
@@ -45,7 +56,8 @@ class CloudChange {
 }
 
 /// A refusal from the online database, with a short [code]:
-/// wrong_password, not_signed_in, already_claimed, unclaimed, or other.
+/// wrong_password, not_signed_in, already_claimed, unclaimed,
+/// wrong_recovery_code, password_too_short, or other.
 class CloudException implements Exception {
   CloudException(this.code, [this.detail]);
 

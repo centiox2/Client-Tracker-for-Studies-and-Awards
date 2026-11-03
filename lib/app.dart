@@ -13,6 +13,8 @@ import 'screens/quick_search/shortcuts_dialog.dart';
 import 'screens/auth/sign_in_screen.dart';
 import 'screens/reports/reports_screen.dart';
 import 'screens/revenue/revenue_screen.dart';
+import 'screens/revenue/scan_payments.dart';
+import 'services/share_receiver.dart';
 import 'screens/settings/settings_screen.dart';
 import 'screens/staff_management/staff_management_screen.dart';
 import 'screens/weekly_tracker/weekly_tracker_screen.dart';
@@ -138,7 +140,40 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       ref.read(autoBackupProvider.notifier).ensureToday();
       // Online sync: download the latest, then live updates.
       ref.read(cloudSyncProvider.notifier).start();
+      // Share → Client Tracker (phones): payment photos or an M-Pesa SMS.
+      listenForShares(_onShared);
     });
+  }
+
+  /// Photos or text shared into the app: to Revenue, read and reviewed.
+  /// Adding needs the admin, so sign in first if needed.
+  Future<void> _onShared(SharedItems items) async {
+    if (!mounted) return;
+    if (!ref.read(adminSessionProvider)) {
+      await showAdminSignIn(context);
+      if (!mounted || !ref.read(adminSessionProvider)) {
+        await deleteSharedCopies(items.photos);
+        return;
+      }
+    }
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    ref.read(navTabProvider.notifier).set(AppTab.revenue);
+    ref.read(revenueDateProvider.notifier).set(today);
+    // Let the Revenue page come up behind the review.
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    if (!mounted) return;
+    if (items.photos.isNotEmpty) {
+      await importPaymentPhotos(
+        context,
+        ref,
+        today,
+        items.photos,
+        shared: true,
+      );
+    } else if (items.text != null) {
+      await reviewSharedText(context, ref, today, items.text!);
+    }
   }
 
   @override

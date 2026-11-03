@@ -31,6 +31,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   final _target = TextEditingController();
   final _currency = TextEditingController();
+  final _purposes = TextEditingController();
 
   // Shared by the Scrollbar and the list: on desktop a list doesn't attach
   // to the primary controller, so a scrollbar without one can't paint.
@@ -41,6 +42,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void dispose() {
     _target.dispose();
     _currency.dispose();
+    _purposes.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -56,6 +58,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               : 'Daily target set to $v clients',
         ),
       ),
+    );
+  }
+
+  void _savePurposes() {
+    ref.read(appActionsProvider).setRevenuePurposes(_purposes.text.split('\n'));
+    final saved = ref.read(revenuePurposesProvider);
+    _purposes.text = saved.join('\n');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${saved.length} payment purposes saved')),
     );
   }
 
@@ -77,6 +88,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (!_targetSeeded) {
       _target.text = target?.toString() ?? '';
       _currency.text = ref.read(currencyProvider);
+      _purposes.text = ref.read(revenuePurposesProvider).join('\n');
       _targetSeeded = true;
     }
     // The export dropdown follows the week list until the user picks one.
@@ -161,6 +173,33 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
             const SizedBox(width: 10),
             OutlinedButton(onPressed: _saveCurrency, child: const Text('Save')),
+          ],
+        ),
+      ),
+      _Section(
+        title: 'Payment purposes',
+        icon: Icons.sell_outlined,
+        description:
+            'What payments can be for, one per line. Chosen when adding '
+            'revenue; Insights shows the money by purpose.',
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            SizedBox(
+              width: 280,
+              child: TextField(
+                key: const ValueKey('purposes-field'),
+                controller: _purposes,
+                minLines: 3,
+                maxLines: 8,
+                decoration: const InputDecoration(
+                  labelText: 'Purposes',
+                  isDense: true,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            OutlinedButton(onPressed: _savePurposes, child: const Text('Save')),
           ],
         ),
       ),
@@ -528,6 +567,13 @@ class _OnlineSyncSection extends ConsumerWidget {
                 icon: const Icon(Icons.sync, size: 16),
                 label: const Text('Sync now'),
               ),
+              if (s.adminLinked)
+                OutlinedButton.icon(
+                  key: const ValueKey('create-recovery'),
+                  onPressed: () => _createRecoveryCode(context, ref),
+                  icon: const Icon(Icons.key_outlined, size: 16),
+                  label: const Text('Recovery code'),
+                ),
               if (s.phase == SyncPhase.error || s.pending > 0)
                 TextButton(
                   onPressed: () async {
@@ -565,6 +611,96 @@ class _OnlineSyncSection extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Makes a recovery code for a forgotten admin password and shows it once.
+Future<void> _createRecoveryCode(BuildContext context, WidgetRef ref) async {
+  final sync = ref.read(cloudSyncProvider.notifier);
+  final had = await sync.hasRecoveryCode();
+  if (!context.mounted) return;
+  final go = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Recovery code'),
+      content: SizedBox(
+        width: 420,
+        child: Text(
+          'If the admin password is ever forgotten, a recovery code lets you '
+          'set a new one from the sign-in screen ("Forgot password?").\n\n'
+          'The code is shown once. Write it down or keep it somewhere safe '
+          'and private — anyone with it can set the admin password. Each '
+          'code works once.'
+          '${had == true ? '\n\nA code already exists: making a new one '
+                    'replaces it.' : ''}',
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: Text(had == true ? 'Make a new code' : 'Make a code'),
+        ),
+      ],
+    ),
+  );
+  if (go != true || !context.mounted) return;
+  final code = await sync.createRecoveryCode();
+  if (!context.mounted) return;
+  if (code == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Couldn’t make a code — check the connection, or sign in again.',
+        ),
+      ),
+    );
+    return;
+  }
+  await showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) => AlertDialog(
+      title: const Text('Your recovery code'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SelectableText(
+              code,
+              key: const ValueKey('recovery-code'),
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                fontFamily: 'monospace',
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.5,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Write it down now. It won’t be shown again.',
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton.icon(
+          onPressed: () => Clipboard.setData(ClipboardData(text: code)),
+          icon: const Icon(Icons.copy, size: 16),
+          label: const Text('Copy'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('I’ve saved it'),
+        ),
+      ],
+    ),
+  );
 }
 
 /// Daily automatic backups: where they go, the latest ones, and Restore.
