@@ -122,6 +122,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
       final now = _dateOnly(DateTime.now());
       if (now != _today) {
+        // Revenue was showing "today": move it on to the new day too.
+        final revenueDay = ref.read(revenueDateProvider.notifier);
+        if (ref.read(revenueDateProvider) == _today) revenueDay.set(now);
         _today = now;
         ref.read(dataVersionProvider.notifier).bump();
         ref.read(autoBackupProvider.notifier).ensureToday();

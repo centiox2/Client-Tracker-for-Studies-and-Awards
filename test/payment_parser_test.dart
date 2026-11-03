@@ -98,4 +98,29 @@ JANE WANJIKU 254711000111. Account Number Brian New Utility balance is Ksh117,02
     expect(parsePayments('Hello, see you tomorrow'), isEmpty);
     expect(parsePayments('Your balance is Ksh60,780.00'), isEmpty);
   });
+
+  test('amounts survive what text recognition does to them', () {
+    int read(String amount) => parsePayments(
+      'UK3JPO8PVA Confirmed. on 3/11/26 at 1:38 PM $amount received from '
+      'DAVID KANGOGO 254722699840. New Utility balance is Ksh106,520.00',
+    ).single.amountCents;
+    expect(read('Ksh45,740.00'), 4574000);
+    expect(read('Ksh45740.00'), 4574000); // commas lost
+    expect(read('Ksh45, 740.00'), 4574000); // stray space
+    expect(read('Ksh45.740.00'), 4574000); // comma read as a dot
+    expect(read('Ksh 45 740.00'), 4574000);
+    expect(read('Ksh45,740.0O'), 4574000); // 0 read as O
+    expect(read('Ksh1,245,740.00'), 124574000);
+    expect(read('Ksh1,500'), 150000);
+    expect(read('Ksh500'), 50000);
+  });
+
+  test('a name with an initial is kept whole', () {
+    final p = parsePayments(
+      'SJK4ABC12D Confirmed.You have received Ksh2,000.00 from ALICE K. '
+      'MWANGI 0712345678 on 5/11/26 at 9:15 AM New M-PESA balance is Ksh1.00',
+    ).single;
+    expect(p.payer, 'ALICE K. MWANGI');
+    expect(p.amountCents, 200000);
+  });
 }

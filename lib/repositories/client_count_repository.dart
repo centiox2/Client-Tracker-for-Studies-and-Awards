@@ -227,8 +227,8 @@ class ClientCountRepository {
     }
     _db.raw.execute(
       'INSERT INTO client_counts '
-      '(day_id, staff_id, new_clients, existing_clients, updated_at) '
-      'VALUES (?, ?, ?, ?, ?) '
+      '(id, day_id, staff_id, new_clients, existing_clients, updated_at) '
+      'VALUES (new_id(), ?, ?, ?, ?, ?) '
       'ON CONFLICT(day_id, staff_id) DO UPDATE SET '
       'new_clients = excluded.new_clients, '
       'existing_clients = excluded.existing_clients, '
@@ -283,8 +283,9 @@ class ClientCountRepository {
       return;
     }
     _db.raw.execute(
-      'INSERT INTO count_changes (day_id, staff_id, old_new, old_existing, '
-      'new_new, new_existing, changed_at) VALUES (?, ?, ?, ?, ?, ?, ?);',
+      'INSERT INTO count_changes (id, day_id, staff_id, old_new, '
+      'old_existing, new_new, new_existing, changed_at) '
+      'VALUES (new_id(), ?, ?, ?, ?, ?, ?, ?);',
       [
         dayId,
         staffId,

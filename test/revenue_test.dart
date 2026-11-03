@@ -8,6 +8,7 @@ import 'package:client_tracker/database/app_database_io.dart';
 import 'package:client_tracker/database/database.dart';
 import 'package:client_tracker/repositories/notes_settings_repository.dart';
 import 'package:client_tracker/repositories/revenue_repository.dart';
+import 'package:client_tracker/repositories/staff_repository.dart';
 import 'package:client_tracker/state/app_state.dart';
 
 import 'test_helpers.dart';
@@ -89,6 +90,29 @@ void main() {
       RevenueRepository(other).day(DateTime(2026, 11, 2)).totalCents,
       5000,
     );
+  });
+
+  test('two devices adding before they sync never pick the same id', () {
+    // The phone and the PC each add entries while apart. Ids used to be
+    // 1, 2, 3… per device, so online one entry replaced the other.
+    final phone = openInMemoryDatabase();
+    addTearDown(phone.close);
+    final day = DateTime(2026, 11, 3);
+    final pcIds = [
+      for (var i = 0; i < 50; i++) RevenueRepository(db).add(day, 1000 + i),
+    ];
+    final phoneIds = [
+      for (var i = 0; i < 50; i++) RevenueRepository(phone).add(day, 2000 + i),
+    ];
+    expect({...pcIds, ...phoneIds}, hasLength(100));
+    // Still in creation order, and exact as JSON numbers (below 2^53).
+    expect(pcIds, orderedEquals([...pcIds]..sort()));
+    expect(phoneIds.last, lessThan(9007199254740992));
+
+    // The same holds for client numbers, weeks and staff.
+    final staffA = StaffRepository(db).add('New A');
+    final staffB = StaffRepository(phone).add('New B');
+    expect(staffA, isNot(staffB));
   });
 
   test('currency defaults to KSh and can be changed', () {

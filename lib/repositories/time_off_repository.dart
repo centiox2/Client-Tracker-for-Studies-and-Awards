@@ -25,8 +25,8 @@ class TimeOffRepository {
   void setDay({required int dayId, required int staffId, required bool off}) {
     if (off) {
       _db.raw.execute(
-        'INSERT OR IGNORE INTO staff_day_off (day_id, staff_id) '
-        'VALUES (?, ?);',
+        'INSERT OR IGNORE INTO staff_day_off (id, day_id, staff_id) '
+        'VALUES (new_id(), ?, ?);',
         [dayId, staffId],
       );
     } else {

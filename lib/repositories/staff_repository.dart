@@ -38,8 +38,8 @@ class StaffRepository {
                 .first['next']!
             as int;
     _db.raw.execute(
-      'INSERT INTO staff (name, active, display_order, created_at) '
-      'VALUES (?, ?, ?, ?);',
+      'INSERT INTO staff (id, name, active, display_order, created_at) '
+      'VALUES (new_id(), ?, ?, ?, ?);',
       [trimmed, active ? 1 : 0, order, DateTime.now().toIso8601String()],
     );
     final id = _db.raw.lastInsertRowId;
