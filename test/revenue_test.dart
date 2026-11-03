@@ -9,6 +9,7 @@ import 'package:client_tracker/database/database.dart';
 import 'package:client_tracker/repositories/notes_settings_repository.dart';
 import 'package:client_tracker/repositories/revenue_repository.dart';
 import 'package:client_tracker/repositories/staff_repository.dart';
+import 'package:client_tracker/services/photo_text.dart';
 import 'package:client_tracker/state/app_state.dart';
 
 import 'test_helpers.dart';
@@ -200,8 +201,13 @@ void main() {
     await pumpApp(tester, admin: true);
     await tester.tap(find.text('Revenue').last);
     await tester.pumpAndSettle();
-    // The test runs on Linux: no photo reading, but paste is always there.
-    expect(find.byKey(const ValueKey('scan-photo')), findsNothing);
+    // Scan photo shows where photos can be read (phones, Windows); Paste
+    // message is always there.
+    expect(
+      find.byKey(const ValueKey('scan-photo')),
+      photoTextSupported ? findsOneWidget : findsNothing,
+    );
+    expect(find.byKey(const ValueKey('paste-payment')), findsOneWidget);
 
     const sms =
         'UK3JPO8PVA Confirmed. on 3/11/26 at 1:38 PM Ksh45,740.00 received '
