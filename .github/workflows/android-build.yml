@@ -1,0 +1,58 @@
+name: Client Tracker – Android build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Same online database as the Windows build. Repository secrets with the
+# same names, if set, take priority. Keep this repository private.
+env:
+  SUPABASE_URL_DEFAULT: https://dpmluuckgstycdctqwym.supabase.co
+  SUPABASE_KEY_DEFAULT: sb_publishable_qsw0KVpDbNr616WaSmG70w_QplfFMPs
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Get packages
+        run: flutter pub get
+
+      - name: Check Supabase details
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || env.SUPABASE_URL_DEFAULT }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY || env.SUPABASE_KEY_DEFAULT }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_KEY" ]; then
+            echo "::error::SUPABASE_URL / SUPABASE_KEY are missing - the app would build without online sync."
+            exit 1
+          fi
+          if ! echo "$SUPABASE_URL" | grep -Eq '^https://[a-z0-9]+\.supabase\.co$'; then
+            echo "::error::SUPABASE_URL should look like https://<ref>.supabase.co (no /rest/v1/)."
+            exit 1
+          fi
+
+      - name: Build APK
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || env.SUPABASE_URL_DEFAULT }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY || env.SUPABASE_KEY_DEFAULT }}
+        run: flutter build apk --release --dart-define=SUPABASE_URL="$SUPABASE_URL" --dart-define=SUPABASE_KEY="$SUPABASE_KEY"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: client_tracker-android-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
