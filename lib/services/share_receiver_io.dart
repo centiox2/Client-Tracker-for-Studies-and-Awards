@@ -1,42 +1,36 @@
-import 'dart:async';
 import 'dart:io';
 
-import 'package:receive_sharing_intent/receive_sharing_intent.dart';
+import 'package:flutter/services.dart';
 
 /// Something shared into the app: photo paths, or a message's text.
 typedef SharedItems = ({List<String> photos, String? text});
 
-StreamSubscription<List<SharedMediaFile>>? _sub;
+const _channel = MethodChannel('client_tracker/share');
 
-SharedItems _items(List<SharedMediaFile> files) => (
-  photos: [
-    for (final f in files)
-      if (f.type == SharedMediaType.image) f.path,
-  ],
-  text: files
-      .where((f) => f.type == SharedMediaType.text)
-      .map((f) => f.path)
-      .join('\n')
-      .trim()
-      .let((t) => t.isEmpty ? null : t),
-);
+SharedItems? _items(Object? raw) {
+  if (raw is! Map) return null;
+  final photos = [
+    for (final p in (raw['photos'] as List? ?? const [])) '$p',
+  ];
+  final text = (raw['text'] as String?)?.trim();
+  if (photos.isEmpty && (text == null || text.isEmpty)) return null;
+  return (photos: photos, text: text == null || text.isEmpty ? null : text);
+}
 
 /// Calls [onShared] for what was shared when the app was opened that way,
-/// and for anything shared while it runs.
+/// and for anything shared while it runs. (Android: MainActivity.kt.)
 void listenForShares(void Function(SharedItems items) onShared) {
   if (!Platform.isAndroid) return;
-  void handle(List<SharedMediaFile> files) {
-    if (files.isEmpty) return;
-    final items = _items(files);
-    if (items.photos.isNotEmpty || items.text != null) onShared(items);
-  }
-
-  _sub ??= ReceiveSharingIntent.instance.getMediaStream().listen(handle);
-  ReceiveSharingIntent.instance.getInitialMedia().then((files) {
-    handle(files);
-    // So the same share isn't handled again next time the app starts.
-    ReceiveSharingIntent.instance.reset();
+  _channel.setMethodCallHandler((call) async {
+    if (call.method == 'share') {
+      final items = _items(call.arguments);
+      if (items != null) onShared(items);
+    }
   });
+  _channel.invokeMethod<Object?>('initialShare').then((raw) {
+    final items = _items(raw);
+    if (items != null) onShared(items);
+  }, onError: (_) {});
 }
 
 /// Photos are never kept: the share hands the app *copies* (in its cache);
@@ -48,8 +42,4 @@ Future<void> deleteSharedCopies(List<String> paths) async {
       await File(p).delete();
     } catch (_) {}
   }
-}
-
-extension<T> on T {
-  R let<R>(R Function(T) f) => f(this);
 }

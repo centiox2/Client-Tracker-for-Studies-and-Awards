@@ -36,8 +36,6 @@ dependencies:
   supabase: ^2.16.5
   google_mlkit_text_recognition: ^0.17.1
   desktop_drop: ^0.8.4
-  receive_sharing_intent: ^1.9.0
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
