@@ -10,7 +10,7 @@ import '../../services/payment_text_parser.dart';
 import '../../services/photo_text.dart';
 import '../../services/share_receiver.dart';
 import '../../state/app_state.dart';
-import 'revenue_screen.dart' show PurposeField;
+import 'revenue_screen.dart' show PickerBox, PurposeField;
 
 /// Image files that can be dropped or picked.
 const photoExtensions = {
@@ -325,17 +325,27 @@ class _Source {
 /// One payment found, with where it came from.
 class _Candidate {
   _Candidate(this.payment, this.source);
-  final ParsedPayment payment;
+
+  /// What was read — or, once the admin has corrected it, what they set.
+  ParsedPayment payment;
   final _Source source;
 
-  /// What it was for (chosen in the review for the whole batch).
+  /// What it was for: the admin's choice for this one, else the batch's.
   String purpose = '';
+  String? ownPurpose;
+
+  /// The date and time the admin set; overrides anything read.
+  DateTime? setTime;
+
+  /// Corrected by hand: kept as it is when other photos' text is re-read.
+  bool edited = false;
 
   /// The message's date, unless it can't be right (a misread year).
   DateTime? get messageTime => _plausible(payment.time);
 
-  /// When the payment happened: the message's time, else the photo's.
-  DateTime? get when => messageTime ?? _plausible(source.fileTime);
+  /// When the payment happened: as set by the admin, else the message's
+  /// time, else the photo's.
+  DateTime? get when => setTime ?? messageTime ?? _plausible(source.fileTime);
 
   /// Transaction code with letter O and zero treated alike (text readers
   /// mix them up), for spotting the same payment twice.
@@ -467,15 +477,29 @@ class _ReviewDialogState extends State<_ReviewDialog> {
         : _photos.firstOrNull;
   }
 
-  /// Re-reads every source's text and works out the flags.
+  /// The text each source had when it was last read.
+  final _readText = <_Source, String>{};
+
+  /// Reads any source whose text changed (not the others, so corrections
+  /// made by hand stay) and works out the flags.
   void _rebuild() {
     final before = Map.of(_ticked);
+    final kept = <_Candidate>[
+      for (final c in _items)
+        if (_readText[c.source] == c.source.text) c,
+    ];
     _items
       ..clear()
       ..addAll([
         for (final s in widget.sources)
-          for (final p in parsePayments(s.text)) _Candidate(p, s),
+          if (_readText[s] == s.text)
+            ...kept.where((c) => c.source == s)
+          else
+            for (final p in parsePayments(s.text)) _Candidate(p, s),
       ]);
+    for (final s in widget.sources) {
+      _readText[s] = s.text;
+    }
     // Oldest first, as they happened.
     _items.sort((a, b) {
       final ta = a.when, tb = b.when;
@@ -503,6 +527,10 @@ class _ReviewDialogState extends State<_ReviewDialog> {
       final fresh =
           c.payment.incoming && !_saved.contains(c) && !_dupeOf.containsKey(c);
       // Keep the admin's own choice for a payment still there after a fix.
+      if (before.containsKey(c)) {
+        _ticked[c] = before[c]!;
+        continue;
+      }
       final kept = before.entries
           .where(
             (e) =>
@@ -536,6 +564,26 @@ class _ReviewDialogState extends State<_ReviewDialog> {
     });
   }
 
+  /// Every detail of one payment as fields: amount, date, time, who paid,
+  /// code, method, purpose — beside its photo.
+  Future<void> _details(_Candidate c) async {
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => _DetailsDialog(
+        candidate: c,
+        currency: widget.currency,
+        purposes: widget.purposes,
+        batchPurpose: _purpose,
+        fallbackDay: widget.fallbackDay,
+      ),
+    );
+    if (saved != true || !mounted) return;
+    setState(() {
+      _ticked[c] = true;
+      _rebuild();
+    });
+  }
+
   /// "3 Nov, 1:38 PM", with the year whenever it isn't this year, so an
   /// older message's date is plain to check.
   static String _at(DateTime t) => DateFormat(
@@ -543,6 +591,7 @@ class _ReviewDialogState extends State<_ReviewDialog> {
   ).format(t);
 
   String _whenText(_Candidate c) {
+    if (c.setTime != null) return _at(c.setTime!);
     if (c.messageTime != null) return _at(c.messageTime!);
     final misread = c.payment.time != null;
     if (c.when != null) {
@@ -629,6 +678,8 @@ class _ReviewDialogState extends State<_ReviewDialog> {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
+            if (c.ownPurpose != null && c.ownPurpose!.isNotEmpty)
+              Text('For ${c.ownPurpose}'),
             if (c.payment.account != null)
               Text(
                 'Account: ${c.payment.account}',
@@ -661,9 +712,10 @@ class _ReviewDialogState extends State<_ReviewDialog> {
           children: [
             if (!wide && c.source.path != null) thumb(c.source),
             IconButton(
-              tooltip: 'Edit text',
-              icon: const Icon(Icons.edit_note, size: 20),
-              onPressed: () => _edit(c.source),
+              key: ValueKey('edit-payment-${_items.indexOf(c)}'),
+              tooltip: 'Check and correct the details',
+              icon: const Icon(Icons.edit_outlined, size: 20),
+              onPressed: () => _details(c),
             ),
           ],
         ),
@@ -738,7 +790,7 @@ class _ReviewDialogState extends State<_ReviewDialog> {
             ? null
             : () {
                 for (final c in chosen) {
-                  c.purpose = _purpose;
+                  c.purpose = c.ownPurpose ?? _purpose;
                 }
                 Navigator.of(context).pop(chosen);
               },
@@ -871,6 +923,377 @@ class _ReviewDialogState extends State<_ReviewDialog> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// One payment's details as fields, beside its photo, so anything misread —
+/// the date most of all — is set right without editing the message text.
+class _DetailsDialog extends StatefulWidget {
+  const _DetailsDialog({
+    required this.candidate,
+    required this.currency,
+    required this.purposes,
+    required this.batchPurpose,
+    required this.fallbackDay,
+  });
+  final _Candidate candidate;
+  final String currency;
+  final List<String> purposes;
+  final String batchPurpose;
+  final DateTime fallbackDay;
+
+  @override
+  State<_DetailsDialog> createState() => _DetailsDialogState();
+}
+
+class _DetailsDialogState extends State<_DetailsDialog> {
+  static const _methods = ['M-Pesa', 'Airtel Money', 'Bank', 'Payment'];
+
+  late final _Candidate c = widget.candidate;
+  late final _amount = TextEditingController(
+    text: formatMoney(c.payment.amountCents, '').trim(),
+  );
+  late final _payer = TextEditingController(text: c.payment.payer ?? '');
+  late final _account = TextEditingController(text: c.payment.account ?? '');
+  late final _code = TextEditingController(text: c.payment.code ?? '');
+  late final _text = TextEditingController(text: c.source.text);
+  late String _method = _methods.contains(c.payment.method)
+      ? c.payment.method
+      : 'Payment';
+  late bool _incoming = c.payment.incoming;
+  late String _purpose = c.ownPurpose ?? widget.batchPurpose;
+  late DateTime _at =
+      c.when ??
+      DateTime(
+        widget.fallbackDay.year,
+        widget.fallbackDay.month,
+        widget.fallbackDay.day,
+        12,
+      );
+  String? _error;
+  int _purposeKey = 0;
+
+  @override
+  void dispose() {
+    for (final t in [_amount, _payer, _account, _code, _text]) {
+      t.dispose();
+    }
+    super.dispose();
+  }
+
+  /// Fills the fields again from the message text (after fixing it).
+  void _readAgain() {
+    final found = parsePayments(_text.text);
+    if (found.isEmpty) {
+      setState(() => _error = 'No payment found in that text.');
+      return;
+    }
+    // The same one again when the text holds several.
+    final mine = [
+      for (final o in parsePayments(c.source.text))
+        o.code == c.payment.code && o.amountCents == c.payment.amountCents,
+    ].indexOf(true);
+    final p = found[mine >= 0 && mine < found.length ? mine : 0];
+    setState(() {
+      _error = null;
+      _amount.text = formatMoney(p.amountCents, '').trim();
+      _payer.text = p.payer ?? '';
+      _account.text = p.account ?? '';
+      _code.text = p.code ?? '';
+      _method = _methods.contains(p.method) ? p.method : 'Payment';
+      _incoming = p.incoming;
+      final t = _plausible(p.time);
+      if (t != null) _at = t;
+    });
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _at.isAfter(now) ? now : _at,
+      firstDate: revenueEarliestDate,
+      lastDate: now,
+    );
+    if (picked != null) {
+      setState(
+        () => _at = DateTime(
+          picked.year,
+          picked.month,
+          picked.day,
+          _at.hour,
+          _at.minute,
+        ),
+      );
+    }
+  }
+
+  Future<void> _pickTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_at),
+    );
+    if (picked != null) {
+      setState(
+        () => _at = DateTime(
+          _at.year,
+          _at.month,
+          _at.day,
+          picked.hour,
+          picked.minute,
+        ),
+      );
+    }
+  }
+
+  void _save() {
+    final cents = RevenueRepository.parseAmount(_amount.text);
+    if (cents == null || cents <= 0) {
+      setState(() => _error = 'Enter the amount, e.g. 3000 or 3,000.50');
+      return;
+    }
+    c
+      ..payment = c.payment.copyWith(
+        amountCents: cents,
+        method: _method,
+        payer: _payer.text,
+        account: _account.text,
+        code: _code.text.toUpperCase(),
+        incoming: _incoming,
+      )
+      ..setTime = _at
+      ..ownPurpose = _purpose
+      ..edited = true;
+    Navigator.of(context).pop(true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = Dt.textMuted(theme);
+    final size = MediaQuery.sizeOf(context);
+    final path = c.source.path;
+    final wide = path != null && size.width >= 900;
+    final messageAt = c.messageTime;
+
+    Widget gap([double h = 12]) => SizedBox(height: h);
+    // Side by side when there's room; one above the other on a phone.
+    Widget pair(Widget a, Widget b) => LayoutBuilder(
+      builder: (context, box) => box.maxWidth < 360
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [a, gap(), b],
+            )
+          : Row(
+              children: [
+                Expanded(child: a),
+                const SizedBox(width: 10),
+                Expanded(child: b),
+              ],
+            ),
+    );
+    final fields = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        TextField(
+          key: const ValueKey('detail-amount'),
+          controller: _amount,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          style: Dt.tab(theme.textTheme.titleMedium!)
+              .copyWith(fontWeight: FontWeight.w700),
+          decoration: InputDecoration(
+            labelText: 'Amount',
+            prefixText: '${widget.currency} ',
+            isDense: true,
+          ),
+          onChanged: (_) {
+            if (_error != null) setState(() => _error = null);
+          },
+          onSubmitted: (_) => _save(),
+        ),
+        gap(),
+        pair(
+          PickerBox(
+            key: const ValueKey('detail-date'),
+            label: 'Date',
+            value: DateFormat('EEE d MMM y').format(_at),
+            icon: Icons.calendar_today_outlined,
+            onTap: _pickDate,
+          ),
+          PickerBox(
+            key: const ValueKey('detail-time'),
+            label: 'Time',
+            value: DateFormat('h:mm a').format(_at),
+            icon: Icons.schedule,
+            onTap: _pickTime,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 4, left: 4),
+          child: Text(
+            messageAt != null
+                ? 'Read from the message: '
+                      '${DateFormat('d MMM y, h:mm a').format(messageAt)}'
+                : c.payment.time != null
+                ? 'The message’s date looked misread — please check.'
+                : 'No date found in the message — please check.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: messageAt != null ? muted : theme.colorScheme.error,
+            ),
+          ),
+        ),
+        gap(),
+        TextField(
+          key: const ValueKey('detail-payer'),
+          controller: _payer,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+            labelText: 'From (who paid)',
+            isDense: true,
+          ),
+        ),
+        gap(),
+        pair(
+          TextField(
+            key: const ValueKey('detail-code'),
+            controller: _code,
+            textCapitalization: TextCapitalization.characters,
+            decoration: const InputDecoration(
+              labelText: 'Transaction code',
+              isDense: true,
+            ),
+          ),
+          DropdownButtonFormField<String>(
+            initialValue: _method,
+            isExpanded: true,
+            style: theme.textTheme.bodyLarge,
+            decoration: const InputDecoration(
+              labelText: 'Paid by',
+              isDense: true,
+            ),
+            items: [
+              for (final m in _methods)
+                DropdownMenuItem(value: m, child: Text(m)),
+            ],
+            onChanged: (m) => setState(() => _method = m ?? _method),
+          ),
+        ),
+        gap(),
+        TextField(
+          controller: _account,
+          decoration: const InputDecoration(
+            labelText: 'Account (optional)',
+            isDense: true,
+          ),
+        ),
+        gap(),
+        PurposeField(
+          key: ValueKey('detail-purpose-$_purposeKey'),
+          purposes: widget.purposes,
+          value: _purpose,
+          onChanged: (p) => setState(() => _purpose = p),
+        ),
+        gap(6),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          value: _incoming,
+          onChanged: (v) => setState(() => _incoming = v),
+          title: const Text('Money received'),
+          subtitle: Text(
+            _incoming
+                ? 'Counts as revenue'
+                : 'Money going out — not counted unless ticked',
+          ),
+        ),
+        ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          title: Text('Message text', style: theme.textTheme.labelLarge),
+          subtitle: Text(
+            'Fix the text and fill the fields again from it',
+            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+          ),
+          children: [
+            TextField(
+              key: const ValueKey('detail-text'),
+              controller: _text,
+              minLines: 3,
+              maxLines: 8,
+              style: theme.textTheme.bodySmall,
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () {
+                  _readAgain();
+                  _purposeKey++;
+                },
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Read again'),
+              ),
+            ),
+          ],
+        ),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              _error!,
+              style: TextStyle(color: theme.colorScheme.error),
+            ),
+          ),
+      ],
+    );
+
+    return AlertDialog(
+      title: const Text('Payment details'),
+      content: wide
+          ? SizedBox(
+              width: math.min(1040, size.width - 120),
+              height: math.min(620, size.height - 220),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: _ZoomPhoto(path: path)),
+                  const SizedBox(width: 18),
+                  SizedBox(
+                    width: 400,
+                    child: SingleChildScrollView(child: fields),
+                  ),
+                ],
+              ),
+            )
+          : SizedBox(
+              width: 460,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (path != null) ...[
+                      SizedBox(height: 200, child: _ZoomPhoto(path: path)),
+                      gap(),
+                    ],
+                    fields,
+                  ],
+                ),
+              ),
+            ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const ValueKey('detail-save'),
+          onPressed: _save,
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }

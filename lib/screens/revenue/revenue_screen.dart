@@ -9,6 +9,7 @@ import '../../repositories/revenue_repository.dart';
 import '../../services/photo_text.dart';
 import '../../state/app_state.dart';
 import '../../widgets/panels.dart';
+import 'revenue_all.dart';
 import 'revenue_insights.dart';
 import 'scan_payments.dart';
 
@@ -24,6 +25,8 @@ class RevenueScreen extends ConsumerStatefulWidget {
   @override
   ConsumerState<RevenueScreen> createState() => _RevenueScreenState();
 }
+
+enum RevenueView { day, all, insights }
 
 class _RevenueScreenState extends ConsumerState<RevenueScreen> {
   final _amount = TextEditingController();
@@ -43,8 +46,9 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
   /// The next typed transaction is money paid back.
   bool _refund = false;
 
-  /// Day (enter and see one day) or Insights (charts and figures).
-  bool _insights = false;
+  /// Day (enter and see one day), All (every transaction, to find and fix
+  /// older ones) or Insights (charts and figures).
+  RevenueView _view = RevenueView.day;
 
   @override
   void dispose() {
@@ -94,28 +98,11 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
     final picked = await showRevenueSearch(context, ref, initial: query);
     if (picked == null || !mounted) return;
     ref.read(revenueDateProvider.notifier).set(picked.date);
-    setState(() => _insights = false);
+    setState(() => _view = RevenueView.day);
   }
 
-  void _delete(RevenueEntry entry) {
-    final actions = ref.read(appActionsProvider);
-    final currency = ref.read(currencyProvider);
-    actions.deleteRevenue(entry.id);
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text('Removed ${formatMoney(entry.amountCents, currency)}'),
-          duration: const Duration(seconds: 6),
-          persist: false,
-          showCloseIcon: true,
-          action: SnackBarAction(
-            label: 'Undo',
-            onPressed: () => actions.restoreRevenue(entry),
-          ),
-        ),
-      );
-  }
+  void _delete(RevenueEntry entry) =>
+      deleteRevenueWithUndo(context, ref, entry);
 
   Future<void> _pickDay(DateTime day) async {
     final picked = await showDatePicker(
@@ -150,23 +137,32 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
       builder: (context, viewport) {
         final phone = viewport.maxWidth < 600;
         final pad = phone ? 14.0 : 18.0;
-        final switchButton = SegmentedButton<bool>(
+        final switchButton = SegmentedButton<RevenueView>(
           key: const ValueKey('revenue-view'),
-          segments: const [
+          segments: [
             ButtonSegment(
-              value: false,
-              icon: Icon(Icons.today_outlined, size: 16),
-              label: Text('Day'),
+              value: RevenueView.day,
+              icon: phone ? null : const Icon(Icons.today_outlined, size: 16),
+              label: const Text('Day'),
             ),
             ButtonSegment(
-              value: true,
-              icon: Icon(Icons.insights_outlined, size: 16),
-              label: Text('Insights'),
+              value: RevenueView.all,
+              icon: phone
+                  ? null
+                  : const Icon(Icons.receipt_long_outlined, size: 16),
+              label: const Text('All'),
+            ),
+            ButtonSegment(
+              value: RevenueView.insights,
+              icon: phone
+                  ? null
+                  : const Icon(Icons.insights_outlined, size: 16),
+              label: const Text('Insights'),
             ),
           ],
-          selected: {_insights},
+          selected: {_view},
           showSelectedIcon: false,
-          onSelectionChanged: (s) => setState(() => _insights = s.first),
+          onSelectionChanged: (s) => setState(() => _view = s.first),
         );
         final viewSwitch = Row(
           children: [
@@ -190,7 +186,18 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
             ),
           ],
         );
-        if (_insights) {
+        if (_view == RevenueView.all) {
+          return AllRevenue(
+            readOnly: widget.readOnly,
+            padding: EdgeInsets.fromLTRB(pad, 16, pad, 28),
+            header: viewSwitch,
+            onOpenDay: (d) {
+              ref.read(revenueDateProvider.notifier).set(d);
+              setState(() => _view = RevenueView.day);
+            },
+          );
+        }
+        if (_view == RevenueView.insights) {
           return ListView(
             padding: EdgeInsets.fromLTRB(pad, 16, pad, 28),
             children: [
@@ -300,7 +307,7 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
                           : Column(
                               children: [
                                 for (final (i, e) in entries.indexed)
-                                  _EntryRow(
+                                  RevenueEntryRow(
                                     index: i + 1,
                                     entry: e,
                                     currency: currency,
@@ -866,8 +873,9 @@ class PickerBox extends StatelessWidget {
   );
 }
 
-class _EntryRow extends StatelessWidget {
-  const _EntryRow({
+class RevenueEntryRow extends StatelessWidget {
+  const RevenueEntryRow({
+    super.key,
     required this.index,
     required this.entry,
     required this.currency,
@@ -1068,6 +1076,32 @@ class _WeekBars extends StatelessWidget {
 }
 
 /// Changes the amount or note of one transaction.
+/// Removes [entry], with an Undo card that goes away by itself.
+void deleteRevenueWithUndo(
+  BuildContext context,
+  WidgetRef ref,
+  RevenueEntry entry,
+) {
+  final actions = ref.read(appActionsProvider);
+  final currency = ref.read(currencyProvider);
+  actions.deleteRevenue(entry.id);
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(
+        content: Text('Removed ${formatMoney(entry.amountCents, currency)}'),
+        duration: const Duration(seconds: 6),
+        // Flutter keeps a card with a button up until it's tapped otherwise.
+        persist: false,
+        showCloseIcon: true,
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () => actions.restoreRevenue(entry),
+        ),
+      ),
+    );
+}
+
 Future<void> showEditRevenueDialog(
   BuildContext context,
   WidgetRef ref,

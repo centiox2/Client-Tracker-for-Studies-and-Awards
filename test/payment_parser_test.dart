@@ -131,4 +131,39 @@ JANE WANJIKU 254711000111. Account Number Brian New Utility balance is Ksh117,02
     ).single;
     expect(p.time, DateTime(2023, 2, 14, 9, 5));
   });
+
+  test(
+    'agent/bank format: dashes in the date, receipt number, masked phone',
+    () {
+      // As in the photo.
+      const photo =
+          'Ref:AC4597897426: Dear EVELYNE, You have received KES 3000 on your '
+          'M-Pesa from PIUS-6145****354 at 03-10-2026 10:53 AM.The M-Pesa '
+          'receipt number is:UJ3H98O13S. We Are You!';
+      final p = parsePayments(photo).single;
+      expect(p.amountCents, 300000);
+      expect(p.time, DateTime(2026, 10, 3, 10, 53));
+      expect(p.code, 'UJ3H98O13S');
+      expect(p.payer, 'PIUS');
+      expect(p.method, 'M-Pesa');
+
+      // As the Windows reader gave it: the phone dropped, slashes.
+      const read =
+          'Ref:AC4597897426: Dear EVELYNE, You have received KES 3000 on your '
+          'M-Pesa from PIUS- at 03/10/2026 10:53 AM.The M-Pesa receipt '
+          'number is:UJ3H98013S.';
+      final q = parsePayments(read).single;
+      expect(q.time, DateTime(2026, 10, 3, 10, 53));
+      expect(q.code, 'UJ3H98013S');
+      expect(q.payer, 'PIUS');
+    },
+  );
+
+  test('other date shapes', () {
+    DateTime? t(String s) =>
+        parsePayments('Ksh100.00 received from A B $s').single.time;
+    expect(t('on 3.11.2026 at 13:38'), DateTime(2026, 11, 3, 13, 38));
+    expect(t('on 03/10/2026'), DateTime(2026, 10, 3, 12));
+    expect(t('at 3/10/26 1:05 p.m.'), DateTime(2026, 10, 3, 13, 5));
+  });
 }

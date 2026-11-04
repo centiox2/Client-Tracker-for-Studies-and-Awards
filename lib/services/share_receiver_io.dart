@@ -9,9 +9,7 @@ const _channel = MethodChannel('client_tracker/share');
 
 SharedItems? _items(Object? raw) {
   if (raw is! Map) return null;
-  final photos = [
-    for (final p in (raw['photos'] as List? ?? const [])) '$p',
-  ];
+  final photos = [for (final p in (raw['photos'] as List? ?? const [])) '$p'];
   final text = (raw['text'] as String?)?.trim();
   if (photos.isEmpty && (text == null || text.isEmpty)) return null;
   return (photos: photos, text: text == null || text.isEmpty ? null : text);
