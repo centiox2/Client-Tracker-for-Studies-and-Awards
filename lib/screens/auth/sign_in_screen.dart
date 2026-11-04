@@ -27,7 +27,7 @@ class SignInScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         leading: BackButton(onPressed: () => Navigator.of(context).pop()),
-        title: const Text('Back to reports'),
+        title: const Text('Back to profiles'),
         titleTextStyle: Theme.of(context).textTheme.labelLarge,
       ),
       body: Center(

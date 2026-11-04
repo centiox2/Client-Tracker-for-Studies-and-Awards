@@ -121,12 +121,13 @@ class _TvViewState extends ConsumerState<_TvView> {
             ),
             stat('This week', '${weekSoFar.total}'),
             stat(DateFormat('MMMM').format(day), '${month.total}'),
-            stat(
-              isToday
-                  ? 'Revenue today'
-                  : 'Revenue ${DateFormat('EEEE').format(day)}',
-              formatMoney(revenueToday.totalCents, currency),
-            ),
+            if (ref.watch(seesRevenueProvider))
+              stat(
+                isToday
+                    ? 'Revenue today'
+                    : 'Revenue ${DateFormat('EEEE').format(day)}',
+                formatMoney(revenueToday.totalCents, currency),
+              ),
           ],
         ),
         if (fill) const Spacer() else const SizedBox(height: 24),

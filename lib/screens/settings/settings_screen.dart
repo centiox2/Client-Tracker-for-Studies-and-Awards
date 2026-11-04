@@ -185,16 +185,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            SizedBox(
-              width: 280,
-              child: TextField(
-                key: const ValueKey('purposes-field'),
-                controller: _purposes,
-                minLines: 3,
-                maxLines: 8,
-                decoration: const InputDecoration(
-                  labelText: 'Purposes',
-                  isDense: true,
+            Flexible(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 280),
+                child: TextField(
+                  key: const ValueKey('purposes-field'),
+                  controller: _purposes,
+                  minLines: 3,
+                  maxLines: 8,
+                  decoration: const InputDecoration(
+                    labelText: 'Purposes',
+                    isDense: true,
+                  ),
                 ),
               ),
             ),
@@ -317,12 +319,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ),
       ),
+      const _ProfilesSection(),
       _Section(
         title: 'Admin password',
         icon: Icons.key_outlined,
         description:
-            'Needed to open the workspace. Reports are open to anyone using '
-            'the app, without a password.',
+            'Needed to open the Admin profile (the admin portal: revenue '
+            'and settings).',
         child: Align(
           alignment: Alignment.centerLeft,
           child: OutlinedButton.icon(
@@ -962,4 +965,218 @@ class _PasswordDialogState extends ConsumerState<_PasswordDialog> {
       ],
     );
   }
+}
+
+/// Settings › Profiles: the admin gives Admin team, Director and Team a
+/// password, or leaves them open (anyone can choose them at launch).
+class _ProfilesSection extends ConsumerStatefulWidget {
+  const _ProfilesSection();
+
+  @override
+  ConsumerState<_ProfilesSection> createState() => _ProfilesSectionState();
+}
+
+class _ProfilesSectionState extends ConsumerState<_ProfilesSection> {
+  UserRole? _saving;
+
+  /// Saves online first (so every device gets it), then on this device.
+  Future<void> _save(UserRole role, String password) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final sync = ref.read(cloudSyncProvider.notifier);
+    setState(() => _saving = role);
+    final online =
+        !sync.enabled || await sync.setProfilePassword(role, password);
+    if (!mounted) return;
+    setState(() => _saving = null);
+    if (!online) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Couldn’t save it online, so nothing was changed. Check the '
+            'internet connection (and that the admin is signed in online), '
+            'then try again.',
+          ),
+          duration: Duration(seconds: 6),
+        ),
+      );
+      return;
+    }
+    ref.read(authRepositoryProvider).setProfilePassword(role, password);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          password.isEmpty
+              ? '${role.label} is open — no password needed'
+              : '${role.label} password set',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _setPassword(UserRole role) async {
+    final password = await showDialog<String>(
+      context: context,
+      builder: (_) => _ProfilePasswordDialog(role: role),
+    );
+    if (password != null && mounted) await _save(role, password);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = Dt.textMuted(theme);
+    final auth = ref.read(authRepositoryProvider);
+    return _Section(
+      title: 'Profiles',
+      icon: Icons.switch_account_outlined,
+      description:
+          'Everyone picks a profile when the app opens. Admin team enters '
+          'and edits everything except revenue; Director views everything; '
+          'Team views everything except revenue. Give a profile a password, '
+          'or leave it open.',
+      child: Column(
+        children: [
+          for (final role in UserRole.others) ...[
+            if (role != UserRole.others.first)
+              Divider(height: 1, color: theme.colorScheme.outline),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  Icon(
+                    auth.isLocked(role)
+                        ? Icons.lock_outline
+                        : Icons.lock_open_outlined,
+                    size: 18,
+                    color: muted,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(role.label, style: theme.textTheme.titleSmall),
+                        Text(
+                          auth.isLocked(role)
+                              ? 'Password set'
+                              : 'Open — no password',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: muted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (_saving == role)
+                    const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else ...[
+                    if (auth.isLocked(role))
+                      TextButton(
+                        key: ValueKey('profile-open-${role.name}'),
+                        onPressed: _saving != null
+                            ? null
+                            : () => _save(role, ''),
+                        child: const Text('Make open'),
+                      ),
+                    OutlinedButton(
+                      key: ValueKey('profile-set-${role.name}'),
+                      onPressed: _saving != null
+                          ? null
+                          : () => _setPassword(role),
+                      child: Text(
+                        auth.isLocked(role) ? 'Change' : 'Set password',
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// A new password for one profile, typed twice. Returns it.
+class _ProfilePasswordDialog extends StatefulWidget {
+  const _ProfilePasswordDialog({required this.role});
+  final UserRole role;
+
+  @override
+  State<_ProfilePasswordDialog> createState() => _ProfilePasswordDialogState();
+}
+
+class _ProfilePasswordDialogState extends State<_ProfilePasswordDialog> {
+  final _first = TextEditingController();
+  final _second = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _first.dispose();
+    _second.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final p = _first.text;
+    if (p.length < AuthRepository.minPasswordLength) {
+      setState(
+        () => _error =
+            'Use at least ${AuthRepository.minPasswordLength} characters.',
+      );
+      return;
+    }
+    if (p != _second.text) {
+      setState(() => _error = 'The two passwords don’t match.');
+      return;
+    }
+    Navigator.of(context).pop(p);
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text('${widget.role.label} password'),
+    content: SizedBox(
+      width: 340,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            key: const ValueKey('profile-new-password'),
+            controller: _first,
+            autofocus: true,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: 'New password'),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            key: const ValueKey('profile-new-password-again'),
+            controller: _second,
+            obscureText: true,
+            onSubmitted: (_) => _submit(),
+            decoration: InputDecoration(
+              labelText: 'Type it again',
+              errorText: _error,
+            ),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        key: const ValueKey('profile-save-password'),
+        onPressed: _submit,
+        child: const Text('Save'),
+      ),
+    ],
+  );
 }

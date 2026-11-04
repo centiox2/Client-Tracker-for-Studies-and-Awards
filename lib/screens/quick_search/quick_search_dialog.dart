@@ -66,7 +66,10 @@ class _QuickSearchDialogState extends ConsumerState<_QuickSearchDialog> {
     final query = rawQuery.trim().toLowerCase();
     final results = <_Result>[];
 
+    final role = ref.read(sessionProvider);
     for (final (tab, label, icon) in _pages) {
+      if (tab == AppTab.revenue && !(role?.seesRevenue ?? false)) continue;
+      if (tab == AppTab.settings && !(role?.isAdmin ?? false)) continue;
       if (query.isEmpty || label.toLowerCase().contains(query)) {
         results.add(
           _Result(

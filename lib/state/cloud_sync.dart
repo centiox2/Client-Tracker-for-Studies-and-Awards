@@ -81,10 +81,17 @@ final cloudSyncProvider = NotifierProvider<CloudSyncController, CloudSyncState>(
 
 class CloudSyncController extends Notifier<CloudSyncState> {
   static const _tokenKey = 'cloud_admin_token';
+  static const _teamTokenKey = 'cloud_team_token';
 
   CloudApi? _api;
   SyncEngine? _engine;
   String? _token;
+
+  /// The admin team's token: sends their changes (not revenue).
+  String? _teamToken;
+
+  /// What changes are sent with: the admin's token if this device has one.
+  String? get _pushToken => _token ?? _teamToken;
   Timer? _flushTimer;
   Timer? _refreshTimer;
   Timer? _heartbeat;
@@ -119,12 +126,14 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     _api = api;
     _engine = SyncEngine(ref.read(databaseProvider), api);
     try {
-      _token = (await SharedPreferences.getInstance()).getString(_tokenKey);
+      final prefs = await SharedPreferences.getInstance();
+      _token = prefs.getString(_tokenKey);
+      _teamToken = prefs.getString(_teamTokenKey);
     } catch (_) {}
     if (!ref.mounted) return;
     state = state.copyWith(
       phase: SyncPhase.connecting,
-      adminLinked: _token != null,
+      adminLinked: _pushToken != null,
       pending: _engine!.pending,
     );
     _changes = api.changes().listen(_onRemote);
@@ -156,7 +165,7 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     _connecting = true;
     try {
       final claimed = (await api.adminStatus()) == 'claimed';
-      final changed = await engine.pull(token: _token);
+      final changed = await engine.pull(token: _pushToken);
       if (!ref.mounted) return;
       if (changed) _bumpFromRemote();
       state = state.copyWith(
@@ -189,7 +198,7 @@ class CloudSyncController extends Notifier<CloudSyncState> {
 
   Future<void> _flush() async {
     final engine = _engine;
-    final token = _token;
+    final token = _pushToken;
     if (engine == null || token == null || engine.pending == 0) return;
     if (!engine.connected) {
       // Not joined yet: join first (which also sends).
@@ -241,10 +250,14 @@ class CloudSyncController extends Notifier<CloudSyncState> {
   void _refused(CloudException e) {
     if (!ref.mounted) return;
     if (e.code == 'not_signed_in') {
-      _setToken(null);
+      if (_token != null) {
+        _setToken(null);
+      } else {
+        _setTeamToken(null);
+      }
       state = state.copyWith(
         phase: SyncPhase.error,
-        adminLinked: false,
+        adminLinked: _pushToken != null,
         message: 'Sign in again to send your changes online.',
       );
       return;
@@ -338,6 +351,57 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     }
   }
 
+  /// Which profiles have a password online; null when it can't be asked
+  /// (offline, or online sync is off).
+  Future<Map<UserRole, bool>?> profileStatus() async {
+    final api = _api;
+    if (api == null) return null;
+    try {
+      final status = await api.profileStatus();
+      return {
+        for (final r in UserRole.others) r: status[r.serverName] ?? false,
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Checks [role]'s [password] online. The admin team's device can then
+  /// send their changes.
+  Future<CloudLink> openProfile(UserRole role, String password) async {
+    final api = _api;
+    if (api == null) return CloudLink.off;
+    try {
+      final token = await api.profileLogin(role.serverName, password);
+      if (role == UserRole.adminTeam && token.isNotEmpty) {
+        _setTeamToken(token);
+        state = state.copyWith(adminLinked: true);
+        unawaited(_connect());
+      }
+      return CloudLink.linked;
+    } on CloudException catch (e) {
+      return e.code == 'wrong_password'
+          ? CloudLink.wrongPassword
+          : CloudLink.offline;
+    } catch (_) {
+      return CloudLink.offline;
+    }
+  }
+
+  /// The admin sets [role]'s password ('' leaves it open). False when it
+  /// couldn't be saved online (offline, or not signed in online).
+  Future<bool> setProfilePassword(UserRole role, String password) async {
+    final api = _api;
+    final token = _token;
+    if (api == null || token == null) return false;
+    try {
+      await api.setProfilePassword(token, role.serverName, password);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Throws away waiting local changes and downloads the cloud's data.
   Future<void> resetFromCloud() async {
     final engine = _engine;
@@ -362,6 +426,15 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     SharedPreferences.getInstance().then(
       (p) =>
           token == null ? p.remove(_tokenKey) : p.setString(_tokenKey, token),
+    );
+  }
+
+  void _setTeamToken(String? token) {
+    _teamToken = token;
+    SharedPreferences.getInstance().then(
+      (p) => token == null
+          ? p.remove(_teamTokenKey)
+          : p.setString(_teamTokenKey, token),
     );
   }
 

@@ -58,7 +58,7 @@ class AppDatabase {
   final String file;
   final common.CommonDatabase _db;
 
-  static const int schemaVersion = 9;
+  static const int schemaVersion = 10;
   static const int rollingBackupCount = 5;
 
   /// Runs [action] inside a transaction; rolls back on any error.
@@ -251,6 +251,21 @@ class AppDatabase {
       db.execute('''
         CREATE INDEX IF NOT EXISTS idx_revenue_changes_at
           ON revenue_changes(changed_at);
+      ''');
+
+      // v10: passwords for the Admin team, Director and Team profiles, as
+      // the admin set them (or open: locked = 0). Kept on the device so a
+      // locked profile still opens offline; like app_accounts, never synced
+      // or put in backups. A locked row without a hash: locked online, but
+      // not yet opened on this device.
+      db.execute('''
+        CREATE TABLE IF NOT EXISTS profile_passwords (
+          role          TEXT PRIMARY KEY,
+          locked        INTEGER NOT NULL DEFAULT 0,
+          password_hash TEXT,
+          salt          TEXT,
+          updated_at    TEXT NOT NULL
+        );
       ''');
 
       _createSyncTables(db);
