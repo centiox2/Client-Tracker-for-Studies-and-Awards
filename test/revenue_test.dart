@@ -555,4 +555,89 @@ void main() {
     expect(find.text('Undo'), findsNothing);
     expect(RevenueRepository(db).day(today()).count, 2);
   });
+
+  testWidgets('a payment’s details can be corrected as fields', (tester) async {
+    await pumpApp(tester, admin: true);
+    await tester.tap(find.text('Revenue').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('paste-payment')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('paste-message')),
+      'Ref:AC4597897426: Dear EVELYNE, You have received KES 3000 on your '
+      'M-Pesa from PIUS-6145****354 at 03-10-2026 10:53 AM.The M-Pesa '
+      'receipt number is:UJ3H98O13S. We Are You!',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Read'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('3 Oct, 10:53 AM'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('edit-payment-0')));
+    await tester.pumpAndSettle();
+    expect(find.text('Payment details'), findsOneWidget);
+    expect(find.text('Sat 3 Oct 2026'), findsOneWidget);
+    await tester.enterText(find.byKey(const ValueKey('detail-amount')), '3500');
+    await tester.enterText(
+      find.byKey(const ValueKey('detail-payer')),
+      'Pius Otieno',
+    );
+    await tester.tap(find.byKey(const ValueKey('detail-save')));
+    await tester.pumpAndSettle();
+    expect(find.text('KSh 3,500'), findsOneWidget);
+    expect(find.text('From Pius Otieno'), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.widgetWithText(FilledButton, 'Add'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final saved = RevenueRepository(db).entriesFor(DateTime(2026, 10, 3));
+    expect(saved.single.amountCents, 350000);
+    expect(saved.single.note, 'M-Pesa · Pius Otieno · UJ3H98O13S');
+    expect(saved.single.createdAt, DateTime(2026, 10, 3, 10, 53));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('All: older transactions are listed by month and can be edited', (
+    tester,
+  ) async {
+    final repo = RevenueRepository(db);
+    final now = DateTime.now();
+    final lastMonth = DateTime(now.year, now.month - 1, 12);
+    repo.add(lastMonth, 420000, note: 'M-Pesa · Old Payer · QWE123RTY9');
+    repo.add(today(), 10000, note: 'Cash');
+    await pumpApp(tester, admin: true);
+    await tester.tap(find.text('Revenue').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('All'));
+    await tester.pumpAndSettle();
+    expect(find.text('Cash'), findsOneWidget);
+    expect(find.textContaining('Old Payer'), findsNothing);
+
+    await tester.tap(find.byTooltip('Earlier month'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Old Payer'), findsOneWidget);
+    expect(find.text('KSh 4,200'), findsWidgets);
+
+    // Tap it: the edit dialog opens on it.
+    await tester.tap(find.textContaining('Old Payer'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    // Search finds it from any month.
+    await tester.tap(find.text('This month'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('all-revenue-search')),
+      'qwe123',
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Old Payer'), findsOneWidget);
+    expect(find.text('Cash'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }

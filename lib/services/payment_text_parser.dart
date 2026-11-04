@@ -42,6 +42,29 @@ class ParsedPayment {
   /// False for money going out (sent, paid, withdrawn).
   final bool incoming;
 
+  /// The same payment with some details corrected (by the admin, in the
+  /// review). Empty text clears a detail.
+  ParsedPayment copyWith({
+    int? amountCents,
+    String? method,
+    String? code,
+    String? payer,
+    String? account,
+    bool? incoming,
+  }) {
+    String? clean(String? v, String? old) =>
+        v == null ? old : (v.trim().isEmpty ? null : v.trim());
+    return ParsedPayment(
+      amountCents: amountCents ?? this.amountCents,
+      method: method ?? this.method,
+      code: clean(code, this.code),
+      payer: clean(payer, this.payer),
+      account: clean(account, this.account),
+      time: time,
+      incoming: incoming ?? this.incoming,
+    );
+  }
+
   /// The note saved with the revenue entry.
   String get note => [
     method,
@@ -97,8 +120,11 @@ final _cost = RegExp(
   caseSensitive: false,
 );
 
+// "on 3/11/26 at 1:38 PM", "at 03-10-2026 10:53 AM", "3.11.2026 13:38",
+// or a date with no time ("on 03/10/2026").
 final _date = RegExp(
-  r'\bon\s+(\d{1,2})/(\d{1,2})/(\d{2,4})\s+at\s+(\d{1,2})[:.](\d{2})\s*([AP]\.?M\.?)?',
+  r'(?<![\d/.-])(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})(?![\d/-])'
+  r'(?:\s*,?\s*(?:at\s+)?(\d{1,2})[:.](\d{2})(?:[:.]\d{2})?\s*([AP]\.?\s?M\.?)?)?',
   caseSensitive: false,
 );
 
@@ -164,7 +190,7 @@ ParsedPayment? _parseOne(String? code, String body, String whole) {
   return ParsedPayment(
     amountCents: cents,
     method: method,
-    code: code ?? _otherReference(body),
+    code: code ?? _receipt(body) ?? _otherReference(body),
     payer: _payer(cleaned),
     account: _account(cleaned),
     time: _time(body),
@@ -195,9 +221,10 @@ String? _payer(String body) {
   // Case matters here: a full stop then a capitalised word ("… KANGOGO.
   // Account …") ends the name; an initial ("ALICE K. MWANGI") doesn't.
   final m = RegExp(
-    r'\b[Ff][Rr][Oo][Mm]\s+(.+?)(?=\s*(?:\+?\d[\d\s]{8,}|\b[Oo][Nn]\s+\d|\.\s+(?=[A-Z][a-z])|\.$|\b(?:Account|ACCOUNT|account|Acc|ACC|New|NEW)\b|$))',
+    r'\b[Ff][Rr][Oo][Mm]\s+(.+?)(?=[\s-]*(?:\+?\d[\d\s*xX]{5,}|\*{2,}|\b(?:[Oo][Nn]|[Aa][Tt])\s+\d|\.\s+(?=[A-Z][a-z])|\.$|\b(?:Account|ACCOUNT|account|Acc|ACC|New|NEW)\b|$))',
   ).firstMatch(body);
-  final name = m?.group(1)?.trim();
+  // "PIUS-" (a masked phone number cut off after the dash) → "PIUS".
+  final name = m?.group(1)?.trim().replaceAll(RegExp(r'[\s,:;-]+$'), '');
   if (name == null || name.isEmpty) return null;
   // Not a name if it's only digits/symbols.
   if (!RegExp('[A-Za-z]').hasMatch(name)) return null;
@@ -214,22 +241,40 @@ String? _account(String body) {
   return acc.length > 40 ? acc.substring(0, 40) : acc;
 }
 
-/// "3/11/26 at 1:38 PM" — Kenyan messages are day/month/year.
+/// "3/11/26 at 1:38 PM" — Kenyan messages are day/month/year. A date with
+/// no time is taken as midday, so it stays on its day in any time zone.
 DateTime? _time(String body) {
-  final m = _date.firstMatch(body);
-  if (m == null) return null;
+  for (final m in _date.allMatches(body)) {
+    final t = _dateOf(m);
+    if (t != null) return t;
+  }
+  return null;
+}
+
+DateTime? _dateOf(RegExpMatch m) {
   final d = int.parse(m.group(1)!);
   final mo = int.parse(m.group(2)!);
   var y = int.parse(m.group(3)!);
   if (y < 100) y += 2000;
-  var h = int.parse(m.group(4)!);
-  final min = int.parse(m.group(5)!);
-  final ampm = m.group(6)?.toUpperCase().replaceAll('.', '');
+  var h = int.parse(m.group(4) ?? '12');
+  final min = int.parse(m.group(5) ?? '0');
+  final ampm = m.group(6)?.toUpperCase().replaceAll(RegExp(r'[.\s]'), '');
   if (ampm == 'PM' && h < 12) h += 12;
   if (ampm == 'AM' && h == 12) h = 0;
   if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || min > 59) return null;
   final t = DateTime(y, mo, d, h, min);
   return t.month == mo ? t : null; // rejects 31/2 etc.
+}
+
+/// "The M-Pesa receipt number is:UJ3H98O13S" (bank and agent messages):
+/// the M-Pesa code, preferred over the sender's own "Ref:".
+String? _receipt(String body) {
+  final m = RegExp(
+    r'\b(?:m-?pesa\s+)?receipt\s*(?:number|no\.?)?\s*(?:is)?\s*[:.#]?\s*([A-Z0-9]{10})\b',
+    caseSensitive: false,
+  ).firstMatch(body);
+  final code = m?.group(1);
+  return code != null && _looksLikeCode(code) ? code.toUpperCase() : null;
 }
 
 /// A reference on non-M-Pesa slips: "Ref: ABC123", "Transaction ID …".
