@@ -50,6 +50,18 @@ class FakeCloud implements CloudApi {
     };
   }
 
+  /// Bumped whenever a profile's password changes.
+  final profileVersionNumbers = <String, int>{};
+
+  @override
+  Future<Map<String, String>> profileVersions() async {
+    _online();
+    return {
+      for (final r in ['admin_team', 'director', 'team'])
+        r: 'v${profileVersionNumbers[r] ?? 0}',
+    };
+  }
+
   @override
   Future<String> profileLogin(String role, String p) async {
     _online();
@@ -70,6 +82,7 @@ class FakeCloud implements CloudApi {
     } else {
       profilePasswords[role] = p;
     }
+    profileVersionNumbers[role] = (profileVersionNumbers[role] ?? 0) + 1;
     if (role == 'admin_team') teamTokens.clear();
   }
 
@@ -494,6 +507,29 @@ void main() {
     expect(container.read(adminSessionProvider), UserRole.adminTeam);
     expect(cloud.teamTokens, hasLength(1));
     expect(container.read(cloudSyncProvider).adminLinked, isTrue);
+    container.dispose();
+  });
+
+  testWidgets('kept signed in, until the admin changes the password', (
+    tester,
+  ) async {
+    cloud.profilePasswords['director'] = 'd-pass';
+    final auth = AuthRepository(boss);
+    auth.setProfilePassword(UserRole.director, 'd-pass');
+    auth.rememberProfile(UserRole.director, version: 'v0');
+    var container = await pumpApp(tester, boss);
+    expect(container.read(adminSessionProvider), UserRole.director);
+    container.dispose();
+
+    // Changed on the admin's device: this one asks again.
+    cloud.profileVersionNumbers['director'] = 1;
+    await tester.pumpWidget(const SizedBox());
+    container = await pumpApp(tester, boss);
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pumpAndSettle();
+    expect(container.read(adminSessionProvider), isNull);
+    expect(find.text('Who’s using the app?'), findsOneWidget);
+    expect(find.textContaining('password was changed'), findsOneWidget);
     container.dispose();
   });
 }

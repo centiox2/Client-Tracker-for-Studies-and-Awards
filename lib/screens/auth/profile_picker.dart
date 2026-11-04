@@ -51,6 +51,8 @@ class _ProfilePickerScreenState extends ConsumerState<ProfilePickerScreen> {
       // Open. The admin team still checks in online so their changes can
       // be sent; it doesn't hold them up.
       if (role == UserRole.adminTeam) unawaited(sync.openProfile(role, ''));
+      // The director's device opens straight into Director next time.
+      if (role == UserRole.director) auth.rememberProfile(role);
       ref.read(sessionProvider.notifier).open(role);
       return;
     }
@@ -209,11 +211,6 @@ class _ProfileCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      role.description,
-                      style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                    ),
                   ],
                 ),
               ),
@@ -249,6 +246,9 @@ class _PasswordDialogState extends ConsumerState<_PasswordDialog> {
   String? _error;
   bool _busy = false;
   bool _show = false;
+
+  /// "Keep me signed in on this device" — on for the director.
+  late bool _stay = widget.role == UserRole.director;
 
   @override
   void dispose() {
@@ -293,6 +293,14 @@ class _PasswordDialogState extends ConsumerState<_PasswordDialog> {
             : 'Wrong password. Try again.';
     }
     if (ok) {
+      if (_stay) {
+        final version = await ref
+            .read(cloudSyncProvider.notifier)
+            .profileVersion(role)
+            .timeout(const Duration(seconds: 5), onTimeout: () => null);
+        auth.rememberProfile(role, version: version);
+      }
+      if (!mounted) return;
       Navigator.of(context).pop(true);
       return;
     }
@@ -335,7 +343,18 @@ class _PasswordDialogState extends ConsumerState<_PasswordDialog> {
                 ),
               ),
             ),
-            const SizedBox(height: 8),
+            CheckboxListTile(
+              key: const ValueKey('profile-stay'),
+              value: _stay,
+              onChanged: (v) => setState(() => _stay = v ?? false),
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              dense: true,
+              title: const Text('Keep me signed in on this device'),
+              subtitle: const Text(
+                'Opens straight into this profile. Switch profile signs out.',
+              ),
+            ),
             Text(
               'Ask the admin if you don’t know it.',
               style: Theme.of(context).textTheme.bodySmall

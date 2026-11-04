@@ -1,25 +1,20 @@
 /// Who is using the app, chosen on the profile screen at launch.
 enum UserRole {
   /// Everything, including Settings and revenue (the admin portal).
-  admin('Admin', 'Everything, including revenue and settings', 'admin'),
+  admin('Admin', 'admin'),
 
   /// Enters and edits client numbers, staff and history; no revenue.
-  adminTeam(
-    'Admin team',
-    'Enter and edit everything except revenue',
-    'admin_team',
-  ),
+  adminTeam('Admin team', 'admin_team'),
 
   /// Sees every figure, revenue included; changes nothing.
-  director('Director', 'View everything, including revenue', 'director'),
+  director('Director', 'director'),
 
   /// Sees every figure except revenue; changes nothing.
-  team('Team', 'View everything except revenue', 'team');
+  team('Team', 'team');
 
-  const UserRole(this.label, this.description, this.serverName);
+  const UserRole(this.label, this.serverName);
 
   final String label;
-  final String description;
 
   /// The name the online database knows the profile by.
   final String serverName;

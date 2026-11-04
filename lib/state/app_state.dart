@@ -31,8 +31,8 @@ final staffListProvider = Provider<List<Staff>>((ref) {
   return ref.read(staffRepositoryProvider).getAll();
 });
 
-/// The profile in use, chosen on the profile screen at every launch; null
-/// until one is chosen. Not persisted: every launch starts at the profiles.
+/// The profile in use, chosen on the profile screen at launch; null until
+/// one is chosen. Only a profile kept signed in on this device skips it.
 final sessionProvider = NotifierProvider<SessionNotifier, UserRole?>(
   SessionNotifier.new,
 );
@@ -58,8 +58,10 @@ final seesRevenueProvider = Provider<bool>(
 typedef AdminSessionNotifier = SessionNotifier;
 
 class SessionNotifier extends Notifier<UserRole?> {
+  /// Opens straight into a profile kept signed in on this device (the
+  /// director's, say); otherwise the profile screen.
   @override
-  UserRole? build() => null;
+  UserRole? build() => ref.read(authRepositoryProvider).rememberedProfile;
 
   /// Checks the admin [password] and signs in on success.
   bool signIn(String password) {
@@ -79,8 +81,9 @@ class SessionNotifier extends Notifier<UserRole?> {
     state = role;
   }
 
-  /// Back to the profile screen.
+  /// Back to the profile screen (and no longer kept signed in here).
   void signOut() {
+    ref.read(authRepositoryProvider).forgetProfile();
     ref.read(navTabProvider.notifier).set(AppTab.reports);
     state = null;
   }
