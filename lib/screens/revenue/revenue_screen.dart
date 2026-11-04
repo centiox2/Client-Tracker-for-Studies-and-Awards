@@ -106,6 +106,9 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
       ..showSnackBar(
         SnackBar(
           content: Text('Removed ${formatMoney(entry.amountCents, currency)}'),
+          duration: const Duration(seconds: 6),
+          persist: false,
+          showCloseIcon: true,
           action: SnackBarAction(
             label: 'Undo',
             onPressed: () => actions.restoreRevenue(entry),

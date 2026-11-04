@@ -562,6 +562,7 @@ ThemeData buildAppTheme(Brightness brightness) {
         fontSize: 13,
         color: p.bg,
       ),
+      closeIconColor: p.bg,
       shape: const StadiumBorder(),
     ),
 
