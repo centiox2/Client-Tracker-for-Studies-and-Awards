@@ -82,6 +82,8 @@ final cloudSyncProvider = NotifierProvider<CloudSyncController, CloudSyncState>(
 class CloudSyncController extends Notifier<CloudSyncState> {
   static const _tokenKey = 'cloud_admin_token';
   static const _teamTokenKey = 'cloud_team_token';
+  static const _directorTokenKey = 'cloud_director_token';
+  static const _viewerTokenKey = 'cloud_viewer_token';
 
   CloudApi? _api;
   SyncEngine? _engine;
@@ -90,8 +92,37 @@ class CloudSyncController extends Notifier<CloudSyncState> {
   /// The admin team's token: sends their changes (not revenue).
   String? _teamToken;
 
+  /// The view-only profiles' tokens: they read the data (the director's
+  /// with revenue).
+  String? _directorToken;
+  String? _viewerToken;
+
   /// What changes are sent with: the admin's token if this device has one.
   String? get _pushToken => _token ?? _teamToken;
+
+  /// What the data is read with: the open profile's own token, so each
+  /// profile gets only what it may see.
+  String? get _readToken => switch (ref.read(sessionProvider)) {
+    UserRole.admin => _token,
+    UserRole.adminTeam => _teamToken,
+    UserRole.director => _directorToken,
+    UserRole.team => _viewerToken,
+    null => null,
+  };
+
+  /// Whether the open profile can read the online data on this device.
+  bool get canRead => _readToken != null;
+
+  final _tokensLoaded = Completer<void>();
+
+  /// Done once this device's saved sign-ins are loaded (right away when
+  /// online sync is off).
+  Future<void> get ready =>
+      _api == null ? Future.value() : _tokensLoaded.future;
+
+  /// A change arrived while downloading: download again after.
+  bool _again = false;
+  Timer? _pingTimer;
   Timer? _flushTimer;
   Timer? _refreshTimer;
   Timer? _heartbeat;
@@ -113,6 +144,10 @@ class CloudSyncController extends Notifier<CloudSyncState> {
       }
       _scheduleFlush();
     });
+    // Another profile opened: its own data (revenue or not).
+    ref.listen(sessionProvider, (before, now) {
+      if (now != null && now != before) _connect();
+    });
     return const CloudSyncState();
   }
 
@@ -129,7 +164,10 @@ class CloudSyncController extends Notifier<CloudSyncState> {
       final prefs = await SharedPreferences.getInstance();
       _token = prefs.getString(_tokenKey);
       _teamToken = prefs.getString(_teamTokenKey);
+      _directorToken = prefs.getString(_directorTokenKey);
+      _viewerToken = prefs.getString(_viewerTokenKey);
     } catch (_) {}
+    if (!_tokensLoaded.isCompleted) _tokensLoaded.complete();
     if (!ref.mounted) return;
     state = state.copyWith(
       phase: SyncPhase.connecting,
@@ -161,11 +199,20 @@ class CloudSyncController extends Notifier<CloudSyncState> {
   Future<void> _connect() async {
     final engine = _engine;
     final api = _api;
-    if (engine == null || api == null || _connecting) return;
+    if (engine == null || api == null) return;
+    if (_connecting) {
+      _again = true;
+      return;
+    }
     _connecting = true;
+    _again = false;
     try {
       final claimed = (await api.adminStatus()) == 'claimed';
-      final changed = await engine.pull(token: _pushToken);
+      final read = _readToken;
+      // Before a profile is open there is nothing to read with.
+      final changed = read != null
+          ? await engine.pull(token: _pushToken, readToken: read)
+          : false;
       if (!ref.mounted) return;
       if (changed) _bumpFromRemote();
       state = state.copyWith(
@@ -186,6 +233,7 @@ class CloudSyncController extends Notifier<CloudSyncState> {
       }
     } finally {
       _connecting = false;
+      if (_again && ref.mounted) unawaited(_connect());
     }
   }
 
@@ -226,19 +274,12 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     }
   }
 
+  /// Some device changed the data: read the latest (once for a burst of
+  /// changes, e.g. while someone types numbers in).
   void _onRemote(CloudChange change) {
-    final engine = _engine;
-    if (engine == null || !engine.connected) return;
-    if (!engine.apply(change)) {
-      _connect(); // out of order (e.g. a day before its week): re-download
-      return;
-    }
-    // Many changes arrive together (a restore, an import): refresh once.
-    _refreshTimer?.cancel();
-    _refreshTimer = Timer(const Duration(milliseconds: 250), () {
-      if (!ref.mounted) return;
-      _bumpFromRemote();
-      state = state.copyWith(lastSynced: DateTime.now());
+    _pingTimer?.cancel();
+    _pingTimer = Timer(const Duration(milliseconds: 800), () {
+      if (ref.mounted) _connect();
     });
   }
 
@@ -250,7 +291,11 @@ class CloudSyncController extends Notifier<CloudSyncState> {
   void _refused(CloudException e) {
     if (!ref.mounted) return;
     if (e.code == 'not_signed_in') {
-      if (_token != null) {
+      // This profile's sign-in ran out (or its password was changed).
+      final role = ref.read(sessionProvider);
+      if (role != null) {
+        _setRoleToken(role, null);
+      } else if (_token != null) {
         _setToken(null);
       } else {
         _setTeamToken(null);
@@ -258,7 +303,7 @@ class CloudSyncController extends Notifier<CloudSyncState> {
       state = state.copyWith(
         phase: SyncPhase.error,
         adminLinked: _pushToken != null,
-        message: 'Sign in again to send your changes online.',
+        message: 'Switch profile and sign in again to get the latest data.',
       );
       return;
     }
@@ -385,9 +430,11 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     if (api == null) return CloudLink.off;
     try {
       final token = await api.profileLogin(role.serverName, password);
-      if (role == UserRole.adminTeam && token.isNotEmpty) {
-        _setTeamToken(token);
-        state = state.copyWith(adminLinked: true);
+      if (token.isNotEmpty) {
+        _setRoleToken(role, token);
+        if (role == UserRole.adminTeam) {
+          state = state.copyWith(adminLinked: true);
+        }
         unawaited(_connect());
       }
       return CloudLink.linked;
@@ -417,9 +464,10 @@ class CloudSyncController extends Notifier<CloudSyncState> {
   /// Throws away waiting local changes and downloads the cloud's data.
   Future<void> resetFromCloud() async {
     final engine = _engine;
-    if (engine == null) return;
+    final read = _readToken;
+    if (engine == null || read == null) return;
     try {
-      await engine.resetFromCloud();
+      await engine.resetFromCloud(read);
       if (!ref.mounted) return;
       _bumpFromRemote();
       state = state.copyWith(
@@ -450,7 +498,29 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     );
   }
 
+  void _setRoleToken(UserRole role, String? token) {
+    switch (role) {
+      case UserRole.admin:
+        _setToken(token);
+      case UserRole.adminTeam:
+        _setTeamToken(token);
+      case UserRole.director || UserRole.team:
+        final key = role == UserRole.director
+            ? _directorTokenKey
+            : _viewerTokenKey;
+        if (role == UserRole.director) {
+          _directorToken = token;
+        } else {
+          _viewerToken = token;
+        }
+        SharedPreferences.getInstance().then(
+          (p) => token == null ? p.remove(key) : p.setString(key, token),
+        );
+    }
+  }
+
   void _stop() {
+    _pingTimer?.cancel();
     _flushTimer?.cancel();
     _refreshTimer?.cancel();
     _heartbeat?.cancel();

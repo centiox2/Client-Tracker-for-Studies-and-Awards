@@ -1,8 +1,9 @@
 /// What the app needs from the online database. The real one talks to
 /// Supabase ([SupabaseCloudApi]); tests use an in-memory fake.
 abstract class CloudApi {
-  /// Every synced table's rows, keyed by table name.
-  Future<Map<String, List<Map<String, Object?>>>> snapshot();
+  /// Every synced table's rows, keyed by table name, read with a profile's
+  /// [token]. Revenue comes back empty for profiles that may not see it.
+  Future<Map<String, List<Map<String, Object?>>>> snapshot(String token);
 
   /// Applies one batch of local changes (needs an admin token):
   /// `{"deletes": {table: [keys]}, "upserts": {table: [rows]}}`.
@@ -39,13 +40,15 @@ abstract class CloudApi {
   Future<Map<String, String>> profileVersions();
 
   /// Opens a profile with its password (any password for an open one).
-  /// Returns a token for the admin team, '' for view-only profiles.
+  /// Returns the profile's token, for reading (and, for the admin team,
+  /// sending changes).
   Future<String> profileLogin(String role, String password);
 
   /// The admin sets a profile's password; '' leaves it open.
   Future<void> setProfilePassword(String token, String role, String password);
 
-  /// Live changes made by any device, as they happen.
+  /// A signal each time any device changes the data (no data in it: the
+  /// latest is then read with [snapshot]).
   Stream<CloudChange> changes();
 
   /// Whether the live connection is up (true) or down (false).

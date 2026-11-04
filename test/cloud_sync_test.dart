@@ -9,6 +9,7 @@ import 'package:client_tracker/database/app_database_io.dart';
 import 'package:client_tracker/database/database.dart';
 import 'package:client_tracker/repositories/auth_repository.dart';
 import 'package:client_tracker/repositories/client_count_repository.dart';
+import 'package:client_tracker/repositories/revenue_repository.dart';
 import 'package:client_tracker/repositories/staff_repository.dart';
 import 'package:client_tracker/repositories/week_repository.dart';
 import 'package:client_tracker/services/cloud/cloud_api.dart';
@@ -67,7 +68,11 @@ class FakeCloud implements CloudApi {
     _online();
     final want = profilePasswords[role];
     if (want != null && want != p) throw CloudException('wrong_password');
-    if (role != 'admin_team') return '';
+    if (role != 'admin_team') {
+      final t = '$role-${viewTokens.length}';
+      viewTokens[t] = role;
+      return t;
+    }
     final t = 'team-${teamTokens.length}';
     teamTokens.add(t);
     return t;
@@ -115,12 +120,32 @@ class FakeCloud implements CloudApi {
     return t;
   }
 
+  /// Tokens of the view-only profiles: token -> role.
+  final viewTokens = <String, String>{};
+
+  /// What each read was made as, newest last.
+  final reads = <String>[];
+
+  /// Runs while a read is on its way (to test edits made meanwhile).
+  void Function()? duringRead;
+
   @override
-  Future<Map<String, List<Map<String, Object?>>>> snapshot() async {
+  Future<Map<String, List<Map<String, Object?>>>> snapshot(String token) async {
     _online();
+    duringRead?.call();
+    final role = tokens.contains(token)
+        ? 'admin'
+        : teamTokens.contains(token)
+        ? 'admin_team'
+        : viewTokens[token];
+    if (role == null) throw CloudException('not_signed_in');
+    reads.add(role);
+    final money = role == 'admin' || role == 'director';
     return {
       for (final MapEntry(:key, :value) in tables.entries)
-        key: [for (final r in value.values) Map.of(r)],
+        key: money || !key.startsWith('revenue')
+            ? [for (final r in value.values) Map.of(r)]
+            : [],
     };
   }
 
@@ -253,7 +278,7 @@ void main() {
         existingClients: 3,
       );
       final a = SyncEngine(admin, cloud);
-      await a.pull(token: token);
+      await a.pull(token: token, readToken: token);
       expect(a.connected, isTrue);
       expect(a.pending, 0);
       expect(cloud.tables['staff'], hasLength(14));
@@ -262,7 +287,10 @@ void main() {
       // The boss's fresh device: its starter data is replaced by the cloud's.
       StaffRepository(boss).rename(staffId(boss, 'Joy'), 'Not Joy');
       final b = SyncEngine(boss, cloud);
-      expect(await b.pull(), isTrue);
+      expect(
+        await b.pull(readToken: await cloud.profileLogin('director', '')),
+        isTrue,
+      );
       expect(b.pending, 0, reason: 'nothing from the boss device goes up');
       final joy = staffId(boss, 'Joy');
       final day = WeekRepository(boss).getDays(week.id).first;
@@ -277,9 +305,9 @@ void main() {
     final token = await cloud.claim('pass1234');
     final week = WeekRepository(admin).createWeekFor(DateTime(2026, 10, 12));
     final a = SyncEngine(admin, cloud);
-    await a.pull(token: token);
+    await a.pull(token: token, readToken: token);
     final b = SyncEngine(boss, cloud);
-    await b.pull();
+    await b.pull(readToken: await cloud.profileLogin('director', ''));
     final sub = cloud.changes().listen(b.apply);
 
     final day = WeekRepository(admin).getDays(week.id)[2];
@@ -310,7 +338,7 @@ void main() {
     final token = await cloud.claim('pass1234');
     final week = WeekRepository(admin).createWeekFor(DateTime(2026, 10, 12));
     final a = SyncEngine(admin, cloud);
-    await a.pull(token: token);
+    await a.pull(token: token, readToken: token);
     final day = WeekRepository(admin).getDays(week.id).first;
     final joy = staffId(admin, 'Joy');
     final counts = ClientCountRepository(admin);
@@ -350,7 +378,7 @@ void main() {
     final token = await cloud.claim('pass1234');
     final a = SyncEngine(admin, cloud);
     WeekRepository(admin).createWeekFor(DateTime(2026, 10, 12));
-    await a.pull(token: token);
+    await a.pull(token: token, readToken: token);
     final other = openInMemoryDatabase();
     addTearDown(other.close);
     WeekRepository(other).createWeekFor(DateTime(2026, 9, 7));
@@ -517,6 +545,9 @@ void main() {
     final auth = AuthRepository(boss);
     auth.setProfilePassword(UserRole.director, 'd-pass');
     auth.rememberProfile(UserRole.director, version: 'v0');
+    SharedPreferences.setMockInitialValues({
+      'cloud_director_token': await cloud.profileLogin('director', 'd-pass'),
+    });
     var container = await pumpApp(tester, boss);
     expect(container.read(adminSessionProvider), UserRole.director);
     container.dispose();
@@ -530,6 +561,117 @@ void main() {
     expect(container.read(adminSessionProvider), isNull);
     expect(find.text('Who’s using the app?'), findsOneWidget);
     expect(find.textContaining('password was changed'), findsOneWidget);
+    container.dispose();
+  });
+
+  test(
+    'reading needs a sign-in; revenue only for admin and director',
+    () async {
+      final token = await cloud.claim('pass1234');
+      RevenueRepository(admin).add(DateTime(2026, 10, 12), 300000);
+      final a = SyncEngine(admin, cloud);
+      await a.pull(token: token, readToken: token);
+      expect(cloud.tables['revenue_entries'], hasLength(1));
+
+      // A Team device keeps no revenue, even one it had before.
+      RevenueRepository(boss).add(DateTime(2026, 10, 1), 100);
+      final b = SyncEngine(boss, cloud);
+      await b.pull(readToken: await cloud.profileLogin('team', ''));
+      expect(
+        RevenueRepository(boss).entriesFor(DateTime(2026, 10, 1)),
+        isEmpty,
+      );
+      expect(
+        RevenueRepository(boss).entriesFor(DateTime(2026, 10, 12)),
+        isEmpty,
+      );
+      expect(cloud.tables['staff'], isNotEmpty);
+
+      // The director's does.
+      await b.pull(readToken: await cloud.profileLogin('director', ''));
+      expect(
+        RevenueRepository(boss).entriesFor(DateTime(2026, 10, 12)),
+        hasLength(1),
+      );
+
+      // No sign-in, no data.
+      await expectLater(
+        b.pull(readToken: 'made-up'),
+        throwsA(isA<CloudException>()),
+      );
+    },
+  );
+
+  test('a number typed while downloading is not overwritten', () async {
+    final token = await cloud.claim('pass1234');
+    final week = WeekRepository(admin).createWeekFor(DateTime(2026, 10, 12));
+    final a = SyncEngine(admin, cloud);
+    await a.pull(token: token, readToken: token);
+    final day = WeekRepository(admin).getDays(week.id).first;
+    final joy = staffId(admin, 'Joy');
+    cloud.duringRead = () => ClientCountRepository(
+      admin,
+    ).saveCount(dayId: day.id, staffId: joy, newClients: 9, existingClients: 0);
+    expect(await a.pull(token: token, readToken: token), isFalse);
+    cloud.duringRead = null;
+    expect(ClientCountRepository(admin).countValues(day.id, joy).newClients, 9);
+    expect(a.pending, greaterThan(0)); // still to go up
+    await a.pull(token: token, readToken: token);
+    expect(a.pending, 0);
+    expect(ClientCountRepository(admin).countValues(day.id, joy).newClients, 9);
+  });
+
+  testWidgets('changes from another device arrive while the app is open', (
+    tester,
+  ) async {
+    final token = await cloud.claim('pass1234');
+    final week = WeekRepository(admin).createWeekFor(DateTime(2026, 10, 12));
+    await SyncEngine(admin, cloud).pull(token: token, readToken: token);
+    final container = await pumpApp(tester, boss);
+    await tester.tap(find.byKey(const ValueKey('profile-director')));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pumpAndSettle();
+    expect(cloud.reads.last, 'director');
+    final before = cloud.reads.length;
+
+    // The admin enters a number on their device.
+    final day = WeekRepository(admin).getDays(week.id)[1];
+    ClientCountRepository(admin).saveCount(
+      dayId: day.id,
+      staffId: staffId(admin, 'Ian'),
+      newClients: 5,
+      existingClients: 1,
+    );
+    await tester.runAsync(() => SyncEngine(admin, cloud).flush(token));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pumpAndSettle();
+    expect(cloud.reads.length, greaterThan(before));
+    expect(
+      ClientCountRepository(boss)
+          .countValues(day.id, staffId(boss, 'Ian'))
+          .newClients,
+      5,
+    );
+    container.dispose();
+  });
+
+  testWidgets('kept signed in from an older version: asked once more', (
+    tester,
+  ) async {
+    cloud.profilePasswords['director'] = 'd-pass';
+    final auth = AuthRepository(boss);
+    auth.setProfilePassword(UserRole.director, 'd-pass');
+    auth.rememberProfile(UserRole.director, version: 'v0');
+    final container = await pumpApp(tester, boss); // no saved sign-in
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pumpAndSettle();
+    expect(container.read(adminSessionProvider), isNull);
+    expect(
+      find.textContaining('sign in to Director once more'),
+      findsOneWidget,
+    );
     container.dispose();
   });
 }

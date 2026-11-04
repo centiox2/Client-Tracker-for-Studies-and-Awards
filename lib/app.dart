@@ -168,7 +168,30 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final auth = ref.read(authRepositoryProvider);
     final role = ref.read(sessionProvider);
     if (role == null || auth.rememberedProfile != role) return;
-    final now = await ref.read(cloudSyncProvider.notifier).profileVersion(role);
+    final sync = ref.read(cloudSyncProvider.notifier);
+    await sync.ready;
+    if (!mounted) return;
+    if (sync.enabled && !sync.canRead) {
+      // Kept signed in from before reading needed a sign-in: an open
+      // profile signs in again by itself; a locked one asks once.
+      if (!auth.isLocked(role)) {
+        await sync.openProfile(role, '');
+        return;
+      }
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      ref.read(sessionProvider.notifier).signOut();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Please sign in to ${role.label} once more to keep getting the '
+            'latest data.',
+          ),
+        ),
+      );
+      return;
+    }
+    final now = await sync.profileVersion(role);
     if (now == null || !mounted) return; // offline: stay signed in
     final kept = auth.rememberedVersion(role);
     if (kept == null) {

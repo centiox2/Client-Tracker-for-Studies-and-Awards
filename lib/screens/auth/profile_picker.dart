@@ -48,9 +48,10 @@ class _ProfilePickerScreenState extends ConsumerState<ProfilePickerScreen> {
     final auth = ref.read(authRepositoryProvider);
     final sync = ref.read(cloudSyncProvider.notifier);
     if (!auth.isLocked(role)) {
-      // Open. The admin team still checks in online so their changes can
-      // be sent; it doesn't hold them up.
-      if (role == UserRole.adminTeam) unawaited(sync.openProfile(role, ''));
+      // Open: still signs in online (no password), so this device can
+      // read the data (and the admin team send theirs). It doesn't hold
+      // the app up.
+      unawaited(sync.openProfile(role, ''));
       // The director's device opens straight into Director next time.
       if (role == UserRole.director) auth.rememberProfile(role);
       ref.read(sessionProvider.notifier).open(role);

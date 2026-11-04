@@ -32,10 +32,11 @@ class SyncEngine {
       _db.raw.select('SELECT COUNT(*) AS c FROM sync_outbox;').first['c']!
           as int;
 
-  /// Downloads the cloud's data and brings this device up to date.
-  /// [token] (admin devices) lets waiting local changes go up first.
-  /// Returns true when local data changed.
-  Future<bool> pull({String? token}) async {
+  /// Downloads the cloud's data (read with the profile's [readToken]) and
+  /// brings this device up to date. [token] (devices that edit) lets
+  /// waiting local changes go up first. Returns true when local data
+  /// changed.
+  Future<bool> pull({String? token, required String readToken}) async {
     if (connected && pending > 0) {
       if (token == null) {
         // Can't send them yet; keep them, and take live updates only.
@@ -43,7 +44,11 @@ class SyncEngine {
       }
       await flush(token);
     }
-    final snap = await _api.snapshot();
+    final seqBefore = _lastSeq();
+    final snap = await _api.snapshot(readToken);
+    // Edited while downloading: those edits go up first (the next pull
+    // brings everything), rather than being overwritten here.
+    if (_lastSeq() != seqBefore) return false;
     final remoteEmpty = snap.values.every((rows) => rows.isEmpty);
     final localEmpty = _localIsEmpty();
 
@@ -144,9 +149,9 @@ class SyncEngine {
 
   /// Drops waiting local changes and takes the cloud's data as it is —
   /// the way out if a change can't be sent.
-  Future<void> resetFromCloud() async {
+  Future<void> resetFromCloud(String readToken) async {
     _db.raw.execute('DELETE FROM sync_outbox;');
-    final snap = await _api.snapshot();
+    final snap = await _api.snapshot(readToken);
     if (snap.values.any((rows) => rows.isNotEmpty)) _replaceLocal(snap);
     _setState(_connectedKey, '1');
   }
@@ -178,6 +183,11 @@ class SyncEngine {
     _db.applyingRemote(() => _db.restoreFromJson(json));
     _db.raw.execute('DELETE FROM sync_outbox;');
   }
+
+  int _lastSeq() =>
+      _db.raw.select('SELECT MAX(seq) AS s FROM sync_outbox;').first['s']
+          as int? ??
+      0;
 
   /// Nothing worth uploading (the staff list alone counts — it's the team).
   bool _localIsEmpty() => AppDatabase.syncedTables.keys.every(
