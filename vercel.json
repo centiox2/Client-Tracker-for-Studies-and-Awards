@@ -1,0 +1,23 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "true",
+  "buildCommand": "bash tool/vercel_build.sh",
+  "outputDirectory": "build/web",
+  "ignoreCommand": "bash -c '[ \"$VERCEL_GIT_COMMIT_REF\" != \"main\" ]'",
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+      ]
+    },
+    {
+      "source": "/(index.html|flutter_service_worker.js|flutter_bootstrap.js|version.json)?",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+    }
+  ]
+}
