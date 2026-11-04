@@ -144,7 +144,9 @@ void main() {
       ProviderScope(
         overrides: [
           databaseProvider.overrideWithValue(db),
-          if (admin) adminSessionProvider.overrideWith(SignedInSession.new),
+          adminSessionProvider.overrideWith(
+            admin ? SignedInSession.new : DirectorSession.new,
+          ),
         ],
         child: const ClientTrackerApp(),
       ),

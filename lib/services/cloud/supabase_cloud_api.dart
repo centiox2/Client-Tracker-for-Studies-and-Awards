@@ -23,6 +23,8 @@ class SupabaseCloudApi implements CloudApi {
     'unclaimed',
     'password_too_short',
     'wrong_recovery_code',
+    'not_allowed',
+    'unknown_profile',
   ];
 
   Future<T> _call<T>(String fn, [Map<String, Object?>? params]) async {
@@ -109,6 +111,24 @@ class SupabaseCloudApi implements CloudApi {
   @override
   Future<String> recover(String code, String newPassword) =>
       _call<String>('admin_recover', {'p_code': code, 'p_new': newPassword});
+
+  @override
+  Future<Map<String, bool>> profileStatus() async {
+    final data = await _call<Map<String, dynamic>>('profile_status');
+    return {for (final e in data.entries) e.key: e.value == true};
+  }
+
+  @override
+  Future<String> profileLogin(String role, String password) =>
+      _call<String>('profile_login', {'p_role': role, 'p_password': password});
+
+  @override
+  Future<void> setProfilePassword(String token, String role, String password) =>
+      _call<dynamic>('admin_set_profile_password', {
+        'p_token': token,
+        'p_role': role,
+        'p_password': password,
+      });
 
   @override
   void dispose() {

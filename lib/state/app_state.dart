@@ -3,12 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/staff.dart';
+import '../models/user_role.dart';
 import '../repositories/client_count_repository.dart';
 import '../repositories/report_repository.dart';
 import '../repositories/revenue_repository.dart';
 import '../repositories/week_repository.dart';
 import 'providers.dart';
 
+export '../models/user_role.dart';
 export 'providers.dart';
 
 /// Bumps whenever any data changes so dependent providers refresh.
@@ -29,16 +31,35 @@ final staffListProvider = Provider<List<Staff>>((ref) {
   return ref.read(staffRepositoryProvider).getAll();
 });
 
-/// True while the admin is signed in to the workspace. Signed out, the app
-/// shows Reports only — open to anyone, no login needed. Not persisted:
-/// every launch starts signed out.
-final adminSessionProvider = NotifierProvider<AdminSessionNotifier, bool>(
-  AdminSessionNotifier.new,
+/// The profile in use, chosen on the profile screen at every launch; null
+/// until one is chosen. Not persisted: every launch starts at the profiles.
+final sessionProvider = NotifierProvider<SessionNotifier, UserRole?>(
+  SessionNotifier.new,
 );
 
-class AdminSessionNotifier extends Notifier<bool> {
+/// The same provider by its older name (the admin was the only sign-in).
+final adminSessionProvider = sessionProvider;
+
+/// Signed in as the admin (the admin portal: revenue entry, Settings).
+final isAdminProvider = Provider<bool>(
+  (ref) => ref.watch(sessionProvider)?.isAdmin ?? false,
+);
+
+/// The profile can enter and change client numbers (admin, admin team).
+final canEditProvider = Provider<bool>(
+  (ref) => ref.watch(sessionProvider)?.canEdit ?? false,
+);
+
+/// The profile may see revenue (admin, director).
+final seesRevenueProvider = Provider<bool>(
+  (ref) => ref.watch(sessionProvider)?.seesRevenue ?? false,
+);
+
+typedef AdminSessionNotifier = SessionNotifier;
+
+class SessionNotifier extends Notifier<UserRole?> {
   @override
-  bool build() => false;
+  UserRole? build() => null;
 
   /// Checks the admin [password] and signs in on success.
   bool signIn(String password) {
@@ -47,16 +68,21 @@ class AdminSessionNotifier extends Notifier<bool> {
     return ok;
   }
 
-  /// Signs straight in (after first-run setup, the password was just set).
-  void signInAfterSetup() {
-    ref.read(navTabProvider.notifier).set(AppTab.home);
-    state = true;
+  /// Signs straight in as the admin (the password was just checked or set).
+  void signInAfterSetup() => open(UserRole.admin);
+
+  /// Opens [role] (its password, if any, already checked).
+  void open(UserRole role) {
+    ref
+        .read(navTabProvider.notifier)
+        .set(role.canEdit ? AppTab.home : AppTab.reports);
+    state = role;
   }
 
-  /// Back to the open Reports view.
+  /// Back to the profile screen.
   void signOut() {
     ref.read(navTabProvider.notifier).set(AppTab.reports);
-    state = false;
+    state = null;
   }
 }
 

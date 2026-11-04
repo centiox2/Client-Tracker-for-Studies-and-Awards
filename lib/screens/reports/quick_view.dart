@@ -38,6 +38,8 @@ class _QuickView extends ConsumerWidget {
     // Revenue is by calendar day: today's money, even at the weekend.
     final now = DateTime.now();
     final revenueDay = DateTime(now.year, now.month, now.day);
+    // Revenue only for the admin and the director.
+    final seesRevenue = ref.watch(seesRevenueProvider);
     final revenueLastWeek = revenueDay.subtract(const Duration(days: 7));
     final revenue = ref.watch(revenueDaysProvider((revenueDay, revenueDay)));
     final revenuePrev = ref.watch(
@@ -107,31 +109,32 @@ class _QuickView extends ConsumerWidget {
         ),
       ),
       // Tapping opens the Revenue page on today.
-      InkWell(
-        key: const ValueKey('quick-revenue'),
-        borderRadius: BorderRadius.circular(Dt.rMd),
-        onTap: () {
-          ref.read(revenueDateProvider.notifier).set(revenueDay);
-          ref.read(navTabProvider.notifier).set(AppTab.revenue);
-        },
-        child: _Tile(
-          label: 'Revenue today',
-          unit: currency,
-          value: formatMoney(revenueToday.totalCents, '').trim(),
-          caption: revenueToday.count == 0
-              ? 'No transactions yet'
-              : '${revenueToday.count} '
-                    '${revenueToday.count == 1 ? 'transaction' : 'transactions'}',
-          footer: revenueBefore.count == 0
-              ? null
-              : _Delta(
-                  current: revenueToday.totalCents,
-                  previous: revenueBefore.totalCents,
-                  against: 'last ${DateFormat('EEEE').format(revenueDay)}',
-                  format: (c) => formatMoney(c, currency),
-                ),
+      if (seesRevenue)
+        InkWell(
+          key: const ValueKey('quick-revenue'),
+          borderRadius: BorderRadius.circular(Dt.rMd),
+          onTap: () {
+            ref.read(revenueDateProvider.notifier).set(revenueDay);
+            ref.read(navTabProvider.notifier).set(AppTab.revenue);
+          },
+          child: _Tile(
+            label: 'Revenue today',
+            unit: currency,
+            value: formatMoney(revenueToday.totalCents, '').trim(),
+            caption: revenueToday.count == 0
+                ? 'No transactions yet'
+                : '${revenueToday.count} '
+                      '${revenueToday.count == 1 ? 'transaction' : 'transactions'}',
+            footer: revenueBefore.count == 0
+                ? null
+                : _Delta(
+                    current: revenueToday.totalCents,
+                    previous: revenueBefore.totalCents,
+                    against: 'last ${DateFormat('EEEE').format(revenueDay)}',
+                    format: (c) => formatMoney(c, currency),
+                  ),
+          ),
         ),
-      ),
       _Tile(
         label: 'New',
         value: '${today.newClients}',
@@ -161,16 +164,17 @@ class _QuickView extends ConsumerWidget {
           weekSoFar.total,
         ),
       ),
-      revenueTile('Revenue this week', revenueWeek),
+      if (seesRevenue) revenueTile('Revenue this week', revenueWeek),
       _Tile(
         label: '${DateFormat('MMMM').format(day)} so far',
         value: '${monthSoFar.total}',
         caption: '${_avg(monthSoFar.dailyAverage)} / day avg',
       ),
-      revenueTile(
-        'Revenue in ${DateFormat('MMMM').format(revenueDay)}',
-        revenueMonth,
-      ),
+      if (seesRevenue)
+        revenueTile(
+          'Revenue in ${DateFormat('MMMM').format(revenueDay)}',
+          revenueMonth,
+        ),
     ];
 
     final whoPanel = _Panel(

@@ -125,20 +125,28 @@ class _DailySummaryDialog extends ConsumerWidget {
         reportProvider((DateTime(day.year, day.month, 1), day)),
       ),
       target: ref.watch(dailyTargetProvider),
-      revenue: () {
-        int sum(List<RevenueDay> ds) => ds.fold(0, (s, d) => s + d.totalCents);
-        final dayRevenue = ref.watch(revenueDaysProvider((day, day))).single;
-        return (
-          today: dayRevenue.totalCents,
-          todayCount: dayRevenue.count,
-          week: sum(ref.watch(revenueDaysProvider((monday, day)))),
-          month: sum(
-            ref.watch(
-              revenueDaysProvider((DateTime(day.year, day.month, 1), day)),
-            ),
-          ),
-        );
-      }(),
+      revenue: !ref.read(seesRevenueProvider)
+          ? null
+          : () {
+              int sum(List<RevenueDay> ds) =>
+                  ds.fold(0, (s, d) => s + d.totalCents);
+              final dayRevenue = ref
+                  .watch(revenueDaysProvider((day, day)))
+                  .single;
+              return (
+                today: dayRevenue.totalCents,
+                todayCount: dayRevenue.count,
+                week: sum(ref.watch(revenueDaysProvider((monday, day)))),
+                month: sum(
+                  ref.watch(
+                    revenueDaysProvider((
+                      DateTime(day.year, day.month, 1),
+                      day,
+                    )),
+                  ),
+                ),
+              );
+            }(),
       currency: ref.watch(currencyProvider),
     );
     return AlertDialog(

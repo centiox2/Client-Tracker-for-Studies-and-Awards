@@ -27,6 +27,8 @@ void main() {
     WidgetTester tester, {
     bool admin = false,
     Size size = const Size(1600, 1000),
+    UserRole? role,
+    bool picker = false,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -35,7 +37,12 @@ void main() {
       ProviderScope(
         overrides: [
           databaseProvider.overrideWithValue(db),
-          if (admin) adminSessionProvider.overrideWith(SignedInSession.new),
+          if (role != null)
+            adminSessionProvider.overrideWith(() => _AsRole(role))
+          else if (!picker)
+            adminSessionProvider.overrideWith(
+              admin ? SignedInSession.new : DirectorSession.new,
+            ),
         ],
         child: const ClientTrackerApp(),
       ),
@@ -69,13 +76,22 @@ void main() {
     expect(() => auth.setAdminPassword('ab'), throwsArgumentError);
   });
 
-  testWidgets('the app opens on Reports without any login', (tester) async {
+  testWidgets('the app opens on the profiles; Director views Reports', (
+    tester,
+  ) async {
     WeekRepository(db).createWeekFor(DateTime.now());
-    await pumpApp(tester);
+    await pumpApp(tester, picker: true);
+    expect(find.text('Who’s using the app?'), findsOneWidget);
+    for (final r in UserRole.values) {
+      expect(find.byKey(ValueKey('profile-${r.name}')), findsOneWidget);
+    }
+    await tester.tap(find.byKey(const ValueKey('profile-director')));
+    await tester.pumpAndSettle();
 
     expect(find.text('Latest updates'), findsOneWidget);
-    expect(find.text('View only'), findsOneWidget);
-    // None of the workspace is reachable without the admin password.
+    expect(find.text('Signed in as Director'), findsOneWidget);
+    expect(find.text('Revenue'), findsWidgets); // the director sees it
+    // Nothing that changes data.
     for (final hidden in [
       'Weekly tracker',
       'Overview',
@@ -86,6 +102,103 @@ void main() {
     ]) {
       expect(find.text(hidden), findsNothing, reason: hidden);
     }
+  });
+
+  testWidgets('Team sees everything except revenue', (tester) async {
+    WeekRepository(db).createWeekFor(DateTime.now());
+    await pumpApp(tester, role: UserRole.team);
+    expect(find.text('Latest updates'), findsOneWidget);
+    expect(find.text('Revenue'), findsNothing);
+    expect(find.text('Revenue today'), findsNothing);
+    expect(find.byKey(const ValueKey('quick-revenue')), findsNothing);
+    expect(find.text('History'), findsOneWidget);
+    expect(find.text('Staff'), findsOneWidget);
+    expect(find.text('Weekly tracker'), findsNothing);
+  });
+
+  testWidgets('Admin team edits everything except revenue and settings', (
+    tester,
+  ) async {
+    WeekRepository(db).createWeekFor(DateTime.now());
+    await pumpApp(tester, role: UserRole.adminTeam);
+    expect(find.text('Signed in as Admin team'), findsOneWidget);
+    expect(find.text('Weekly tracker'), findsOneWidget);
+    expect(find.text('Overview'), findsWidgets);
+    expect(find.text('Revenue'), findsNothing);
+    expect(find.text('Settings'), findsNothing);
+    await tester.tap(find.text('Reports'));
+    await tester.pumpAndSettle();
+    expect(find.text('Revenue today'), findsNothing);
+  });
+
+  testWidgets('a profile with a password asks for it', (tester) async {
+    AuthRepository(db).setProfilePassword(UserRole.team, 'team-pass');
+    await pumpApp(tester, picker: true);
+    await tester.tap(find.byKey(const ValueKey('profile-team')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('profile-password')), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('profile-password')),
+      'nope',
+    );
+    await tester.tap(find.byKey(const ValueKey('profile-open')));
+    await tester.pumpAndSettle();
+    expect(find.text('Wrong password. Try again.'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('profile-password')),
+      'team-pass',
+    );
+    await tester.tap(find.byKey(const ValueKey('profile-open')));
+    await tester.pumpAndSettle();
+    expect(find.text('Signed in as Team'), findsOneWidget);
+
+    // Switch profile goes back to the profiles.
+    await tester.tap(find.byKey(const ValueKey('switch-profile')));
+    await tester.pumpAndSettle();
+    expect(find.text('Who’s using the app?'), findsOneWidget);
+  });
+
+  testWidgets('the admin sets and clears profile passwords in Settings', (
+    tester,
+  ) async {
+    await pumpApp(tester, admin: true);
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    final set = find.byKey(const ValueKey('profile-set-director'));
+    await tester.ensureVisible(set);
+    await tester.pumpAndSettle();
+    await tester.tap(set);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('profile-new-password')),
+      'boss-pass',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('profile-new-password-again')),
+      'boss-typo',
+    );
+    await tester.tap(find.byKey(const ValueKey('profile-save-password')));
+    await tester.pumpAndSettle();
+    expect(find.text('The two passwords don’t match.'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('profile-new-password-again')),
+      'boss-pass',
+    );
+    await tester.tap(find.byKey(const ValueKey('profile-save-password')));
+    await tester.pumpAndSettle();
+    final auth = AuthRepository(db);
+    expect(auth.isLocked(UserRole.director), isTrue);
+    expect(auth.verifyProfile(UserRole.director, 'boss-pass'), isTrue);
+    expect(auth.isLocked(UserRole.team), isFalse);
+
+    final open = find.byKey(const ValueKey('profile-open-director'));
+    await tester.ensureVisible(open);
+    await tester.pumpAndSettle();
+    await tester.tap(open);
+    await tester.pumpAndSettle();
+    expect(auth.isLocked(UserRole.director), isFalse);
   });
 
   testWidgets('the boss sees read-only History and Staff', (tester) async {
@@ -124,8 +237,8 @@ void main() {
   testWidgets(
     'first Admin click creates the password and opens the workspace',
     (tester) async {
-      await pumpApp(tester);
-      await tester.tap(find.text('Admin'));
+      await pumpApp(tester, picker: true);
+      await tester.tap(find.byKey(const ValueKey('profile-admin')));
       await tester.pumpAndSettle();
       expect(find.text('Create the admin password'), findsOneWidget);
 
@@ -141,30 +254,32 @@ void main() {
     },
   );
 
-  testWidgets('admin signs in, then signs out back to Reports', (tester) async {
+  testWidgets('admin signs in, then switches back to the profiles', (
+    tester,
+  ) async {
     AuthRepository(db).setAdminPassword('admin-pass');
-    await pumpApp(tester);
+    await pumpApp(tester, picker: true);
 
-    await tester.tap(find.text('Admin'));
+    await tester.tap(find.byKey(const ValueKey('profile-admin')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'admin-pass');
     await tester.tap(find.text('Sign in to workspace'));
     await tester.pumpAndSettle();
     expect(find.text('Clients this month'), findsOneWidget);
 
-    await tester.tap(find.text('Sign out'));
+    await tester.tap(find.byKey(const ValueKey('switch-profile')));
     await tester.pumpAndSettle();
-    expect(find.text('Latest updates'), findsOneWidget);
+    expect(find.text('Who’s using the app?'), findsOneWidget);
     expect(find.text('Weekly tracker'), findsNothing);
   });
 
-  testWidgets('wrong password is rejected, and Back returns to Reports', (
+  testWidgets('wrong password is rejected, and Back returns to the profiles', (
     tester,
   ) async {
     AuthRepository(db).setAdminPassword('admin-pass');
-    await pumpApp(tester);
+    await pumpApp(tester, picker: true);
 
-    await tester.tap(find.text('Admin'));
+    await tester.tap(find.byKey(const ValueKey('profile-admin')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'nope');
     await tester.tap(find.text('Sign in to workspace'));
@@ -173,7 +288,7 @@ void main() {
 
     await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
-    expect(find.text('Latest updates'), findsOneWidget);
+    expect(find.text('Who’s using the app?'), findsOneWidget);
     expect(find.text('Clients this month'), findsNothing);
   });
 
@@ -395,4 +510,12 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('Staff by day'), findsOneWidget);
   });
+}
+
+class _AsRole extends AdminSessionNotifier {
+  _AsRole(this.role);
+  final UserRole role;
+
+  @override
+  UserRole? build() => role;
 }

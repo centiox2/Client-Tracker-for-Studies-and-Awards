@@ -170,7 +170,8 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   Widget build(BuildContext context) {
     final report = ref.watch(reportProvider(_range));
     final previous = ref.watch(reportProvider(_previousRange));
-    final isAdmin = ref.watch(adminSessionProvider);
+    // Admin and admin team can jump from a report to edit its week.
+    final isAdmin = ref.watch(canEditProvider);
     final theme = Theme.of(context);
     final ranged = _period != ReportPeriod.day && report.days.isNotEmpty;
     final yearly = _period == ReportPeriod.year;
@@ -1329,9 +1330,12 @@ class _DownloadMenu extends ConsumerWidget {
       position: PopupMenuPosition.under,
       onSelected: (kind) {
         final target = ref.read(dailyTargetProvider);
-        final revenue = ref
-            .read(revenueRepositoryProvider)
-            .entriesBetween(report.from, report.to);
+        // Revenue goes in only for the profiles allowed to see it.
+        final revenue = ref.read(seesRevenueProvider)
+            ? ref
+                  .read(revenueRepositoryProvider)
+                  .entriesBetween(report.from, report.to)
+            : null;
         final currency = ref.read(currencyProvider);
         if (kind == 'xlsx') {
           deliverFile(

@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 
 import '../database/database.dart';
+import '../models/user_role.dart';
 
 /// The admin password that guards the workspace (data entry and editing).
 /// Reports are open to anyone using the app without signing in.
@@ -56,6 +57,83 @@ class AuthRepository {
     final salt = base64Decode(rows.first['salt']! as String);
     final expected = rows.first['password_hash']! as String;
     return _constantTimeEquals(_hash(password, salt), expected);
+  }
+
+  // ---- The other profiles (Admin team, Director, Team) -------------------
+
+  /// Whether [role] needs a password. Unknown (never set here or seen
+  /// online) counts as open.
+  bool isLocked(UserRole role) => _db.raw.select(
+    'SELECT 1 FROM profile_passwords WHERE role = ? AND locked = 1;',
+    [role.serverName],
+  ).isNotEmpty;
+
+  /// Sets [role]'s password; empty leaves the profile open.
+  void setProfilePassword(UserRole role, String password) {
+    if (password.isEmpty) {
+      _putProfile(role, locked: false);
+      return;
+    }
+    if (password.length < minPasswordLength) {
+      throw ArgumentError(
+        'Password must be at least $minPasswordLength characters.',
+      );
+    }
+    final salt = _randomSalt();
+    _putProfile(
+      role,
+      locked: true,
+      hash: _hash(password, salt),
+      salt: base64Encode(salt),
+    );
+  }
+
+  /// What the online database says: locked or open. A lock without a known
+  /// password here keeps any hash already stored (the same password).
+  void markProfile(UserRole role, {required bool locked}) {
+    if (!locked) {
+      if (isLocked(role)) _putProfile(role, locked: false);
+      return;
+    }
+    if (isLocked(role)) return;
+    _putProfile(role, locked: true);
+  }
+
+  /// Checks [password] for [role] on this device: true or false, or null
+  /// when it can't be checked here (locked online, never opened here).
+  bool? verifyProfile(UserRole role, String password) {
+    final rows = _db.raw.select(
+      'SELECT locked, password_hash, salt FROM profile_passwords '
+      'WHERE role = ?;',
+      [role.serverName],
+    );
+    if (rows.isEmpty || rows.first['locked'] != 1) return true;
+    final hash = rows.first['password_hash'] as String?;
+    final salt = rows.first['salt'] as String?;
+    if (hash == null || salt == null) return null;
+    return _constantTimeEquals(_hash(password, base64Decode(salt)), hash);
+  }
+
+  void _putProfile(
+    UserRole role, {
+    required bool locked,
+    String? hash,
+    String? salt,
+  }) {
+    _db.raw.execute(
+      'INSERT INTO profile_passwords (role, locked, password_hash, salt, '
+      'updated_at) VALUES (?, ?, ?, ?, ?) '
+      'ON CONFLICT(role) DO UPDATE SET locked = excluded.locked, '
+      'password_hash = excluded.password_hash, salt = excluded.salt, '
+      'updated_at = excluded.updated_at;',
+      [
+        role.serverName,
+        locked ? 1 : 0,
+        hash,
+        salt,
+        DateTime.now().toIso8601String(),
+      ],
+    );
   }
 
   static Uint8List _randomSalt() {

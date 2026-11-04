@@ -31,6 +31,17 @@ abstract class CloudApi {
   /// working and every device must sign in again. Returns a token.
   Future<String> recover(String code, String newPassword);
 
+  /// Which of the other profiles (admin_team, director, team) have a
+  /// password: {"admin_team": true, ...}.
+  Future<Map<String, bool>> profileStatus();
+
+  /// Opens a profile with its password (any password for an open one).
+  /// Returns a token for the admin team, '' for view-only profiles.
+  Future<String> profileLogin(String role, String password);
+
+  /// The admin sets a profile's password; '' leaves it open.
+  Future<void> setProfilePassword(String token, String role, String password);
+
   /// Live changes made by any device, as they happen.
   Stream<CloudChange> changes();
 

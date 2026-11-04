@@ -65,9 +65,11 @@ Future<void> exportWeekToFile(
       .read(exportServiceProvider)
       .exportWeek(
         week,
-        revenue: ref
-            .read(revenueRepositoryProvider)
-            .entriesBetween(week.startDate, week.endDate),
+        revenue: ref.read(seesRevenueProvider)
+            ? ref
+                  .read(revenueRepositoryProvider)
+                  .entriesBetween(week.startDate, week.endDate)
+            : null,
         currency: ref.read(currencyProvider),
       );
   await deliverFile(

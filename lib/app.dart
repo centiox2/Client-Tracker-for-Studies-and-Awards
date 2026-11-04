@@ -10,6 +10,7 @@ import 'screens/dashboard/dashboard_screen.dart';
 import 'screens/history/history_screen.dart';
 import 'screens/quick_search/quick_search_dialog.dart';
 import 'screens/quick_search/shortcuts_dialog.dart';
+import 'screens/auth/profile_picker.dart';
 import 'screens/auth/sign_in_screen.dart';
 import 'screens/reports/reports_screen.dart';
 import 'screens/revenue/revenue_screen.dart';
@@ -39,9 +40,12 @@ class ClientTrackerApp extends ConsumerWidget {
       theme: buildAppTheme(Brightness.light),
       darkTheme: buildAppTheme(Brightness.dark),
       themeMode: themeMode,
-      // Signed out: the open Reports view. Signed in: the admin workspace.
-      // Keyed so signing in or out starts from a fresh shell.
-      home: HomeShell(key: ValueKey(ref.watch(adminSessionProvider))),
+      // First the profiles (Admin, Admin team, Director, Team); then the
+      // app as that profile allows. Keyed so switching starts afresh.
+      home: switch (ref.watch(sessionProvider)) {
+        null => const ProfilePickerScreen(),
+        final role => HomeShell(key: ValueKey(role)),
+      },
     );
   }
 }
@@ -106,9 +110,21 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     _AppTabInfo(AppTab.staff, 'Staff', Icons.groups_2_outlined),
   ];
 
-  bool get _isViewer => !ref.read(adminSessionProvider);
+  /// View-only profiles (Director, Team): nothing that changes data.
+  bool get _isViewer => !ref.read(canEditProvider);
 
-  List<_AppTabInfo> get _tabs => _isViewer ? _viewerTabs : _adminTabs;
+  /// The pages this profile may open: revenue only for the admin and the
+  /// director, Settings only for the admin.
+  List<_AppTabInfo> get _tabs {
+    final role = ref.read(sessionProvider);
+    final base = _isViewer ? _viewerTabs : _adminTabs;
+    return [
+      for (final t in base)
+        if ((t.tab != AppTab.revenue || (role?.seesRevenue ?? false)) &&
+            (t.tab != AppTab.settings || (role?.isAdmin ?? false)))
+          t,
+    ];
+  }
 
   /// Notices when the date changes so "today" (Quick view, the tracker's
   /// today column, the start-week banner) moves on even if the app is left
@@ -149,9 +165,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   /// Adding needs the admin, so sign in first if needed.
   Future<void> _onShared(SharedItems items) async {
     if (!mounted) return;
-    if (!ref.read(adminSessionProvider)) {
+    if (!ref.read(isAdminProvider)) {
       await showAdminSignIn(context);
-      if (!mounted || !ref.read(adminSessionProvider)) {
+      if (!mounted || !ref.read(isAdminProvider)) {
         await deleteSharedCopies(items.photos);
         return;
       }
@@ -244,7 +260,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   Widget _page(AppTab tab) => switch (tab) {
     AppTab.home => const DashboardScreen(),
     AppTab.week => const WeeklyTrackerScreen(),
-    AppTab.revenue => RevenueScreen(readOnly: _isViewer),
+    AppTab.revenue => RevenueScreen(readOnly: !ref.read(isAdminProvider)),
     AppTab.history => HistoryScreen(readOnly: _isViewer),
     AppTab.staff => StaffManagementScreen(readOnly: _isViewer),
     AppTab.reports => const ReportsScreen(),
@@ -279,12 +295,13 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
-    final isViewer = !ref.watch(adminSessionProvider);
+    final isViewer = !ref.watch(canEditProvider);
     final requested = ref.watch(navTabProvider);
-    // Never render a workspace page when signed out, whatever the nav state.
-    final tab = isViewer && !_viewerTabs.any((t) => t.tab == requested)
-        ? AppTab.reports
-        : requested;
+    final allowed = _tabs;
+    // Never render a page this profile may not see, whatever the nav state.
+    final tab = allowed.any((t) => t.tab == requested)
+        ? requested
+        : (isViewer ? AppTab.reports : allowed.first.tab);
     final width = MediaQuery.sizeOf(context).width;
     final desktop = width >= 1050;
     final theme = Theme.of(context);
@@ -299,7 +316,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     );
 
     if (!desktop) {
-      final tabs = isViewer ? _viewerTabs : _adminTabs;
+      final tabs = allowed;
       final useMore = tabs.length > 5;
       final barTabs = useMore
           ? [
@@ -545,7 +562,7 @@ class _AppSidebar extends StatelessWidget {
                 ),
               ),
             const SizedBox(height: 14),
-            _SidebarCaption(settings == null ? 'VIEW ONLY' : 'WORKSPACE'),
+            _SidebarCaption(onSearch == null ? 'VIEW ONLY' : 'WORKSPACE'),
             for (final item in mainTabs) navItem(item),
             const SizedBox(height: 13),
             const Divider(height: 1),
@@ -571,23 +588,21 @@ class _AccountMenu extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final isViewer = !ref.watch(adminSessionProvider);
+    final role = ref.watch(sessionProvider);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: PopupMenuButton<String>(
         tooltip: 'Account',
         position: PopupMenuPosition.under,
-        onSelected: (_) => isViewer
-            ? showAdminSignIn(context)
-            : ref.read(adminSessionProvider.notifier).signOut(),
-        itemBuilder: (_) => [
+        onSelected: (_) => ref.read(sessionProvider.notifier).signOut(),
+        itemBuilder: (_) => const [
           PopupMenuItem(
             value: 'account',
             child: Row(
               children: [
-                Icon(isViewer ? Icons.lock_open : Icons.logout, size: 16),
-                const SizedBox(width: 10),
-                Text(isViewer ? 'Admin sign in' : 'Sign out'),
+                Icon(Icons.switch_account_outlined, size: 16),
+                SizedBox(width: 10),
+                Text('Switch profile'),
               ],
             ),
           ),
@@ -611,7 +626,7 @@ class _AccountMenu extends ConsumerWidget {
                       ),
                     ),
                     Text(
-                      isViewer ? 'View only' : 'Signed in as Admin',
+                      role == null ? '' : 'Signed in as ${role.label}',
                       style: theme.textTheme.labelSmall?.copyWith(
                         fontSize: 10.5,
                         color: scheme.onSurfaceVariant,
@@ -704,7 +719,7 @@ class _TopBar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final color = theme.colorScheme.onSurfaceVariant;
-    final isViewer = !ref.watch(adminSessionProvider);
+    final isViewer = !ref.watch(canEditProvider);
     return SizedBox(
       height: 46,
       child: DecoratedBox(
@@ -743,20 +758,15 @@ class _TopBar extends ConsumerWidget {
                   onPressed: () => showShortcutsDialog(context),
                   icon: const Icon(Icons.help_outline, size: 17),
                 ),
-              if (isViewer)
-                OutlinedButton.icon(
-                  onPressed: () => showAdminSignIn(context),
-                  icon: const Icon(Icons.lock_outline, size: 14),
-                  label: const Text('Admin'),
-                )
-              else
-                TextButton.icon(
-                  onPressed: () =>
-                      ref.read(adminSessionProvider.notifier).signOut(),
-                  style: TextButton.styleFrom(foregroundColor: color),
-                  icon: const Icon(Icons.logout, size: 15),
-                  label: const Text('Sign out'),
+              TextButton.icon(
+                key: const ValueKey('switch-profile'),
+                onPressed: () => ref.read(sessionProvider.notifier).signOut(),
+                style: TextButton.styleFrom(foregroundColor: color),
+                icon: const Icon(Icons.switch_account_outlined, size: 15),
+                label: Text(
+                  '${ref.watch(sessionProvider)?.label ?? ''} · Switch',
                 ),
+              ),
             ],
           ),
         ),
@@ -790,31 +800,27 @@ class _MobileTopBar extends ConsumerWidget {
               } else if (action == 'refresh') {
                 ref.read(dataVersionProvider.notifier).bump();
               } else if (action == 'signout') {
-                ref.read(adminSessionProvider.notifier).signOut();
-              } else if (action == 'signin') {
-                showAdminSignIn(context);
+                ref.read(sessionProvider.notifier).signOut();
               }
             },
             itemBuilder: (context) {
-              final admin = ref.read(adminSessionProvider);
+              final role = ref.read(sessionProvider);
               return [
-                if (admin) ...const [
-                  PopupMenuItem(value: 'search', child: Text('Search')),
-                  PopupMenuItem(value: 'settings', child: Text('Settings')),
-                ],
+                if (role?.canEdit ?? false)
+                  const PopupMenuItem(value: 'search', child: Text('Search')),
+                if (role?.isAdmin ?? false)
+                  const PopupMenuItem(
+                    value: 'settings',
+                    child: Text('Settings'),
+                  ),
                 const PopupMenuItem(
                   value: 'refresh',
                   child: Text('Refresh data'),
                 ),
-                admin
-                    ? const PopupMenuItem(
-                        value: 'signout',
-                        child: Text('Sign out'),
-                      )
-                    : const PopupMenuItem(
-                        value: 'signin',
-                        child: Text('Admin sign in'),
-                      ),
+                PopupMenuItem(
+                  value: 'signout',
+                  child: Text('Switch profile (${role?.label ?? ''})'),
+                ),
               ];
             },
             icon: const Icon(Icons.more_horiz),

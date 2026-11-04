@@ -37,6 +37,42 @@ class FakeCloud implements CloudApi {
 
   String? recoveryCode;
 
+  /// Passwords of the other profiles (missing = open).
+  final profilePasswords = <String, String>{};
+  final teamTokens = <String>{};
+
+  @override
+  Future<Map<String, bool>> profileStatus() async {
+    _online();
+    return {
+      for (final r in ['admin_team', 'director', 'team'])
+        r: profilePasswords.containsKey(r),
+    };
+  }
+
+  @override
+  Future<String> profileLogin(String role, String p) async {
+    _online();
+    final want = profilePasswords[role];
+    if (want != null && want != p) throw CloudException('wrong_password');
+    if (role != 'admin_team') return '';
+    final t = 'team-${teamTokens.length}';
+    teamTokens.add(t);
+    return t;
+  }
+
+  @override
+  Future<void> setProfilePassword(String token, String role, String p) async {
+    _online();
+    if (!tokens.contains(token)) throw CloudException('not_signed_in');
+    if (p.isEmpty) {
+      profilePasswords.remove(role);
+    } else {
+      profilePasswords[role] = p;
+    }
+    if (role == 'admin_team') teamTokens.clear();
+  }
+
   @override
   Future<String> createRecoveryCode(String token) async {
     _online();
@@ -78,9 +114,19 @@ class FakeCloud implements CloudApi {
   @override
   Future<void> push(String token, Map<String, Object?> payload) async {
     _online();
-    if (!tokens.contains(token)) throw CloudException('not_signed_in');
+    final team = teamTokens.contains(token);
+    if (!tokens.contains(token) && !team) {
+      throw CloudException('not_signed_in');
+    }
     final deletes = (payload['deletes'] as Map? ?? {}).cast<String, List>();
     final upserts = (payload['upserts'] as Map? ?? {}).cast<String, List>();
+    if (team &&
+        [
+          'revenue_entries',
+          'revenue_changes',
+        ].any((t) => (deletes[t] ?? upserts[t] ?? const []).isNotEmpty)) {
+      throw CloudException('not_allowed');
+    }
     for (final MapEntry(key: t, value: keys) in deletes.entries) {
       final pk = AppDatabase.syncedTables[t]!;
       for (final k in keys) {
@@ -387,7 +433,7 @@ void main() {
     expect(cloud.password, 'new-secret');
     expect(cloud.recoveryCode, isNull); // one use only
     expect(cloud.tokens, isNot(contains('t1'))); // other devices signed out
-    expect(container.read(adminSessionProvider), isTrue);
+    expect(container.read(adminSessionProvider), UserRole.admin);
     expect(AuthRepository(boss).verifyAdmin('new-secret'), isTrue);
     container.dispose();
   });
@@ -410,9 +456,44 @@ void main() {
     await tester.enterText(find.byType(TextField), 'secret-1');
     await tester.tap(find.text('Sign in to workspace'));
     await tester.pumpAndSettle();
-    expect(container.read(adminSessionProvider), isTrue);
+    expect(container.read(adminSessionProvider), UserRole.admin);
     // Remembered locally, so it also works offline next time.
     expect(AuthRepository(boss).verifyAdmin('secret-1'), isTrue);
+    container.dispose();
+  });
+
+  testWidgets('a profile password set on another device is asked for here', (
+    tester,
+  ) async {
+    cloud.profilePasswords['director'] = 'd-pass';
+    final container = await pumpApp(tester, boss);
+    expect(AuthRepository(boss).isLocked(UserRole.director), isTrue);
+    await tester.tap(find.byKey(const ValueKey('profile-director')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('profile-password')),
+      'd-pass',
+    );
+    await tester.tap(find.byKey(const ValueKey('profile-open')));
+    await tester.pumpAndSettle();
+    expect(container.read(adminSessionProvider), UserRole.director);
+    // Remembered here, so it opens offline next time.
+    expect(
+      AuthRepository(boss).verifyProfile(UserRole.director, 'd-pass'),
+      true,
+    );
+    container.dispose();
+  });
+
+  testWidgets('the admin team’s device can send their changes', (tester) async {
+    final container = await pumpApp(tester, boss);
+    await tester.tap(find.byKey(const ValueKey('profile-adminTeam')));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pumpAndSettle();
+    expect(container.read(adminSessionProvider), UserRole.adminTeam);
+    expect(cloud.teamTokens, hasLength(1));
+    expect(container.read(cloudSyncProvider).adminLinked, isTrue);
     container.dispose();
   });
 }

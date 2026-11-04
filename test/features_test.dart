@@ -46,7 +46,9 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         databaseProvider.overrideWithValue(db),
-        if (admin) adminSessionProvider.overrideWith(SignedInSession.new),
+        adminSessionProvider.overrideWith(
+          admin ? SignedInSession.new : DirectorSession.new,
+        ),
       ],
     );
     addTearDown(container.dispose);
