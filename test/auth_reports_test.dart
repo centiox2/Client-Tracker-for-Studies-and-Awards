@@ -160,6 +160,67 @@ void main() {
     expect(find.text('Who’s using the app?'), findsOneWidget);
   });
 
+  testWidgets('the director stays signed in on her device', (tester) async {
+    final auth = AuthRepository(db);
+    auth.setProfilePassword(UserRole.director, 'boss-pass');
+    await pumpApp(tester, picker: true);
+    await tester.tap(find.byKey(const ValueKey('profile-director')));
+    await tester.pumpAndSettle();
+    // Ticked for the director.
+    final stay = tester.widget<CheckboxListTile>(
+      find.byKey(const ValueKey('profile-stay')),
+    );
+    expect(stay.value, isTrue);
+    await tester.enterText(
+      find.byKey(const ValueKey('profile-password')),
+      'boss-pass',
+    );
+    await tester.tap(find.byKey(const ValueKey('profile-open')));
+    await tester.pumpAndSettle();
+    expect(auth.rememberedProfile, UserRole.director);
+
+    // Next launch: straight in, no profile screen, no password.
+    await tester.pumpWidget(const SizedBox());
+    await pumpApp(tester, picker: true);
+    expect(find.text('Who’s using the app?'), findsNothing);
+    expect(find.text('Signed in as Director'), findsOneWidget);
+
+    // Switch profile signs out for good.
+    await tester.tap(find.byKey(const ValueKey('switch-profile')));
+    await tester.pumpAndSettle();
+    expect(auth.rememberedProfile, isNull);
+    await tester.pumpWidget(const SizedBox());
+    await pumpApp(tester, picker: true);
+    expect(find.text('Who’s using the app?'), findsOneWidget);
+
+    // A new password from the admin ends it too.
+    auth.rememberProfile(UserRole.director);
+    auth.setProfilePassword(UserRole.director, 'new-pass');
+    expect(auth.rememberedProfile, isNull);
+  });
+
+  testWidgets('other profiles aren’t kept signed in unless ticked', (
+    tester,
+  ) async {
+    AuthRepository(db).setProfilePassword(UserRole.team, 'team-pass');
+    await pumpApp(tester, picker: true);
+    await tester.tap(find.byKey(const ValueKey('profile-team')));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<CheckboxListTile>(find.byKey(const ValueKey('profile-stay')))
+          .value,
+      isFalse,
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('profile-password')),
+      'team-pass',
+    );
+    await tester.tap(find.byKey(const ValueKey('profile-open')));
+    await tester.pumpAndSettle();
+    expect(AuthRepository(db).rememberedProfile, isNull);
+  });
+
   testWidgets('the admin sets and clears profile passwords in Settings', (
     tester,
   ) async {

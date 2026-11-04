@@ -58,7 +58,7 @@ class AppDatabase {
   final String file;
   final common.CommonDatabase _db;
 
-  static const int schemaVersion = 10;
+  static const int schemaVersion = 11;
   static const int rollingBackupCount = 5;
 
   /// Runs [action] inside a transaction; rolls back on any error.
@@ -267,6 +267,16 @@ class AppDatabase {
           updated_at    TEXT NOT NULL
         );
       ''');
+      // v11: "Keep me signed in on this device" for a profile, with the
+      // password's online version then (a newer one asks again).
+      final profileColumns = db.select('PRAGMA table_info(profile_passwords);');
+      if (!profileColumns.any((c) => c['name'] == 'stay_signed_in')) {
+        db.execute(
+          'ALTER TABLE profile_passwords '
+          'ADD COLUMN stay_signed_in INTEGER NOT NULL DEFAULT 0;',
+        );
+        db.execute('ALTER TABLE profile_passwords ADD COLUMN version TEXT;');
+      }
 
       _createSyncTables(db);
 

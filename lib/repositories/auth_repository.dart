@@ -114,6 +114,50 @@ class AuthRepository {
     return _constantTimeEquals(_hash(password, base64Decode(salt)), hash);
   }
 
+  // ---- Keep me signed in on this device ----------------------------------
+
+  /// The profile this device opens straight into, if someone chose "Keep
+  /// me signed in" (the admin is never kept).
+  UserRole? get rememberedProfile {
+    final rows = _db.raw.select(
+      'SELECT role FROM profile_passwords WHERE stay_signed_in = 1 LIMIT 1;',
+    );
+    if (rows.isEmpty) return null;
+    final name = rows.first['role'];
+    return UserRole.others.where((r) => r.serverName == name).firstOrNull;
+  }
+
+  /// Opens [role] straight away on this device from now on. [version]: the
+  /// password's online version, if known.
+  void rememberProfile(UserRole role, {String? version}) {
+    forgetProfile();
+    _db.raw.execute(
+      'INSERT INTO profile_passwords (role, locked, updated_at, '
+      'stay_signed_in, version) VALUES (?, 0, ?, 1, ?) '
+      'ON CONFLICT(role) DO UPDATE SET stay_signed_in = 1, '
+      'version = excluded.version;',
+      [role.serverName, DateTime.now().toIso8601String(), version],
+    );
+  }
+
+  /// Back to the profile screen at launch.
+  void forgetProfile() =>
+      _db.raw.execute('UPDATE profile_passwords SET stay_signed_in = 0;');
+
+  /// The password version kept with "Keep me signed in" (null: unknown).
+  String? rememberedVersion(UserRole role) {
+    final rows = _db.raw.select(
+      'SELECT version FROM profile_passwords WHERE role = ?;',
+      [role.serverName],
+    );
+    return rows.isEmpty ? null : rows.first['version'] as String?;
+  }
+
+  void setRememberedVersion(UserRole role, String? version) => _db.raw.execute(
+    'UPDATE profile_passwords SET version = ? WHERE role = ?;',
+    [version, role.serverName],
+  );
+
   void _putProfile(
     UserRole role, {
     required bool locked,
@@ -123,9 +167,10 @@ class AuthRepository {
     _db.raw.execute(
       'INSERT INTO profile_passwords (role, locked, password_hash, salt, '
       'updated_at) VALUES (?, ?, ?, ?, ?) '
+      // A new password (or none) ends "Keep me signed in".
       'ON CONFLICT(role) DO UPDATE SET locked = excluded.locked, '
       'password_hash = excluded.password_hash, salt = excluded.salt, '
-      'updated_at = excluded.updated_at;',
+      'updated_at = excluded.updated_at, stay_signed_in = 0, version = NULL;',
       [
         role.serverName,
         locked ? 1 : 0,

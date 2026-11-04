@@ -35,6 +35,9 @@ abstract class CloudApi {
   /// password: {"admin_team": true, ...}.
   Future<Map<String, bool>> profileStatus();
 
+  /// When each profile's password last changed: {"director": "...", ...}.
+  Future<Map<String, String>> profileVersions();
+
   /// Opens a profile with its password (any password for an open one).
   /// Returns a token for the admin team, '' for view-only profiles.
   Future<String> profileLogin(String role, String password);

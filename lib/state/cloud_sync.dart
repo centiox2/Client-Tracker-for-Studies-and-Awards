@@ -366,6 +366,18 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     }
   }
 
+  /// When [role]'s password last changed online; null when it can't be
+  /// asked.
+  Future<String?> profileVersion(UserRole role) async {
+    final api = _api;
+    if (api == null) return null;
+    try {
+      return (await api.profileVersions())[role.serverName];
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Checks [role]'s [password] online. The admin team's device can then
   /// send their changes.
   Future<CloudLink> openProfile(UserRole role, String password) async {

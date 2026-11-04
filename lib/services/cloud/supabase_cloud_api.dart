@@ -119,6 +119,12 @@ class SupabaseCloudApi implements CloudApi {
   }
 
   @override
+  Future<Map<String, String>> profileVersions() async {
+    final data = await _call<Map<String, dynamic>>('profile_versions');
+    return {for (final e in data.entries) e.key: '${e.value}'};
+  }
+
+  @override
   Future<String> profileLogin(String role, String password) =>
       _call<String>('profile_login', {'p_role': role, 'p_password': password});
 

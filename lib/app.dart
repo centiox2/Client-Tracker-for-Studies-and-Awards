@@ -158,7 +158,32 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       ref.read(cloudSyncProvider.notifier).start();
       // Share → Client Tracker (phones): payment photos or an M-Pesa SMS.
       listenForShares(_onShared);
+      _checkKeptSignIn();
     });
+  }
+
+  /// Kept signed in on this device: if the admin has since changed this
+  /// profile's password, ask for it again.
+  Future<void> _checkKeptSignIn() async {
+    final auth = ref.read(authRepositoryProvider);
+    final role = ref.read(sessionProvider);
+    if (role == null || auth.rememberedProfile != role) return;
+    final now = await ref.read(cloudSyncProvider.notifier).profileVersion(role);
+    if (now == null || !mounted) return; // offline: stay signed in
+    final kept = auth.rememberedVersion(role);
+    if (kept == null) {
+      auth.setRememberedVersion(role, now); // first check: note it
+    } else if (kept != now) {
+      final messenger = ScaffoldMessenger.of(context);
+      ref.read(sessionProvider.notifier).signOut();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'The ${role.label} password was changed. Sign in again.',
+          ),
+        ),
+      );
+    }
   }
 
   /// Photos or text shared into the app: to Revenue, read and reviewed.
