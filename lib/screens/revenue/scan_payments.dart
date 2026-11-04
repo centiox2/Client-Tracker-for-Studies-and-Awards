@@ -408,6 +408,10 @@ Future<void> _review(
       ),
       // The whole batch comes back out in one tap.
       duration: const Duration(seconds: 8),
+      // Flutter keeps a snackbar with an action up until it's tapped;
+      // let it go away by itself.
+      persist: false,
+      showCloseIcon: true,
       action: SnackBarAction(
         label: 'Undo',
         onPressed: () => actions.removeRevenue(added),

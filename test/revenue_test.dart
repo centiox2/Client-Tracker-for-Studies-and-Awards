@@ -524,4 +524,35 @@ void main() {
     await tester.pumpAndSettle();
     expect(RevenueRepository(db).day(today()).count, 0);
   });
+
+  testWidgets('the Undo card goes away by itself', (tester) async {
+    await pumpApp(tester, admin: true);
+    await tester.tap(find.text('Revenue').last);
+    await tester.pumpAndSettle();
+    final now = DateTime.now();
+    final d = '${now.day}/${now.month}/${now.year % 100}';
+    await tester.tap(find.byKey(const ValueKey('paste-payment')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('paste-message')),
+      'UK3JPO8PVA Confirmed. on $d at 1:38 AM Ksh1,000.00 received '
+      'from A B 254700000000.\n'
+      'TJ2AB34CDE Confirmed. on $d at 2:05 AM Ksh2,000.00 received '
+      'from C D 254711000111.',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Read'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.widgetWithText(FilledButton, 'Add 2 · KSh 3,000'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Undo'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 9));
+    await tester.pumpAndSettle();
+    expect(find.text('Undo'), findsNothing);
+    expect(RevenueRepository(db).day(today()).count, 2);
+  });
 }
