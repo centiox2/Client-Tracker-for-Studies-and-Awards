@@ -66,3 +66,6 @@ cloud.json
 
 # Windows installer output (built by CI)
 /installer/Output/
+
+# Flutter downloaded by the Vercel build (tool/vercel_build.sh)
+/.flutter/

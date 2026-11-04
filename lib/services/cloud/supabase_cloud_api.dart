@@ -40,8 +40,10 @@ class SupabaseCloudApi implements CloudApi {
   }
 
   @override
-  Future<Map<String, List<Map<String, Object?>>>> snapshot() async {
-    final data = await _call<Map<String, dynamic>>('sync_snapshot');
+  Future<Map<String, List<Map<String, Object?>>>> snapshot(String token) async {
+    final data = await _call<Map<String, dynamic>>('sync_read', {
+      'p_token': token,
+    });
     return {
       for (final MapEntry(:key, :value) in data.entries)
         key: [
@@ -76,9 +78,12 @@ class SupabaseCloudApi implements CloudApi {
   Stream<CloudChange> changes() {
     _channel ??= _client
         .channel('client-tracker')
+        // Only "something changed" (sync_ping); the data itself is read
+        // with a profile's token.
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'public',
+          table: 'sync_ping',
           callback: (p) => _changes.add(
             CloudChange(
               table: p.table,
