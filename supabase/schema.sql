@@ -712,3 +712,7 @@ end $$;
 revoke all on all functions in schema private from public, anon, authenticated;
 revoke all on function public.sync_read(text) from public;
 grant execute on function public.sync_read(text) to anon, authenticated;
+
+-- ===== Security check (2026-11-04) =====
+-- Supabase helper (event trigger function) needs no public execute.
+revoke execute on function public.rls_auto_enable() from public, anon, authenticated;
