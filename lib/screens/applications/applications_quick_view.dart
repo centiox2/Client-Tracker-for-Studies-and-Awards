@@ -299,6 +299,9 @@ class ApplicationsQuickView extends ConsumerWidget {
     ]..sort((x, y) => y.$2.compareTo(x.$2));
     final stale = waiting.where((w) => w.$2 >= 14).toList();
     final unassigned = inProgress.where((a) => a.assignee.isEmpty).length;
+    // No date anywhere in the tracker: can't say how long they've waited,
+    // so they're named here rather than left out.
+    final undated = inProgress.where((a) => lastActivity(a) == null).length;
 
     final attentionPanel = AppPanel(
       title: 'Needs attention',
@@ -377,6 +380,15 @@ class ApplicationsQuickView extends ConsumerWidget {
               const SizedBox(height: 6),
               Text(
                 '$unassigned in progress with no assignee',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                ),
+              ),
+            ],
+            if (undated > 0) ...[
+              const SizedBox(height: 4),
+              Text(
+                '$undated in progress with no dates in the tracker yet',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.error,
                 ),
