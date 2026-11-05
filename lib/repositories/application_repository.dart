@@ -247,7 +247,7 @@ class ApplicationRepository {
     'doc_date': 'Documents submitted',
     'app_date': 'Application submitted',
     'offer_date': 'Offer letter received',
-    'coe_date': 'COE issued',
+    'coe_date': 'COE / CAS issued',
     'todo': 'To do',
     'follow_up': 'Follow-up',
   };
@@ -338,9 +338,13 @@ class ApplicationRepository {
           continue;
         }
         final old = _valuesOf(before);
+        // A column missing from this file keeps what's there.
+        final next = [
+          for (final (j, v) in row.fields.indexed) row.present[j] ? v : old[j],
+        ];
         final diffs = <String>[];
         for (final (j, field) in _fields.indexed) {
-          if ((old[j] ?? '') != (row.fields[j] ?? '')) diffs.add(field);
+          if ((old[j] ?? '') != (next[j] ?? '')) diffs.add(field);
         }
         if (diffs.isNotEmpty || before.position != i) {
           _db.raw.execute(
@@ -348,26 +352,14 @@ class ApplicationRepository {
             'doc_date = ?, app_date = ?, offer_date = ?, coe_date = ?, '
             'status = ?, assignee = ?, todo = ?, follow_up = ?, position = ?'
             '${diffs.isEmpty ? '' : ', updated_at = ?'} WHERE id = ?;',
-            [
-              row.student,
-              ...row.fields,
-              i,
-              if (diffs.isNotEmpty) now,
-              before.id,
-            ],
+            [row.student, ...next, i, if (diffs.isNotEmpty) now, before.id],
           );
         }
         if (diffs.isNotEmpty) {
           changed++;
           for (final f in diffs) {
             final j = _fields.indexOf(f);
-            changes.add([
-              row.key,
-              row.student,
-              f,
-              old[j] ?? '',
-              row.fields[j] ?? '',
-            ]);
+            changes.add([row.key, row.student, f, old[j] ?? '', next[j] ?? '']);
           }
         }
       }
@@ -448,32 +440,59 @@ class ApplicationRepository {
   static List<ApplicationCsvRow> parseApplicationsCsv(String text) {
     final table = parseCsv(text);
     if (table.isEmpty) throw ApplicationCsvException('The file is empty.');
-    final header = [for (final h in table.first) h.trim().toLowerCase()];
-    int col(List<String> names) {
-      for (final n in names) {
-        final i = header.indexOf(n);
-        if (i >= 0) return i;
+    // Columns are found by what they mean, not their exact wording, so a
+    // rename in Airtable ("COE issue date" to "COE /CAS issue date") keeps
+    // working. Linked "… Tracker" columns are never mistaken for them.
+    final header = [
+      for (final h in table.first)
+        h.toLowerCase().replaceAll(RegExp('[^a-z0-9]'), ''),
+    ];
+    int col(bool Function(String h) matches) {
+      for (final (i, h) in header.indexed) {
+        if (h.contains('tracker')) continue;
+        if (matches(h)) return i;
       }
       return -1;
     }
 
-    final student = col(['student name', 'student', 'name']);
-    final status = col(['status']);
+    final student = col((h) => h.contains('student') || h == 'name');
+    final status = col((h) => h.startsWith('status'));
     if (student < 0 || status < 0) {
       throw ApplicationCsvException(
         'This doesn’t look like the Applications Tracker export: it needs '
         '"Student name" and "Status" columns.',
       );
     }
-    final rto = col(['rto name', 'rto', 'school']);
-    final country = col(['country']);
-    final doc = col(['doc submit date', 'documents submitted']);
-    final app = col(['app submitted date', 'application submitted date']);
-    final offer = col(['offer letter received date', 'offer letter date']);
-    final coe = col(['coe issue date', 'coe issued date']);
-    final assignee = col(['assignee']);
-    final todo = col(['to do list', 'to do', 'todo']);
-    final follow = col(['follow up update', 'follow up']);
+    final rto = col(
+      (h) =>
+          h.startsWith('rto') ||
+          h.contains('school') ||
+          h.contains('institution'),
+    );
+    final country = col((h) => h.contains('country'));
+    final doc = col((h) => h.startsWith('doc'));
+    final app = col((h) => h.startsWith('app') && h.contains('submit'));
+    final offer = col((h) => h.contains('offer'));
+    final coe = col((h) => h.contains('coe') || h.startsWith('cas'));
+    final assignee = col((h) => h.contains('assign'));
+    final todo = col((h) => h.contains('todo'));
+    final follow = col((h) => h.contains('follow'));
+    // In the same order as ApplicationCsvRow.fields.
+    final present = [
+      for (final c in [
+        rto,
+        country,
+        doc,
+        app,
+        offer,
+        coe,
+        status,
+        assignee,
+        todo,
+        follow,
+      ])
+        c >= 0,
+    ];
 
     String at(List<String> r, int i) => i < 0 || i >= r.length ? '' : r[i];
     final out = <ApplicationCsvRow>[];
@@ -488,6 +507,7 @@ class ApplicationRepository {
         ApplicationCsvRow(
           key: n == 1 ? base : '$base #$n',
           student: name,
+          present: present,
           fields: [
             _clean(at(r, rto)),
             _clean(at(r, country)),
@@ -587,7 +607,23 @@ class ApplicationCsvRow {
     required this.key,
     required this.student,
     required this.fields,
+    this.present = const [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+    ],
   });
+
+  /// Which of [fields] the file has a column for. A missing column says
+  /// nothing about the data, so it never clears what's already there.
+  final List<bool> present;
 
   final String key;
   final String student;
