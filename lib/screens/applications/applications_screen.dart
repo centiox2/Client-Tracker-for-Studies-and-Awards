@@ -12,6 +12,8 @@ import '../../services/file_delivery.dart';
 import '../../services/photo_text.dart' show photoDropSupported;
 import '../../state/app_state.dart';
 import '../../widgets/panels.dart';
+import 'applications_quick_view.dart';
+import 'applications_table.dart';
 
 /// Applications: the Airtable "Applications Tracker", uploaded as its CSV
 /// export. Shows where every application stands, grouped by status as in
@@ -39,6 +41,10 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
 
   /// The upload whose changes are shown (null: the latest).
   int? _importId;
+
+  /// Quick view (what happened and what's happening), the full list
+  /// grouped by status, or the table with every column.
+  _View _view = _View.quick;
 
   @override
   void dispose() {
@@ -114,6 +120,25 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
       builder: (context, viewport) {
         final phone = viewport.maxWidth < 600;
         final pad = phone ? 14.0 : 18.0;
+        if (apps.isNotEmpty && _view == _View.table) {
+          // The table scrolls by itself, both ways.
+          return Padding(
+            padding: EdgeInsets.fromLTRB(pad, 16, pad, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _header(context, imports, phone),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: ApplicationsTable(
+                    apps: apps,
+                    onOpen: (a) => showApplicationDetails(context, ref, a),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
         final items = apps.isEmpty
             ? [_empty(context)]
             : _content(context, apps, imports, phone);
@@ -225,8 +250,6 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
     List<ApplicationImport> imports,
     bool phone,
   ) {
-    final theme = Theme.of(context);
-    final muted = Dt.textMuted(theme);
     final now = DateTime.now();
     bool thisMonth(DateTime? d) =>
         d != null && d.year == now.year && d.month == now.month;
@@ -236,24 +259,30 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
     final done = apps
         .where((a) => ApplicationRepository.isDone(a.status))
         .length;
-    final latest = imports.firstOrNull;
     final month = DateFormat('MMMM').format(now);
+    final header = _header(context, imports, phone);
 
-    final header = Row(
-      children: [
-        Expanded(
-          child: Text(
-            latest == null
-                ? ''
-                : 'Updated ${_when(latest.at)}'
-                      '${latest.device.isEmpty ? '' : ' on ${latest.device}'}'
-                      ' · ${latest.total} applications',
-            style: theme.textTheme.bodySmall?.copyWith(color: muted),
-          ),
+    if (_view == _View.quick) {
+      return [
+        header,
+        const SizedBox(height: 14),
+        ApplicationsQuickView(
+          apps: apps,
+          imports: imports,
+          phone: phone,
+          onShowAll: ({String? status, bool inProgress = false}) =>
+              setState(() {
+                _view = _View.list;
+                _status = status;
+                _inProgressOnly = inProgress;
+                _country = _assignee = null;
+                _search.clear();
+              }),
         ),
-        if (widget.canUpload) _uploadButton(),
-      ],
-    );
+        const SizedBox(height: 12),
+        _updatesPanel(context, imports),
+      ];
+    }
 
     final tiles = [
       _Stat(
@@ -279,12 +308,67 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
       const SizedBox(height: 12),
       _StatGrid(tiles: tiles, phone: phone),
       const SizedBox(height: 12),
-      _updatesPanel(context, imports),
-      const SizedBox(height: 12),
       _stagePanel(context, apps),
       const SizedBox(height: 12),
       ..._listPanel(context, apps, phone),
     ];
+  }
+
+  Widget _header(
+    BuildContext context,
+    List<ApplicationImport> imports,
+    bool phone,
+  ) {
+    final theme = Theme.of(context);
+    final muted = Dt.textMuted(theme);
+    final latest = imports.firstOrNull;
+    final viewSwitch = SegmentedButton<_View>(
+      key: const ValueKey('applications-view'),
+      segments: [
+        ButtonSegment(
+          value: _View.quick,
+          icon: phone ? null : const Icon(Icons.bolt_outlined, size: 16),
+          label: Text(phone ? 'Quick' : 'Quick view'),
+        ),
+        ButtonSegment(
+          value: _View.list,
+          icon: phone ? null : const Icon(Icons.list_alt_outlined, size: 16),
+          label: Text(phone ? 'List' : 'All applications'),
+        ),
+        ButtonSegment(
+          value: _View.table,
+          icon: phone ? null : const Icon(Icons.table_chart_outlined, size: 16),
+          label: const Text('Table'),
+        ),
+      ],
+      selected: {_view},
+      showSelectedIcon: false,
+      onSelectionChanged: (v) => setState(() => _view = v.first),
+    );
+    return Wrap(
+      spacing: 12,
+      runSpacing: 10,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      alignment: WrapAlignment.spaceBetween,
+      children: [
+        viewSwitch,
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (latest != null)
+              Text(
+                'Updated ${_when(latest.at)}'
+                '${latest.device.isEmpty ? '' : ' on ${latest.device}'}',
+                style: theme.textTheme.bodySmall?.copyWith(color: muted),
+              ),
+            if (widget.canUpload) ...[
+              const SizedBox(width: 12),
+              _uploadButton(),
+            ],
+          ],
+        ),
+      ],
+    );
   }
 
   static String _when(DateTime t) {
@@ -318,7 +402,7 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
     final first = shown == imports.last && imports.length == 1;
 
     return AppPanel(
-      title: 'Updates',
+      title: 'Changes by upload',
       icon: Icons.notifications_active_outlined,
       trailingWidget: imports.length < 2
           ? null
@@ -359,12 +443,17 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
                     style: theme.textTheme.labelMedium?.copyWith(color: muted),
                   ),
                   const SizedBox(height: 6),
-                  for (final entry in byStudent.entries)
-                    ApplicationUpdateRow(
-                      student: entry.value.first.student,
-                      changes: entry.value,
-                      onTap: () => _openByKey(entry.key),
-                    ),
+                  FirstFew(
+                    key: ValueKey('changes-${shown.id}'),
+                    children: [
+                      for (final entry in byStudent.entries)
+                        ApplicationUpdateRow(
+                          student: entry.value.first.student,
+                          changes: entry.value,
+                          onTap: () => _openByKey(entry.key),
+                        ),
+                    ],
+                  ),
                 ],
               ),
       ),
@@ -1131,3 +1220,5 @@ class _StatGrid extends StatelessWidget {
     );
   }
 }
+
+enum _View { quick, list, table }

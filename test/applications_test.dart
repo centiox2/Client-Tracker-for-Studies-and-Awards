@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 import 'package:client_tracker/app.dart';
 import 'package:client_tracker/database/app_database_io.dart';
 import 'package:client_tracker/database/database.dart';
@@ -116,8 +117,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('upload-applications')), findsNothing);
+    // Opens on its quick view; the full list is the other tab.
+    expect(find.text('Needs attention'), findsOneWidget);
+    await tester.tap(find.text('All applications'));
+    await tester.pumpAndSettle();
     expect(find.text('In progress'), findsOneWidget);
-    expect(find.text('Updates'), findsOneWidget);
     expect(find.text('Brian Sample'), findsWidgets);
     // Grouped like Airtable, each group a status tag with its count.
     expect(find.text('COE ISSUED/DONE'), findsWidgets);
@@ -153,7 +157,7 @@ void main() {
     expect(find.text('To pay school fees'), findsWidgets);
     await tester.tap(find.byKey(const ValueKey('quick-applications')));
     await tester.pumpAndSettle();
-    expect(find.text('By stage'), findsOneWidget);
+    expect(find.text('In progress, by stage'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -163,6 +167,90 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('upload-applications')), findsOneWidget);
     expect(find.textContaining('Download CSV'), findsOneWidget);
+  });
+
+  testWidgets('the applications quick view: today, the week, attention', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    String long(DateTime d) => DateFormat('MMMM d, y').format(d);
+    String short(DateTime d) => DateFormat('dd/MM/yyyy').format(d);
+    final old = now.subtract(const Duration(days: 40));
+    final csv =
+        'Student name,RTO name,Country,Doc submit date,App submitted date,'
+        'Offer letter received date,COE issue date,Status,Assignee,To do list\n'
+        'Today Coe,Reach,Australia,,,,"${long(now)}",COE ISSUED/DONE,Mourine,\n'
+        'Today Offer,NPA,Australia,,,"${long(now)}",,To pay school fees,Joy,\n'
+        'Noted Today,WAIFS,Australia,"${long(old)}",,,,Statement building,Joy,'
+        '"${short(now)}- Student sent bank statements"\n'
+        'Long Wait,AVTA,Australia,"${long(old)}","${long(old)}",,,'
+        'Awaiting offer letter,Ian,\n'
+        'Nobody Assigned,,Australia,"${long(now)}",,,,'
+        'Application to be submitted,,\n';
+    ApplicationRepository(db).importCsv(csv);
+    await pumpApp(tester, UserRole.director);
+    await tester.tap(find.text('Applications').first);
+    await tester.pumpAndSettle();
+
+    // Today's feed: the COE, the offer, documents and the dated note.
+    expect(find.text('COE issued'), findsWidgets);
+    expect(find.text('Offer letter received'), findsOneWidget);
+    expect(find.text('Documents submitted'), findsWidgets);
+    expect(find.text('Student sent bank statements'), findsOneWidget);
+    expect(find.text('3 notes dated today'), findsNothing);
+    expect(find.text('1 notes dated today'), findsOneWidget);
+    // Waiting longest: 40 days since the application.
+    expect(find.text('40 d'), findsOneWidget);
+    expect(find.text('1 in progress with no assignee'), findsOneWidget);
+    // Tapping a stage lists it.
+    await tester.tap(find.text('Awaiting offer letter · 1'));
+    await tester.pumpAndSettle();
+    expect(find.text('1 of 5'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the table shows every column, sorts and searches', (
+    tester,
+  ) async {
+    ApplicationRepository(db).importCsv(sample);
+    await pumpApp(tester, UserRole.director);
+    await tester.tap(find.text('Applications').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Table'));
+    await tester.pumpAndSettle();
+    for (final h in [
+      'Student name',
+      'RTO name',
+      'Country',
+      'Doc submit date',
+      'COE issue date',
+      'Status',
+      'Assignee',
+      'To do list',
+    ]) {
+      expect(find.text(h), findsWidgets, reason: h);
+    }
+    expect(find.text('8 rows'), findsOneWidget);
+    // Airtable order: by status first (Statement building before COE).
+    Offset at(String name) => tester.getTopLeft(find.text(name).first);
+    expect(at('Amina Test').dy, lessThan(at('Dan Demo').dy));
+    // Sort by name, A to Z.
+    await tester.tap(find.byKey(const ValueKey('table-sort-Student name')));
+    await tester.pumpAndSettle();
+    expect(at('Amina Test').dy, lessThan(at('Brian Sample').dy));
+    expect(at('Brian Sample').dy, lessThan(at('Carol Example').dy));
+    // Search.
+    await tester.enterText(
+      find.byKey(const ValueKey('table-search')),
+      'kaplan',
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('1 of 8 rows'), findsOneWidget);
+    await tester.tap(find.text('George Pilot'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.text('Offer letter received'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }
 
