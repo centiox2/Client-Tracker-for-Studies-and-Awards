@@ -45,6 +45,31 @@ class Application {
   /// Still being worked on (not finished, stopped or paused).
   bool get inProgress => ApplicationRepository.isInProgress(status);
 
+  /// The to-do lines that start with a date ("03/11/2026- Student to pay
+  /// fee"), day first as the team writes them: what was noted when.
+  List<(DateTime, String)> get datedNotes {
+    final out = <(DateTime, String)>[];
+    for (final line in todo.split('\n')) {
+      final m = RegExp(
+        r'^\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})\s*[-:–]?\s*(.*)$',
+      ).firstMatch(line);
+      if (m == null) continue;
+      final d = int.parse(m[1]!), mo = int.parse(m[2]!);
+      var y = int.parse(m[3]!);
+      if (y < 100) y += 2000;
+      if (mo < 1 || mo > 12 || d < 1 || d > 31) continue;
+      final t = DateTime(y, mo, d);
+      if (t.month != mo) continue;
+      out.add((t, m[4]!.trim()));
+    }
+    return out;
+  }
+
+  /// The newest milestone date reached (documents, applied, offer, COE).
+  DateTime? get lastStep => [coeDate, offerDate, appDate, docDate]
+      .whereType<DateTime>()
+      .fold<DateTime?>(null, (a, b) => a == null || b.isAfter(a) ? b : a);
+
   static Application fromRow(Map<String, Object?> r) => Application(
     id: r['id']! as int,
     key: r['app_key']! as String,
