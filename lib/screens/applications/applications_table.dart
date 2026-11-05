@@ -123,7 +123,7 @@ class _ApplicationsTableState extends State<ApplicationsTable> {
         (c, a) => text(_date(a.offerDate)),
       ),
       _Column(
-        'COE issue date',
+        'COE / CAS issue date',
         118,
         (a) => _dateKey(a.coeDate),
         (c, a) => text(_date(a.coeDate)),

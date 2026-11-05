@@ -89,6 +89,32 @@ void main() {
     expect(repo.historyOf('brian sample #2'), isEmpty);
   });
 
+  test('a renamed column still reads; a missing one never clears data', () {
+    final repo = ApplicationRepository(db)..importCsv(sample);
+    final coes = repo.all().where((a) => a.coeDate != null).length;
+    expect(coes, 2);
+
+    // Airtable renamed "COE issue date" to "COE /CAS issue date".
+    final renamed = sample.replaceFirst(
+      'COE issue date',
+      'COE /CAS issue date',
+    );
+    expect(renamed, contains('COE /CAS issue date'));
+    final r = repo.importCsv(renamed);
+    expect((r.added, r.changed, r.removed), (0, 0, 0));
+    expect(repo.all().where((a) => a.coeDate != null), hasLength(coes));
+
+    // A column left out of the export altogether keeps what's there.
+    final header = sample.split('\n').first;
+    final withoutCoe = sample.replaceFirst(
+      header,
+      header.replaceFirst('COE issue date', 'Unrelated column'),
+    );
+    final r2 = repo.importCsv(withoutCoe);
+    expect(r2.changed, 0);
+    expect(repo.all().where((a) => a.coeDate != null), hasLength(coes));
+  });
+
   Future<void> pumpApp(WidgetTester tester, UserRole role) async {
     tester.view.physicalSize = const Size(1600, 1000);
     tester.view.devicePixelRatio = 1;
@@ -223,7 +249,7 @@ void main() {
       'RTO name',
       'Country',
       'Doc submit date',
-      'COE issue date',
+      'COE / CAS issue date',
       'Status',
       'Assignee',
       'To do list',
