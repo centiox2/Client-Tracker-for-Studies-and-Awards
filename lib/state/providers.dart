@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../database/database.dart';
+import '../repositories/application_repository.dart';
 import '../repositories/auth_repository.dart';
 import '../repositories/client_count_repository.dart';
 import '../repositories/notes_settings_repository.dart';
@@ -44,6 +45,10 @@ final dayNotesRepositoryProvider = Provider<DayNotesRepository>(
 
 final appSettingsRepositoryProvider = Provider<AppSettingsRepository>(
   (ref) => AppSettingsRepository(ref.watch(databaseProvider)),
+);
+
+final applicationRepositoryProvider = Provider<ApplicationRepository>(
+  (ref) => ApplicationRepository(ref.watch(databaseProvider)),
 );
 
 final revenueRepositoryProvider = Provider<RevenueRepository>(

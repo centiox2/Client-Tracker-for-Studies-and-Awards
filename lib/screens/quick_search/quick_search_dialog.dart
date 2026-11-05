@@ -37,6 +37,7 @@ const _pages = <(AppTab, String, IconData)>[
   (AppTab.home, 'Overview', Icons.space_dashboard_outlined),
   (AppTab.week, 'Weekly tracker', Icons.calendar_view_week_outlined),
   (AppTab.revenue, 'Revenue', Icons.payments_outlined),
+  (AppTab.applications, 'Applications', Icons.school_outlined),
   (AppTab.history, 'History', Icons.history),
   (AppTab.staff, 'Staff', Icons.groups_2_outlined),
   (AppTab.reports, 'Reports', Icons.insights_outlined),
