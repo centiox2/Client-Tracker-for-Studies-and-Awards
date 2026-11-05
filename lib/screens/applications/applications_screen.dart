@@ -345,28 +345,42 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
       showSelectedIcon: false,
       onSelectionChanged: (v) => setState(() => _view = v.first),
     );
-    return Wrap(
-      spacing: 12,
-      runSpacing: 10,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      alignment: WrapAlignment.spaceBetween,
+    final updated = latest == null
+        ? null
+        : Text(
+            'Updated ${_when(latest.at)}'
+            '${latest.device.isEmpty ? '' : ' on ${latest.device}'}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+          );
+    if (phone) {
+      // Phones: the switch on its own line, then when + upload.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          viewSwitch,
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(child: updated ?? const SizedBox()),
+              if (widget.canUpload) _uploadButton(),
+            ],
+          ),
+        ],
+      );
+    }
+    return Row(
       children: [
         viewSwitch,
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (latest != null)
-              Text(
-                'Updated ${_when(latest.at)}'
-                '${latest.device.isEmpty ? '' : ' on ${latest.device}'}',
-                style: theme.textTheme.bodySmall?.copyWith(color: muted),
-              ),
-            if (widget.canUpload) ...[
-              const SizedBox(width: 12),
-              _uploadButton(),
-            ],
-          ],
+        const SizedBox(width: 16),
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: updated ?? const SizedBox(),
+          ),
         ),
+        if (widget.canUpload) ...[const SizedBox(width: 12), _uploadButton()],
       ],
     );
   }

@@ -235,9 +235,33 @@ final previousWeekTotalsProvider = Provider<WeekTotals?>((ref) {
       .findByStartDate(
         current.week.startDate.subtract(const Duration(days: 7)),
       );
-  return previous == null
-      ? null
-      : ref.read(statisticsServiceProvider).weekTotals(previous);
+  if (previous == null) return null;
+  final totals = ref.read(statisticsServiceProvider).weekTotals(previous);
+  // The week shown is still going: compare with the same days of last week
+  // (Mon–Thu against Mon–Thu), not the whole of it.
+  final today = DateTime.now();
+  final start = current.week.startDate;
+  final end = current.week.endDate;
+  final inProgress =
+      !today.isBefore(start) &&
+      !today.isAfter(end.add(const Duration(days: 1)));
+  if (!inProgress) return totals;
+  final cutoff = today.weekday;
+  final days = ref.read(weekRepositoryProvider).getDays(previous.id);
+  var n = 0, e = 0;
+  for (final d in days) {
+    if (d.date.weekday > cutoff) continue;
+    final t = totals.perDay[d.id];
+    if (t == null) continue;
+    n += t.newClients;
+    e += t.existingClients;
+  }
+  return WeekTotals(
+    newClients: n,
+    existingClients: e,
+    dailyAverage: totals.dailyAverage,
+    perDay: totals.perDay,
+  );
 });
 
 /// The Monday of the week the user should be working in today (next week on
