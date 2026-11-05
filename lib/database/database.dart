@@ -58,7 +58,7 @@ class AppDatabase {
   final String file;
   final common.CommonDatabase _db;
 
-  static const int schemaVersion = 11;
+  static const int schemaVersion = 12;
   static const int rollingBackupCount = 5;
 
   /// Runs [action] inside a transaction; rolls back on any error.
@@ -278,6 +278,58 @@ class AppDatabase {
         db.execute('ALTER TABLE profile_passwords ADD COLUMN version TEXT;');
       }
 
+      // v12: Applications — the Airtable "Applications Tracker", loaded from
+      // its CSV export. One row per application (keyed by student name, with
+      // #2, #3… for a student with several), each upload noted, and what
+      // changed between uploads (status moves, offers, COEs…) for the boss.
+      db.execute('''
+        CREATE TABLE IF NOT EXISTS applications (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          app_key     TEXT NOT NULL UNIQUE,
+          student     TEXT NOT NULL,
+          rto         TEXT NOT NULL DEFAULT '',
+          country     TEXT NOT NULL DEFAULT '',
+          doc_date    TEXT,
+          app_date    TEXT,
+          offer_date  TEXT,
+          coe_date    TEXT,
+          status      TEXT NOT NULL DEFAULT '',
+          assignee    TEXT NOT NULL DEFAULT '',
+          todo        TEXT NOT NULL DEFAULT '',
+          follow_up   TEXT NOT NULL DEFAULT '',
+          position    INTEGER NOT NULL DEFAULT 0,
+          updated_at  TEXT NOT NULL
+        );
+      ''');
+      db.execute('''
+        CREATE TABLE IF NOT EXISTS application_imports (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          imported_at TEXT NOT NULL,
+          file_name   TEXT NOT NULL DEFAULT '',
+          total       INTEGER NOT NULL DEFAULT 0,
+          added       INTEGER NOT NULL DEFAULT 0,
+          changed     INTEGER NOT NULL DEFAULT 0,
+          removed     INTEGER NOT NULL DEFAULT 0,
+          device      TEXT NOT NULL DEFAULT ''
+        );
+      ''');
+      db.execute('''
+        CREATE TABLE IF NOT EXISTS application_changes (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          import_id   INTEGER NOT NULL,
+          app_key     TEXT NOT NULL,
+          student     TEXT NOT NULL,
+          field       TEXT NOT NULL,
+          old_value   TEXT NOT NULL DEFAULT '',
+          new_value   TEXT NOT NULL DEFAULT '',
+          changed_at  TEXT NOT NULL
+        );
+      ''');
+      db.execute('''
+        CREATE INDEX IF NOT EXISTS idx_application_changes_import
+          ON application_changes(import_id);
+      ''');
+
       _createSyncTables(db);
 
       db.execute('''
@@ -316,6 +368,9 @@ class AppDatabase {
     'count_changes': 'id',
     'revenue_entries': 'id',
     'revenue_changes': 'id',
+    'applications': 'id',
+    'application_imports': 'id',
+    'application_changes': 'id',
   };
 
   /// v7: every change to a synced row is noted in `sync_outbox` by a
@@ -428,6 +483,13 @@ class AppDatabase {
       'count_changes': dump('SELECT * FROM count_changes ORDER BY id;'),
       'revenue_entries': dump('SELECT * FROM revenue_entries ORDER BY id;'),
       'revenue_changes': dump('SELECT * FROM revenue_changes ORDER BY id;'),
+      'applications': dump('SELECT * FROM applications ORDER BY id;'),
+      'application_imports': dump(
+        'SELECT * FROM application_imports ORDER BY id;',
+      ),
+      'application_changes': dump(
+        'SELECT * FROM application_changes ORDER BY id;',
+      ),
     };
     return const JsonEncoder.withIndent('  ').convert({
       'format': 'client-tracker-backup',
@@ -497,6 +559,43 @@ class AppDatabase {
       'device',
       'changed_at',
     },
+    'applications': {
+      'id',
+      'app_key',
+      'student',
+      'rto',
+      'country',
+      'doc_date',
+      'app_date',
+      'offer_date',
+      'coe_date',
+      'status',
+      'assignee',
+      'todo',
+      'follow_up',
+      'position',
+      'updated_at',
+    },
+    'application_imports': {
+      'id',
+      'imported_at',
+      'file_name',
+      'total',
+      'added',
+      'changed',
+      'removed',
+      'device',
+    },
+    'application_changes': {
+      'id',
+      'import_id',
+      'app_key',
+      'student',
+      'field',
+      'old_value',
+      'new_value',
+      'changed_at',
+    },
   };
 
   void restoreFromJson(String json) {
@@ -522,6 +621,14 @@ class AppDatabase {
       if (tables['revenue_changes'] is List) {
         _db.execute('DELETE FROM revenue_changes;');
       }
+      // Older backups (before v12) carry no applications — keep them.
+      for (final t in const [
+        'applications',
+        'application_imports',
+        'application_changes',
+      ]) {
+        if (tables[t] is List) _db.execute('DELETE FROM $t;');
+      }
       _db.execute('DELETE FROM count_changes;');
       _db.execute('DELETE FROM day_notes;');
       // Older backups (before v5) carry no settings — keep the current ones
@@ -545,6 +652,9 @@ class AppDatabase {
         'count_changes',
         'revenue_entries',
         'revenue_changes',
+        'applications',
+        'application_imports',
+        'application_changes',
       ];
       for (final name in order) {
         final rows = tables[name];

@@ -90,7 +90,16 @@ class SessionNotifier extends Notifier<UserRole?> {
 }
 
 /// Navigation sections, shared by sidebar (desktop) and bottom bar (mobile).
-enum AppTab { home, week, revenue, history, staff, reports, settings }
+enum AppTab {
+  home,
+  week,
+  revenue,
+  applications,
+  history,
+  staff,
+  reports,
+  settings,
+}
 
 /// The shell's context, captured by [HomeShell] so helper functions outside
 /// the widget tree (e.g. [jumpWeeks]) can show snackbars. Null until the

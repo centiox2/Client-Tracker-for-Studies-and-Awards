@@ -10,6 +10,7 @@ import 'screens/dashboard/dashboard_screen.dart';
 import 'screens/history/history_screen.dart';
 import 'screens/quick_search/quick_search_dialog.dart';
 import 'screens/quick_search/shortcuts_dialog.dart';
+import 'screens/applications/applications_screen.dart';
 import 'screens/auth/profile_picker.dart';
 import 'screens/auth/sign_in_screen.dart';
 import 'screens/reports/reports_screen.dart';
@@ -80,11 +81,19 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       shortLabel: 'Tracker',
     ),
     _revenueTab,
+    _applicationsTab,
     _AppTabInfo(AppTab.history, 'History', Icons.history),
     _AppTabInfo(AppTab.staff, 'Staff', Icons.groups_2_outlined),
     _reportsTab,
     _AppTabInfo(AppTab.settings, 'Settings', Icons.settings_outlined),
   ];
+
+  static const _applicationsTab = _AppTabInfo(
+    AppTab.applications,
+    'Applications',
+    Icons.school_outlined,
+    shortLabel: 'Apps',
+  );
 
   static const _revenueTab = _AppTabInfo(
     AppTab.revenue,
@@ -106,6 +115,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   static const _viewerTabs = <_AppTabInfo>[
     _reportsTab,
     _revenueTab,
+    _applicationsTab,
     _AppTabInfo(AppTab.history, 'History', Icons.history),
     _AppTabInfo(AppTab.staff, 'Staff', Icons.groups_2_outlined),
   ];
@@ -309,6 +319,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     AppTab.home => const DashboardScreen(),
     AppTab.week => const WeeklyTrackerScreen(),
     AppTab.revenue => RevenueScreen(readOnly: !ref.read(isAdminProvider)),
+    AppTab.applications => ApplicationsScreen(canUpload: !_isViewer),
     AppTab.history => HistoryScreen(readOnly: _isViewer),
     AppTab.staff => StaffManagementScreen(readOnly: _isViewer),
     AppTab.reports => const ReportsScreen(),
@@ -1050,6 +1061,7 @@ class _WeekPicker extends ConsumerWidget {
 String _tabLabel(AppTab tab) => switch (tab) {
   AppTab.home => 'Overview',
   AppTab.revenue => 'Revenue',
+  AppTab.applications => 'Applications',
   AppTab.week => 'Weekly tracker',
   AppTab.history => 'History',
   AppTab.staff => 'Staff',

@@ -38,6 +38,13 @@ class _QuickView extends ConsumerWidget {
     // Revenue is by calendar day: today's money, even at the weekend.
     final now = DateTime.now();
     final revenueDay = DateTime(now.year, now.month, now.day);
+    final appRepo = ref.read(applicationRepositoryProvider);
+    final apps = appRepo.all();
+    final latestImport = appRepo.latestImport;
+    bool thisMonth(DateTime? d) =>
+        d != null && d.year == now.year && d.month == now.month;
+    void openApplications() =>
+        ref.read(navTabProvider.notifier).set(AppTab.applications);
     // Revenue only for the admin and the director.
     final seesRevenue = ref.watch(seesRevenueProvider);
     final revenueLastWeek = revenueDay.subtract(const Duration(days: 7));
@@ -175,6 +182,33 @@ class _QuickView extends ConsumerWidget {
           'Revenue in ${DateFormat('MMMM').format(revenueDay)}',
           revenueMonth,
         ),
+      // Applications (the Airtable tracker), when any were uploaded.
+      if (apps.isNotEmpty) ...[
+        InkWell(
+          key: const ValueKey('quick-applications'),
+          borderRadius: BorderRadius.circular(Dt.rMd),
+          onTap: openApplications,
+          child: _Tile(
+            label: 'Applications in progress',
+            value: '${apps.where((a) => a.inProgress).length}',
+            caption: latestImport == null
+                ? '${apps.length} in the tracker'
+                : '${latestImport.changed + latestImport.added} updated in '
+                      'the last upload',
+          ),
+        ),
+        InkWell(
+          borderRadius: BorderRadius.circular(Dt.rMd),
+          onTap: openApplications,
+          child: _Tile(
+            label: 'COEs in ${DateFormat('MMMM').format(revenueDay)}',
+            value: '${apps.where((a) => thisMonth(a.coeDate)).length}',
+            caption:
+                '${apps.where((a) => thisMonth(a.offerDate)).length} offer '
+                'letters this month',
+          ),
+        ),
+      ],
     ];
 
     final whoPanel = _Panel(
@@ -212,6 +246,57 @@ class _QuickView extends ConsumerWidget {
       child: _Activity(entries: week.activity.take(8).toList()),
     );
 
+    // What moved in the latest applications upload.
+    final appChanges = latestImport == null
+        ? const <ApplicationChange>[]
+        : appRepo.changesFor(latestImport.id);
+    final byStudent = <String, List<ApplicationChange>>{};
+    for (final c in appChanges) {
+      byStudent.putIfAbsent(c.key, () => []).add(c);
+    }
+    final applicationsPanel = latestImport == null
+        ? null
+        : _Panel(
+            title: 'Application updates',
+            icon: Icons.school_outlined,
+            trailing: DateFormat('d MMM, h:mm a').format(latestImport.at),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (byStudent.isEmpty)
+                    _Note(
+                      latestImport.added == latestImport.total
+                          ? '${latestImport.total} applications loaded. The '
+                                'next upload will show what changed.'
+                          : 'Nothing changed in the last upload.',
+                    )
+                  else
+                    for (final e in byStudent.entries.take(6))
+                      ApplicationUpdateRow(
+                        student: e.value.first.student,
+                        changes: e.value,
+                        dense: true,
+                        onTap: openApplications,
+                      ),
+                  if (byStudent.length > 6 || byStudent.isEmpty)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: openApplications,
+                        child: Text(
+                          byStudent.length > 6
+                              ? 'See all ${byStudent.length} updates'
+                              : 'Open Applications',
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -247,6 +332,10 @@ class _QuickView extends ConsumerWidget {
           weekPanel,
           const SizedBox(height: 12),
           activityPanel,
+          if (applicationsPanel != null) ...[
+            const SizedBox(height: 12),
+            applicationsPanel,
+          ],
         ] else
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -260,6 +349,10 @@ class _QuickView extends ConsumerWidget {
                     weekPanel,
                     const SizedBox(height: 12),
                     activityPanel,
+                    if (applicationsPanel != null) ...[
+                      const SizedBox(height: 12),
+                      applicationsPanel,
+                    ],
                   ],
                 ),
               ),

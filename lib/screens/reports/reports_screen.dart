@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../design/app_theme.dart';
+import '../../repositories/application_repository.dart';
 import '../../repositories/report_repository.dart';
 import '../../repositories/revenue_repository.dart';
 import '../../services/export_actions.dart';
@@ -14,6 +15,7 @@ import '../../services/report_export.dart';
 import '../../state/app_state.dart';
 import '../../widgets/motion.dart';
 import '../../widgets/panels.dart';
+import '../applications/applications_screen.dart' show ApplicationUpdateRow;
 
 part 'quick_view.dart';
 part 'report_charts.dart';
