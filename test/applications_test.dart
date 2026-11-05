@@ -228,6 +228,8 @@ void main() {
     // Waiting longest: 40 days since the application.
     expect(find.text('40 d'), findsOneWidget);
     expect(find.text('1 in progress with no assignee'), findsOneWidget);
+    // Every in-progress one here has a date; none are left unaccounted.
+    expect(find.textContaining('no dates in the tracker'), findsNothing);
     // Tapping a stage lists it.
     await tester.tap(find.text('Awaiting offer letter · 1'));
     await tester.pumpAndSettle();
