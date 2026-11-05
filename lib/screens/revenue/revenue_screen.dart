@@ -219,12 +219,160 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
             ],
           );
         }
+        final totalCard = _TotalCard(
+          label: isToday
+              ? 'Revenue today'
+              : 'Revenue on ${DateFormat('EEEE d MMM').format(day)}',
+          total: formatMoney(total, currency),
+          count: entries.length,
+        );
+        final addPanel = widget.readOnly
+            ? null
+            : _AddPanel(
+                phone: phone,
+                currency: currency,
+                amount: _amount,
+                note: _note,
+                amountFocus: _amountFocus,
+                error: _error,
+                onSubmit: () => _add(day),
+                day: day,
+                time: _time,
+                onPickDay: () => _pickDay(day),
+                onPickTime: () async {
+                  final t = await showTimePicker(
+                    context: context,
+                    initialTime: _time ?? TimeOfDay.now(),
+                  );
+                  if (t != null) setState(() => _time = t);
+                },
+                onClearTime: () => setState(() => _time = null),
+                purposes: ref.watch(revenuePurposesProvider),
+                purpose: _purpose,
+                onPurpose: (p) => setState(() => _purpose = p),
+                refund: _refund,
+                onRefund: (r) => setState(() => _refund = r),
+                onScan: photoTextSupported
+                    ? () => scanPaymentPhotos(context, ref, day)
+                    : null,
+                onPaste: () => pastePaymentMessage(context, ref, day),
+                onChanged: () {
+                  if (_error != null) setState(() => _error = null);
+                },
+              );
+        final transactions = AppPanel(
+          title: 'Transactions',
+          icon: Icons.receipt_long_outlined,
+          trailing: entries.isEmpty
+              ? null
+              : '${entries.length} · ${formatMoney(total, currency)}',
+          child: entries.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    widget.readOnly
+                        ? 'No revenue recorded for this day.'
+                        : 'Nothing yet. Type each amount above '
+                              'and press Enter.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: Dt.textMuted(theme),
+                    ),
+                  ),
+                )
+              : Column(
+                  children: [
+                    for (final (i, e) in entries.indexed)
+                      RevenueEntryRow(
+                        index: i + 1,
+                        entry: e,
+                        currency: currency,
+                        onEdit: widget.readOnly
+                            ? null
+                            : () => showEditRevenueDialog(context, ref, e),
+                        onDelete: widget.readOnly ? null : () => _delete(e),
+                        onPayer: payerOf(e.note) == null
+                            ? null
+                            : () => _openSearch(payerOf(e.note)!),
+                      ),
+                  ],
+                ),
+        );
+        final weekPanel = AppPanel(
+          title: 'Week of ${DateFormat('d MMM').format(monday)}',
+          icon: Icons.bar_chart,
+          trailing: formatMoney(
+            week.fold<int>(0, (s, d) => s + d.totalCents),
+            currency,
+          ),
+          child: _WeekBars(
+            days: week,
+            selected: day,
+            today: today,
+            currency: currency,
+            onSelect: (d) => ref.read(revenueDateProvider.notifier).set(d),
+          ),
+        );
+        final monthLine = Text(
+          '${DateFormat('MMMM').format(day)} '
+          '${isToday ? 'so far' : 'up to ${DateFormat('d MMM').format(day)}'}: '
+          '${formatMoney(monthTotal, currency)}'
+          '${monthDays == 0 ? '' : ' · ${formatMoney((monthTotal / monthDays / 100).round() * 100, currency)} a day on average '
+                    '($monthDays ${monthDays == 1 ? 'day' : 'days'} with revenue)'}',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: Dt.textMuted(theme),
+          ),
+        );
+        // Wide screens: entering on the left, the day's list on the right.
+        final wide = viewport.maxWidth >= 1100;
+        final dayBody = wide
+            ? Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 5,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        totalCard,
+                        if (addPanel != null) ...[
+                          const SizedBox(height: 12),
+                          addPanel,
+                        ],
+                        const SizedBox(height: 12),
+                        weekPanel,
+                        const SizedBox(height: 12),
+                        monthLine,
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(flex: 6, child: transactions),
+                ],
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  totalCard,
+                  if (addPanel != null) ...[
+                    const SizedBox(height: 12),
+                    addPanel,
+                  ],
+                  const SizedBox(height: 12),
+                  transactions,
+                  const SizedBox(height: 12),
+                  weekPanel,
+                  const SizedBox(height: 12),
+                  monthLine,
+                ],
+              );
         return ListView(
           padding: EdgeInsets.fromLTRB(pad, 16, pad, 28),
           children: [
             Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 820),
+                constraints: BoxConstraints(
+                  maxWidth: wide ? Dt.contentMaxWidth : 820,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -242,120 +390,7 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
                           ref.read(revenueDateProvider.notifier).set(today),
                     ),
                     const SizedBox(height: 12),
-                    _TotalCard(
-                      label: isToday
-                          ? 'Revenue today'
-                          : 'Revenue on ${DateFormat('EEEE d MMM').format(day)}',
-                      total: formatMoney(total, currency),
-                      count: entries.length,
-                    ),
-                    if (!widget.readOnly) ...[
-                      const SizedBox(height: 12),
-                      _AddPanel(
-                        phone: phone,
-                        currency: currency,
-                        amount: _amount,
-                        note: _note,
-                        amountFocus: _amountFocus,
-                        error: _error,
-                        onSubmit: () => _add(day),
-                        day: day,
-                        time: _time,
-                        onPickDay: () => _pickDay(day),
-                        onPickTime: () async {
-                          final t = await showTimePicker(
-                            context: context,
-                            initialTime: _time ?? TimeOfDay.now(),
-                          );
-                          if (t != null) setState(() => _time = t);
-                        },
-                        onClearTime: () => setState(() => _time = null),
-                        purposes: ref.watch(revenuePurposesProvider),
-                        purpose: _purpose,
-                        onPurpose: (p) => setState(() => _purpose = p),
-                        refund: _refund,
-                        onRefund: (r) => setState(() => _refund = r),
-                        onScan: photoTextSupported
-                            ? () => scanPaymentPhotos(context, ref, day)
-                            : null,
-                        onPaste: () => pastePaymentMessage(context, ref, day),
-                        onChanged: () {
-                          if (_error != null) setState(() => _error = null);
-                        },
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    AppPanel(
-                      title: 'Transactions',
-                      icon: Icons.receipt_long_outlined,
-                      trailing: entries.isEmpty
-                          ? null
-                          : '${entries.length} · ${formatMoney(total, currency)}',
-                      child: entries.isEmpty
-                          ? Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Text(
-                                widget.readOnly
-                                    ? 'No revenue recorded for this day.'
-                                    : 'Nothing yet. Type each amount above '
-                                          'and press Enter.',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: Dt.textMuted(theme),
-                                ),
-                              ),
-                            )
-                          : Column(
-                              children: [
-                                for (final (i, e) in entries.indexed)
-                                  RevenueEntryRow(
-                                    index: i + 1,
-                                    entry: e,
-                                    currency: currency,
-                                    onEdit: widget.readOnly
-                                        ? null
-                                        : () => showEditRevenueDialog(
-                                            context,
-                                            ref,
-                                            e,
-                                          ),
-                                    onDelete: widget.readOnly
-                                        ? null
-                                        : () => _delete(e),
-                                    onPayer: payerOf(e.note) == null
-                                        ? null
-                                        : () => _openSearch(payerOf(e.note)!),
-                                  ),
-                              ],
-                            ),
-                    ),
-                    const SizedBox(height: 12),
-                    AppPanel(
-                      title: 'Week of ${DateFormat('d MMM').format(monday)}',
-                      icon: Icons.bar_chart,
-                      trailing: formatMoney(
-                        week.fold<int>(0, (s, d) => s + d.totalCents),
-                        currency,
-                      ),
-                      child: _WeekBars(
-                        days: week,
-                        selected: day,
-                        today: today,
-                        currency: currency,
-                        onSelect: (d) =>
-                            ref.read(revenueDateProvider.notifier).set(d),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      '${DateFormat('MMMM').format(day)} '
-                      '${isToday ? 'so far' : 'up to ${DateFormat('d MMM').format(day)}'}: '
-                      '${formatMoney(monthTotal, currency)}'
-                      '${monthDays == 0 ? '' : ' · ${formatMoney((monthTotal / monthDays / 100).round() * 100, currency)} a day on average '
-                                '($monthDays ${monthDays == 1 ? 'day' : 'days'} with revenue)'}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: Dt.textMuted(theme),
-                      ),
-                    ),
+                    dayBody,
                   ],
                 ),
               ),

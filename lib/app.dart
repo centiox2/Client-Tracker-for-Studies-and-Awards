@@ -424,7 +424,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                 selectedIcon: const Icon(Icons.menu),
                 label: barIndex >= 0
                     ? 'More'
-                    : moreTabs.firstWhere((t) => t.tab == tab).label,
+                    : (moreTabs.firstWhere((t) => t.tab == tab).shortLabel ??
+                          moreTabs.firstWhere((t) => t.tab == tab).label),
                 tooltip: 'More pages',
               ),
           ],
@@ -451,7 +452,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
               children: [
                 _TopBar(tab: tab),
                 // Navigation lives in the sidebar only (no duplicate tabs).
-                if (!isViewer) _ContextBar(tab: tab),
+                if (!isViewer && _weekTabs.contains(tab)) _ContextBar(tab: tab),
                 Expanded(child: content),
               ],
             ),
@@ -800,8 +801,8 @@ class _TopBar extends ConsumerWidget {
               const Spacer(),
               const SyncStatusBadge(),
               const SizedBox(width: 8),
-              // Admins refresh from the context bar; the boss gets it here.
-              if (isViewer) ...[
+              // Week pages refresh from their context bar; elsewhere here.
+              if (isViewer || !_weekTabs.contains(tab)) ...[
                 TextButton.icon(
                   onPressed: () =>
                       ref.read(dataVersionProvider.notifier).bump(),
@@ -969,12 +970,15 @@ class _ContextBar extends ConsumerWidget {
                   icon: const Icon(Icons.refresh, size: 14),
                   label: const Text('Refresh'),
                 ),
-              const SizedBox(width: 6),
-              OutlinedButton.icon(
-                onPressed: () => showNewWeekDialog(context, ref),
-                icon: const Icon(Icons.add, size: 14),
-                label: Text(compact ? 'New' : 'New week'),
-              ),
+              // Starting a week belongs with the weeks, not every page.
+              if (picksWeek || tab == AppTab.history) ...[
+                const SizedBox(width: 6),
+                OutlinedButton.icon(
+                  onPressed: () => showNewWeekDialog(context, ref),
+                  icon: const Icon(Icons.add, size: 14),
+                  label: const Text('New week'),
+                ),
+              ],
             ],
           ),
         ),
@@ -1057,6 +1061,9 @@ class _WeekPicker extends ConsumerWidget {
     );
   }
 }
+
+/// Pages about weeks: their context bar picks the week and starts new ones.
+const _weekTabs = {AppTab.home, AppTab.week, AppTab.history};
 
 String _tabLabel(AppTab tab) => switch (tab) {
   AppTab.home => 'Overview',
