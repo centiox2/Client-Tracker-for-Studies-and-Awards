@@ -91,6 +91,11 @@ abstract class CloudApi {
   /// Admin only: a temporary password for a user who forgot theirs.
   Future<void> adminResetPassword(String token, int userId, String password);
 
+  /// Calls one of the online database's functions with [params] and
+  /// returns its JSON result (daily reports use this; they are read and
+  /// written online only). Throws [CloudException] on a refusal.
+  Future<Object?> callFunction(String name, Map<String, Object?> params);
+
   /// A signal each time any device changes the data (no data in it: the
   /// latest is then read with [snapshot]).
   Stream<CloudChange> changes();

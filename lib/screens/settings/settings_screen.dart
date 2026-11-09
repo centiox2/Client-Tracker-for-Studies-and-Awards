@@ -17,6 +17,7 @@ import '../../widgets/panels.dart';
 import '../../widgets/sync_status.dart';
 import '../history/change_history_dialog.dart';
 import 'import_dialog.dart';
+import 'departments_section.dart';
 import 'users_section.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -322,9 +323,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ),
       ),
       // Personal accounts replace the shared profiles and their passwords.
-      if (accounts)
-        const UsersSection()
-      else ...[
+      if (accounts) ...[
+        const UsersSection(),
+        const DepartmentsSection(),
+      ] else ...[
         const _ProfilesSection(),
         _Section(
           title: 'Admin password',

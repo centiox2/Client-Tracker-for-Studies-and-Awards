@@ -1,3 +1,4 @@
+import 'daily_report.dart';
 import 'user_role.dart';
 
 /// One person's account: they sign in with [username] and their own
@@ -14,6 +15,8 @@ class AppUser {
     this.mustChange = false,
     this.lastSignIn,
     this.locked = false,
+    this.departmentId,
+    this.reportAccess = ReportAccess.employee,
   });
 
   final int id;
@@ -32,6 +35,12 @@ class AppUser {
   /// Too many wrong passwords: refused for a few minutes.
   final bool locked;
 
+  /// Their department, for daily reports (null: none yet).
+  final int? departmentId;
+
+  /// What they see in daily reports: own, their department, or all.
+  final ReportAccess reportAccess;
+
   factory AppUser.fromJson(Map<String, Object?> json) => AppUser(
     id: (json['id'] as num).toInt(),
     username: json['username'] as String,
@@ -42,6 +51,8 @@ class AppUser {
     mustChange: json['must_change'] as bool? ?? false,
     lastSignIn: DateTime.tryParse('${json['last_sign_in'] ?? ''}')?.toLocal(),
     locked: json['locked'] as bool? ?? false,
+    departmentId: (json['department_id'] as num?)?.toInt(),
+    reportAccess: ReportAccess.fromCode(json['report_access'] as String?),
   );
 
   Map<String, Object?> toJson() => {
@@ -54,6 +65,8 @@ class AppUser {
     'must_change': mustChange,
     'last_sign_in': lastSignIn?.toUtc().toIso8601String(),
     'locked': locked,
+    'department_id': departmentId,
+    'report_access': reportAccess.code,
   };
 
   AppUser copyWith({bool? mustChange}) => AppUser(
@@ -66,6 +79,8 @@ class AppUser {
     mustChange: mustChange ?? this.mustChange,
     lastSignIn: lastSignIn,
     locked: locked,
+    departmentId: departmentId,
+    reportAccess: reportAccess,
   );
 
   /// The rules the online database enforces: 3 to 32 characters, lower case

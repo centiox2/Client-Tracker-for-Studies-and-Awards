@@ -579,6 +579,11 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     }
   }
 
+  /// Calls an online function as the signed-in person (their token added
+  /// as p_token). Daily reports are read and written this way.
+  Future<Object?> callAsUser(String name, [Map<String, Object?>? params]) =>
+      _needApi().callFunction(name, {'p_token': _needToken(), ...?params});
+
   /// Admin: every account.
   Future<List<AppUser>> listUsers() => _needApi().adminListUsers(_needToken());
 
@@ -592,6 +597,8 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     int? staffId,
     bool active = true,
     String? password,
+    int? departmentId,
+    ReportAccess reportAccess = ReportAccess.employee,
   }) async {
     final saved = await _needApi().adminSaveUser(_needToken(), {
       'id': ?id,
@@ -600,6 +607,8 @@ class CloudSyncController extends Notifier<CloudSyncState> {
       'role': role.serverName,
       'staff_id': staffId,
       'active': active,
+      'department_id': departmentId,
+      'report_access': reportAccess.code,
     }, password: password);
     ref.read(currentUserProvider.notifier).update(saved);
     return saved;

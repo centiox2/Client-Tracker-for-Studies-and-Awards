@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import 'design/app_theme.dart';
+import 'screens/daily_reports/daily_reports_screen.dart';
 import 'screens/dashboard/dashboard_screen.dart';
 import 'screens/history/history_screen.dart';
 import 'screens/quick_search/quick_search_dialog.dart';
@@ -79,6 +80,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       Icons.space_dashboard_outlined,
       shortLabel: 'Home',
     ),
+    _dailyReportsTab,
     _AppTabInfo(
       AppTab.week,
       'Weekly tracker',
@@ -92,6 +94,13 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     _reportsTab,
     _AppTabInfo(AppTab.settings, 'Settings', Icons.settings_outlined),
   ];
+
+  static const _dailyReportsTab = _AppTabInfo(
+    AppTab.dailyReports,
+    'Daily reports',
+    Icons.fact_check_outlined,
+    shortLabel: 'Daily',
+  );
 
   static const _applicationsTab = _AppTabInfo(
     AppTab.applications,
@@ -109,15 +118,17 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   /// The phone's bottom bar holds five buttons at most; with more pages the
   /// main ones stay and the rest go under "More".
   static const _phoneMain = [
+    AppTab.dailyReports,
     AppTab.home,
     AppTab.week,
-    AppTab.revenue,
     AppTab.reports,
+    AppTab.revenue,
   ];
 
   /// Signed out: Reports plus read-only History and Staff — nothing that
   /// can change data.
   static const _viewerTabs = <_AppTabInfo>[
+    _dailyReportsTab,
     _reportsTab,
     _revenueTab,
     _applicationsTab,
@@ -136,7 +147,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     return [
       for (final t in base)
         if ((t.tab != AppTab.revenue || (role?.seesRevenue ?? false)) &&
-            (t.tab != AppTab.settings || (role?.isAdmin ?? false)))
+            (t.tab != AppTab.settings || (role?.isAdmin ?? false)) &&
+            // Daily reports live with personal accounts (online only).
+            (t.tab != AppTab.dailyReports || ref.read(accountsEnabledProvider)))
           t,
     ];
   }
@@ -337,6 +350,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   Widget _page(AppTab tab) => switch (tab) {
     AppTab.home => const DashboardScreen(),
+    AppTab.dailyReports => const DailyReportsScreen(),
     AppTab.week => const WeeklyTrackerScreen(),
     AppTab.revenue => RevenueScreen(readOnly: !ref.read(isAdminProvider)),
     AppTab.applications => ApplicationsScreen(canUpload: !_isViewer),
@@ -397,16 +411,23 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     if (!desktop) {
       final tabs = allowed;
       final useMore = tabs.length > 5;
+      // Four main pages (the most important this profile has) plus More.
+      final main = useMore
+          ? (([
+              for (final t in _phoneMain)
+                if (tabs.any((i) => i.tab == t)) t,
+            ]).take(4).toSet())
+          : const <AppTab>{};
       final barTabs = useMore
           ? [
               for (final t in tabs)
-                if (_phoneMain.contains(t.tab)) t,
+                if (main.contains(t.tab)) t,
             ]
           : tabs;
       final moreTabs = useMore
           ? [
               for (final t in tabs)
-                if (!_phoneMain.contains(t.tab)) t,
+                if (!main.contains(t.tab)) t,
             ]
           : const <_AppTabInfo>[];
       final barIndex = barTabs.indexWhere((item) => item.tab == tab);
@@ -1145,6 +1166,7 @@ const _weekTabs = {AppTab.home, AppTab.week, AppTab.history};
 
 String _tabLabel(AppTab tab) => switch (tab) {
   AppTab.home => 'Overview',
+  AppTab.dailyReports => 'Daily reports',
   AppTab.revenue => 'Revenue',
   AppTab.applications => 'Applications',
   AppTab.week => 'Weekly tracker',

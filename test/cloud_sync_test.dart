@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:excel/excel.dart';
 import 'package:client_tracker/app.dart';
+import 'package:client_tracker/services/daily_report_export.dart';
 import 'package:client_tracker/database/app_database_io.dart';
 import 'package:client_tracker/database/database.dart';
 import 'package:client_tracker/repositories/auth_repository.dart';
@@ -237,6 +241,8 @@ class FakeCloud implements CloudApi {
     String? name,
     bool mustChange = false,
     bool active = true,
+    int? departmentId,
+    ReportAccess reportAccess = ReportAccess.employee,
   }) {
     final id = users.length + 1;
     final user = AppUser(
@@ -246,6 +252,8 @@ class FakeCloud implements CloudApi {
       role: role,
       mustChange: mustChange,
       active: active,
+      departmentId: departmentId,
+      reportAccess: reportAccess,
     );
     users[id] = user;
     userPasswords[id] = password;
@@ -418,6 +426,315 @@ class FakeCloud implements CloudApi {
       mustChange: true,
     );
     _signOutEverywhere(id);
+  }
+
+  // ---- Daily reports (same rules as the database functions) -------------
+
+  DateTime reportsToday = DateTime(2026, 11, 9);
+  final departments = <Map<String, Object?>>[
+    {
+      'id': 1,
+      'name': 'Admissions & Applications',
+      'outputs': [
+        {'key': 'applications_submitted', 'label': 'Applications submitted'},
+        {'key': 'coes_issued', 'label': 'COEs issued'},
+      ],
+      'active': true,
+      'position': 1,
+    },
+    {
+      'id': 2,
+      'name': 'Visa Processing & Documentation',
+      'outputs': [
+        {'key': 'visa_lodgements', 'label': 'Visa lodgements'},
+      ],
+      'active': true,
+      'position': 2,
+    },
+  ];
+  final reports = <int, Map<String, Object?>>{};
+  final reportChanges = <Map<String, Object?>>[];
+  final calls = <String>[];
+
+  String _scope(int uid) {
+    final u = users[uid]!;
+    if (u.role == UserRole.admin ||
+        u.role == UserRole.director ||
+        u.reportAccess == ReportAccess.manager) {
+      return 'all';
+    }
+    if (u.reportAccess == ReportAccess.head && u.departmentId != null) {
+      return 'department';
+    }
+    return 'own';
+  }
+
+  bool _canSee(int uid, int owner, int? dept) => switch (_scope(uid)) {
+    'all' => true,
+    'department' => owner == uid || dept == users[uid]!.departmentId,
+    _ => owner == uid,
+  };
+
+  String _day(DateTime d) => dateKey(d);
+
+  Map<String, Object?> _reportJson(Map<String, Object?> r) => {
+    ...r,
+    'user_name': users[r['user_id']]!.fullName,
+    'department_name': departments.firstWhere(
+      (d) => d['id'] == r['department_id'],
+    )['name'],
+  };
+
+  @override
+  Future<Object?> callFunction(String name, Map<String, Object?> p) async {
+    _online();
+    calls.add(name);
+    final uid = _tokenUser(p['p_token'] as String);
+    final me = users[uid]!;
+    final today = reportsToday;
+    List<Map<String, Object?>> visible() => [
+      for (final r in reports.values)
+        if (_canSee(uid, r['user_id'] as int, r['department_id'] as int?)) r,
+    ];
+    switch (name) {
+      case 'reports_meta':
+        final scope = _scope(uid);
+        return {
+          'today': _day(today),
+          'me': {...me.toJson(), 'scope': scope},
+          'departments': departments,
+          'people': [
+            for (final u in users.values)
+              if (scope == 'all' ||
+                  u.id == uid ||
+                  (scope == 'department' && u.departmentId == me.departmentId))
+                {
+                  'id': u.id,
+                  'full_name': u.fullName,
+                  'department_id': u.departmentId,
+                  'active': u.active,
+                },
+          ],
+        };
+      case 'report_list':
+        final f = (p['p_filter'] as Map).cast<String, Object?>();
+        final rows = visible().where((r) {
+          final d = r['report_date'] as String;
+          final open = r['status'] != 'completed';
+          return (f['from'] == null || d.compareTo(f['from'] as String) >= 0) &&
+              (f['to'] == null || d.compareTo(f['to'] as String) <= 0) &&
+              (f['user_id'] == null || r['user_id'] == f['user_id']) &&
+              (f['department_id'] == null ||
+                  r['department_id'] == f['department_id']) &&
+              (f['statuses'] == null ||
+                  (f['statuses'] as List).contains(r['status'])) &&
+              (f['open_only'] != true || open) &&
+              (f['overdue_only'] != true ||
+                  (open &&
+                      r['due_date'] != null &&
+                      (r['due_date'] as String).compareTo(_day(today)) < 0)) &&
+              (f['search'] == null ||
+                  '${r['description']} ${r['reference']}'
+                      .toLowerCase()
+                      .contains((f['search'] as String).toLowerCase()));
+        }).toList()..sort((a, b) => (b['id'] as int).compareTo(a['id'] as int));
+        return [for (final r in rows) _reportJson(r)];
+      case 'report_summary':
+        final from = p['p_from'] as String;
+        final to = p['p_to'] as String;
+        final deptFilter = p['p_department'] as int?;
+        final inRange = visible().where((r) {
+          final d = r['report_date'] as String;
+          return d.compareTo(from) >= 0 &&
+              d.compareTo(to) <= 0 &&
+              (deptFilter == null || r['department_id'] == deptFilter);
+        }).toList();
+        final status = <String, int>{};
+        for (final r in inRange) {
+          status[r['status'] as String] =
+              (status[r['status'] as String] ?? 0) + 1;
+        }
+        final scope = _scope(uid);
+        final open = visible().where((r) => r['status'] != 'completed');
+        return {
+          'from': from,
+          'to': to,
+          'today': _day(today),
+          'working_days': 1,
+          'status': status,
+          'departments': [
+            for (final d in departments)
+              if ((deptFilter == null || d['id'] == deptFilter) &&
+                  (scope == 'all' || d['id'] == me.departmentId))
+                () {
+                  final rs = inRange.where(
+                    (r) => r['department_id'] == d['id'],
+                  );
+                  final outputs = <String, int>{};
+                  for (final r in rs) {
+                    (r['outputs'] as Map).forEach(
+                      (k, v) =>
+                          outputs['$k'] = (outputs['$k'] ?? 0) + (v as int),
+                    );
+                  }
+                  return {
+                    'id': d['id'],
+                    'name': d['name'],
+                    'activities': rs.length,
+                    'completed': rs
+                        .where((r) => r['status'] == 'completed')
+                        .length,
+                    'open': rs.where((r) => r['status'] != 'completed').length,
+                    'blocked': rs.where((r) => r['status'] == 'blocked').length,
+                    'escalated': rs
+                        .where((r) => r['status'] == 'escalated')
+                        .length,
+                    'people': rs.map((r) => r['user_id']).toSet().length,
+                    'outputs': outputs,
+                  };
+                }(),
+          ],
+          'compliance': [
+            for (final u in users.values)
+              if (u.active &&
+                  u.departmentId != null &&
+                  (deptFilter == null || u.departmentId == deptFilter) &&
+                  (scope == 'all' ||
+                      u.id == uid ||
+                      (scope == 'department' &&
+                          u.departmentId == me.departmentId)))
+                {
+                  'id': u.id,
+                  'full_name': u.fullName,
+                  'department_id': u.departmentId,
+                  'department_name': departments.firstWhere(
+                    (d) => d['id'] == u.departmentId,
+                  )['name'],
+                  'days_submitted': inRange
+                      .where((r) => r['user_id'] == u.id)
+                      .map((r) => r['report_date'])
+                      .toSet()
+                      .length,
+                  'entries': inRange.where((r) => r['user_id'] == u.id).length,
+                  'submitted_today': reports.values.any(
+                    (r) =>
+                        r['user_id'] == u.id && r['report_date'] == _day(today),
+                  ),
+                },
+          ],
+          'overdue': [
+            for (final r in open)
+              if (r['due_date'] != null &&
+                  (r['due_date'] as String).compareTo(_day(today)) < 0)
+                _reportJson(r),
+          ],
+          'attention': [
+            for (final r in open)
+              if (r['status'] == 'blocked' || r['status'] == 'escalated')
+                _reportJson(r),
+          ],
+        };
+      case 'report_save':
+        final r = (p['p_report'] as Map).cast<String, Object?>();
+        final id = r['id'] as int?;
+        final before = id == null ? null : reports[id];
+        if (id != null && before == null) {
+          throw CloudException('unknown_report');
+        }
+        if (before != null &&
+            before['user_id'] != uid &&
+            me.role != UserRole.admin) {
+          throw CloudException('not_allowed');
+        }
+        final dept = before?['department_id'] ?? me.departmentId;
+        if (dept == null) throw CloudException('no_department');
+        final date = r['report_date'] as String? ?? _day(today);
+        if (date.compareTo(_day(today)) > 0) {
+          throw CloudException('future_date');
+        }
+        final status = r['status'] as String? ?? 'completed';
+        if (status != 'completed' && r['due_date'] == null) {
+          throw CloudException('due_date_required');
+        }
+        if ('${r['description'] ?? ''}'.trim().isEmpty) {
+          throw CloudException('description_required');
+        }
+        final keys = [
+          for (final o
+              in departments.firstWhere((d) => d['id'] == dept)['outputs']!
+                  as List)
+            (o as Map)['key'],
+        ];
+        final saved = <String, Object?>{
+          'id': id ?? reports.length + 100,
+          'user_id': before?['user_id'] ?? uid,
+          'department_id': dept,
+          'report_date': date,
+          'description': '${r['description']}'.trim(),
+          'reference': r['reference'] ?? '',
+          'outputs': {
+            for (final e in ((r['outputs'] as Map?) ?? {}).entries)
+              if (keys.contains(e.key) && (e.value as int) > 0) e.key: e.value,
+          },
+          'status': status,
+          'next_action': r['next_action'] ?? '',
+          'blocker': r['blocker'] ?? '',
+          'priority': r['priority'] ?? 'medium',
+          'due_date': r['due_date'],
+          'created_at': '2026-11-09T08:00:00Z',
+          'updated_at': '2026-11-09T08:00:00Z',
+        };
+        reports[saved['id'] as int] = saved;
+        reportChanges.add({
+          'report_id': saved['id'],
+          'action': before == null ? 'created' : 'edited',
+          'changed_by': me.fullName,
+          'changed_at': '2026-11-09T08:00:00Z',
+        });
+        return _reportJson(saved);
+      case 'report_delete':
+        final id = p['p_report'] as int;
+        final r = reports[id];
+        if (r == null) return null;
+        if (r['user_id'] != uid && me.role != UserRole.admin) {
+          throw CloudException('not_allowed');
+        }
+        reports.remove(id);
+        reportChanges.add({
+          'report_id': id,
+          'action': 'deleted',
+          'changed_by': me.fullName,
+          'changed_at': '2026-11-09T09:00:00Z',
+        });
+        return null;
+      case 'report_history':
+        return [
+          for (final c in reportChanges)
+            if (c['report_id'] == p['p_report']) c,
+        ];
+      case 'admin_save_department':
+        _needAdmin(p['p_token'] as String);
+        final d = (p['p_department'] as Map).cast<String, Object?>();
+        if (departments.any(
+          (x) =>
+              '${x['name']}'.toLowerCase() == '${d['name']}'.toLowerCase() &&
+              x['id'] != d['id'],
+        )) {
+          throw CloudException('name_taken');
+        }
+        final saved = {
+          'id': d['id'] ?? departments.length + 1,
+          'name': d['name'],
+          'outputs': d['outputs'],
+          'active': d['active'] ?? true,
+          'position': departments.length + 1,
+        };
+        departments
+          ..removeWhere((x) => x['id'] == saved['id'])
+          ..add(saved);
+        return saved;
+    }
+    throw CloudException('needs_update');
   }
 
   @override
@@ -1189,5 +1506,342 @@ void main() {
         true,
       );
     }
+  });
+
+  // ------------------------------------------------------- daily reports ---
+
+  Map<String, Object?> seedReport(
+    int id,
+    int userId,
+    int dept, {
+    String status = 'completed',
+    String date = '2026-11-09',
+    String? due,
+    Map<String, int> outputs = const {},
+    String description = 'Work done',
+  }) => cloud.reports[id] = {
+    'id': id,
+    'user_id': userId,
+    'department_id': dept,
+    'report_date': date,
+    'description': description,
+    'reference': '',
+    'outputs': outputs,
+    'status': status,
+    'next_action': '',
+    'blocker': status == 'blocked' ? 'Clinic closed' : '',
+    'priority': 'medium',
+    'due_date': due,
+    'created_at': '2026-11-09T08:00:00Z',
+    'updated_at': '2026-11-09T08:00:00Z',
+  };
+
+  testWidgets('daily reports: an employee records their day', (tester) async {
+    cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1600, 1400),
+    );
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    expect(container.read(navTabProvider), AppTab.dailyReports);
+    expect(find.text('What I did today'), findsOneWidget);
+    // Employees see only their own: no Overview.
+    expect(find.byKey(const ValueKey('reports-tab')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('add-activity')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('report-description')),
+      'Lodged visa applications',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('output-visa_lodgements')),
+      '3',
+    );
+    await tester.tap(find.byKey(const ValueKey('report-save')));
+    await settle(tester);
+    expect(cloud.reports.values.single['outputs'], {'visa_lodgements': 3});
+    expect(cloud.reports.values.single['user_id'], 1);
+    expect(find.text('Lodged visa applications'), findsOneWidget);
+    expect(find.textContaining('Visa lodgements 3'), findsWidgets);
+
+    // Something still open needs a due date.
+    await tester.tap(find.byKey(const ValueKey('add-activity')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('report-description')),
+      'Waiting for medical results',
+    );
+    await tester.tap(find.byKey(const ValueKey('report-status')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Blocked').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('report-save')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('report-error')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('report-due')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('report-save')));
+    await settle(tester);
+    final blocked = cloud.reports.values.firstWhere(
+      (r) => r['status'] == 'blocked',
+    );
+    expect(blocked['due_date'], '2026-11-10');
+    expect(find.text('My open items'), findsOneWidget);
+
+    // Done later: one tap.
+    await tester.tap(find.text('Mark done'));
+    await settle(tester);
+    expect(cloud.reports[blocked['id']]!['status'], 'completed');
+    container.dispose();
+  });
+
+  testWidgets('daily reports: the manager’s overview, the head’s department', (
+    tester,
+  ) async {
+    cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
+    cloud.addUser(
+      'grace',
+      'grace-pass-1',
+      name: 'Grace',
+      departmentId: 2,
+      reportAccess: ReportAccess.head,
+    );
+    cloud.addUser('otieno', 'otieno-pass-1', name: 'Otieno', departmentId: 1);
+    cloud.addUser(
+      'ruth',
+      'ruth-pass-1',
+      name: 'Ruth',
+      reportAccess: ReportAccess.manager,
+    );
+    seedReport(
+      10,
+      1,
+      2,
+      status: 'blocked',
+      date: '2026-11-07',
+      due: '2026-11-08',
+      description: 'Waiting on clinic',
+    );
+    seedReport(
+      11,
+      3,
+      1,
+      outputs: {'applications_submitted': 4},
+      description: 'Submitted applications',
+    );
+
+    var container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1600, 2600),
+    );
+    await signIn(tester, 'ruth', 'ruth-pass-1');
+    await settle(tester);
+    // No department of her own: straight to the Overview.
+    expect(find.text('Submission compliance'), findsOneWidget);
+    expect(find.text('1 of 3 today'), findsOneWidget);
+    expect(find.textContaining('Otieno · Admissions'), findsWidgets);
+    expect(find.text('Waiting on clinic'), findsOneWidget); // needs attention
+    expect(find.textContaining('Applications submitted 4'), findsWidgets);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('stat-overdue')),
+        matching: find.text('1'),
+      ),
+      findsOneWidget,
+    );
+    container.dispose();
+
+    // The Visa head sees Visa only.
+    await tester.pumpWidget(const SizedBox());
+    container = await pumpAccounts(tester, admin, size: const Size(1600, 2600));
+    await signIn(tester, 'grace', 'grace-pass-1');
+    await settle(tester);
+    await tester.tap(find.text('Overview'));
+    await settle(tester);
+    expect(find.text('Visa Processing & Documentation'), findsWidgets);
+    expect(find.text('Admissions & Applications'), findsNothing);
+    expect(find.text('Submitted applications'), findsNothing);
+    expect(find.text('Waiting on clinic'), findsWidgets);
+    container.dispose();
+  });
+
+  testWidgets('daily reports: the admin manages departments', (tester) async {
+    cloud.addUser('admin', 'admin-pass-1', role: UserRole.admin, name: 'Admin');
+    final container = await pumpAccounts(
+      tester,
+      admin,
+      size: const Size(1600, 3000),
+    );
+    await signIn(tester, 'admin', 'admin-pass-1');
+    container.read(navTabProvider.notifier).set(AppTab.settings);
+    await settle(tester);
+    expect(find.byKey(const ValueKey('department-1')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('add-department')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('department-name')),
+      'Customer Care',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('department-outputs')),
+      'Calls made\nComplaints resolved\n\nCalls made',
+    );
+    await tester.tap(find.byKey(const ValueKey('department-save')));
+    await settle(tester);
+    final care = cloud.departments.firstWhere(
+      (d) => d['name'] == 'Customer Care',
+    );
+    expect(care['outputs'], [
+      {'key': 'calls_made', 'label': 'Calls made'},
+      {'key': 'complaints_resolved', 'label': 'Complaints resolved'},
+    ]);
+
+    // A person's department and report access are set in Users.
+    await tester.tap(find.byKey(const ValueKey('add-user')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('user-department')), findsOneWidget);
+    expect(find.byKey(const ValueKey('user-access')), findsOneWidget);
+    container.dispose();
+  });
+
+  test('operations report exports: Excel sheets and a real PDF', () async {
+    final summary = ReportSummary.fromJson({
+      'from': '2026-11-03',
+      'to': '2026-11-09',
+      'today': '2026-11-09',
+      'working_days': 5,
+      'status': {'completed': 1, 'blocked': 1},
+      'departments': [
+        {
+          'id': 1,
+          'name': 'Admissions & Applications',
+          'activities': 2,
+          'completed': 1,
+          'open': 1,
+          'blocked': 1,
+          'escalated': 0,
+          'people': 1,
+          'outputs': {'applications_submitted': 4},
+        },
+      ],
+      'compliance': [
+        {
+          'id': 1,
+          'full_name': 'Otieno',
+          'department_name': 'Admissions & Applications',
+          'days_submitted': 3,
+          'entries': 4,
+          'submitted_today': true,
+          'last_date': '2026-11-09',
+        },
+      ],
+      'overdue': [],
+      'attention': [],
+    });
+    final entry = ActivityReport.fromJson({
+      'id': 1,
+      'user_id': 1,
+      'user_name': 'Otieno',
+      'department_id': 1,
+      'department_name': 'Admissions & Applications',
+      'report_date': '2026-11-09',
+      'description': 'Submitted applications — Zoë’s file',
+      'outputs': {'applications_submitted': 4},
+      'status': 'completed',
+      'priority': 'high',
+    });
+    final report = OperationsReport(
+      title: 'Weekly Performance Report',
+      periodLabel: '3 Nov 2026 – 9 Nov 2026',
+      filtersLabel: 'All departments · Everyone',
+      generatedBy: 'Ruth',
+      generatedAt: DateTime(2026, 11, 9, 17),
+      summary: summary,
+      entries: [entry],
+      departments: [
+        Department.fromJson({
+          'id': 1,
+          'name': 'Admissions & Applications',
+          'outputs': [
+            {
+              'key': 'applications_submitted',
+              'label': 'Applications submitted',
+            },
+          ],
+        }),
+      ],
+    );
+    expect(report.outputsText(1, entry.outputs), 'Applications submitted 4');
+    expect(
+      report.fileStem,
+      'weekly_performance_report_2026-11-03_to_2026-11-09',
+    );
+
+    final xlsx = Excel.decodeBytes(operationsReportToExcel(report));
+    expect(
+      xlsx.tables.keys,
+      containsAll(['Summary', 'Departments', 'Entries', 'Compliance']),
+    );
+    final entries = xlsx.tables['Entries']!;
+    expect(entries.rows[1][1]?.value.toString(), 'Otieno');
+
+    ByteData font(String f) =>
+        ByteData.sublistView(File('assets/fonts/$f').readAsBytesSync());
+    final pdf = await operationsReportToPdf(
+      report,
+      regular: font('InstrumentSans-400.ttf'),
+      bold: font('InstrumentSans-700.ttf'),
+    );
+    expect(String.fromCharCodes(pdf.take(5)), '%PDF-');
+    expect(pdf.length, greaterThan(2000));
+  });
+
+  testWidgets('daily reports fit a phone', (tester) async {
+    cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
+    cloud.addUser(
+      'ruth',
+      'ruth-pass-1',
+      name: 'Ruth',
+      reportAccess: ReportAccess.manager,
+      departmentId: 1,
+    );
+    seedReport(
+      10,
+      1,
+      2,
+      status: 'escalated',
+      due: '2026-11-08',
+      description: 'A long description of a visa case that is escalated',
+    );
+    const phone = Size(360, 780);
+    var container = await pumpAccounts(tester, boss, size: phone);
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('add-activity')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('report-status')), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    container.dispose();
+
+    await tester.pumpWidget(const SizedBox());
+    container = await pumpAccounts(tester, admin, size: phone);
+    await signIn(tester, 'ruth', 'ruth-pass-1');
+    await settle(tester);
+    await tester.tap(find.text('Overview'));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('stat-total')), findsOneWidget);
+    await tester.drag(
+      find.byType(SingleChildScrollView).first,
+      const Offset(0, -1500),
+    );
+    await tester.pumpAndSettle();
+    container.dispose();
   });
 }

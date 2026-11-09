@@ -36,6 +36,16 @@ class SupabaseCloudApi implements CloudApi {
     'same_password',
     'unknown_user',
     'use_accounts',
+    'no_department',
+    'future_date',
+    'date_too_old',
+    'due_date_required',
+    'description_required',
+    'unknown_report',
+    'bad_outputs',
+    'name_taken',
+    'unknown_department',
+    'bad_access',
   ];
 
   Future<T> _call<T>(String fn, [Map<String, Object?>? params]) async {
@@ -165,6 +175,10 @@ class SupabaseCloudApi implements CloudApi {
       AppUser.fromJson(Map<String, Object?>.from(data['user'] as Map)),
     );
   }
+
+  @override
+  Future<Object?> callFunction(String name, Map<String, Object?> params) =>
+      _call<Object?>(name, params);
 
   @override
   Future<String> usersStatus() => _call<String>('users_status');

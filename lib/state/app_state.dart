@@ -13,6 +13,7 @@ import '../repositories/week_repository.dart';
 import 'providers.dart';
 
 export '../models/app_user.dart';
+export '../models/daily_report.dart';
 export '../models/user_role.dart';
 export 'providers.dart';
 
@@ -59,7 +60,13 @@ class CurrentUserNotifier extends Notifier<AppUser?> {
   void signedIn(AppUser user) {
     ref
         .read(navTabProvider.notifier)
-        .set(user.role.canEdit ? AppTab.home : AppTab.reports);
+        .set(
+          user.role.canEdit
+              ? AppTab.home
+              : user.role == UserRole.team
+              ? AppTab.dailyReports
+              : AppTab.reports,
+        );
     state = user;
   }
 
@@ -159,6 +166,7 @@ class SessionNotifier extends Notifier<UserRole?> {
 /// Navigation sections, shared by sidebar (desktop) and bottom bar (mobile).
 enum AppTab {
   home,
+  dailyReports,
   week,
   revenue,
   applications,

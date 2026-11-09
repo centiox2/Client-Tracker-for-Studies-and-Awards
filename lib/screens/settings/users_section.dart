@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../../design/app_theme.dart';
 import '../../models/staff.dart';
 import '../../services/cloud/cloud_api.dart';
+import '../../services/daily_reports_service.dart';
 import '../../state/app_state.dart';
 import '../../state/cloud_sync.dart';
 import '../../widgets/panels.dart';
@@ -24,6 +25,10 @@ class UsersSection extends ConsumerStatefulWidget {
 
 class _UsersSectionState extends ConsumerState<UsersSection> {
   List<AppUser>? _users;
+
+  /// For each person's department (empty until loaded, or if daily
+  /// reports aren't set up online yet).
+  List<Department> _departments = const [];
   bool _loading = true;
   String? _error;
 
@@ -40,9 +45,16 @@ class _UsersSectionState extends ConsumerState<UsersSection> {
     });
     try {
       final users = await ref.read(cloudSyncProvider.notifier).listUsers();
+      List<Department>? departments;
+      try {
+        departments = (await ref.read(dailyReportsProvider).meta()).departments;
+      } catch (_) {
+        // Daily reports not set up online yet: accounts still work.
+      }
       if (!mounted) return;
       setState(() {
         _users = users;
+        if (departments != null) _departments = departments;
         _loading = false;
       });
     } catch (e) {
@@ -57,7 +69,11 @@ class _UsersSectionState extends ConsumerState<UsersSection> {
   Future<void> _edit([AppUser? user]) async {
     final result = await showDialog<({AppUser user, String? password})>(
       context: context,
-      builder: (_) => _UserDialog(user: user, existing: _users ?? const []),
+      builder: (_) => _UserDialog(
+        user: user,
+        existing: _users ?? const [],
+        departments: _departments,
+      ),
     );
     if (result == null || !mounted) return;
     await _load();
@@ -154,6 +170,8 @@ class _UsersSectionState extends ConsumerState<UsersSection> {
             role: user.role,
             staffId: user.staffId,
             active: active,
+            departmentId: user.departmentId,
+            reportAccess: user.reportAccess,
           );
     } catch (e) {
       if (mounted) _snack(describeAccountError(e));
@@ -212,6 +230,9 @@ class _UsersSectionState extends ConsumerState<UsersSection> {
                   key: ValueKey('user-${u.username}'),
                   user: u,
                   staff: u.staffId == null ? null : staff[u.staffId],
+                  department: _departments
+                      .where((d) => d.id == u.departmentId)
+                      .firstOrNull,
                   isMe: u.id == me?.id,
                   onEdit: () => _edit(u),
                   onReset: () => _resetPassword(u),
@@ -247,6 +268,7 @@ class _UserRow extends StatelessWidget {
     super.key,
     required this.user,
     required this.staff,
+    this.department,
     required this.isMe,
     required this.onEdit,
     required this.onReset,
@@ -255,6 +277,7 @@ class _UserRow extends StatelessWidget {
 
   final AppUser user;
   final Staff? staff;
+  final Department? department;
   final bool isMe;
   final VoidCallback onEdit;
   final VoidCallback onReset;
@@ -271,6 +294,8 @@ class _UserRow extends StatelessWidget {
     final details = [
       '@${user.username}',
       user.role.label,
+      if (department != null) department!.name,
+      if (user.reportAccess != ReportAccess.employee) user.reportAccess.label,
       if (staff != null) 'Staff: ${staff!.name}',
       last == null
           ? 'Never signed in'
@@ -361,10 +386,15 @@ class _UserRow extends StatelessWidget {
 /// Add or edit one account. Returns the saved account, with the temporary
 /// password for a new one.
 class _UserDialog extends ConsumerStatefulWidget {
-  const _UserDialog({required this.user, required this.existing});
+  const _UserDialog({
+    required this.user,
+    required this.existing,
+    required this.departments,
+  });
 
   final AppUser? user;
   final List<AppUser> existing;
+  final List<Department> departments;
 
   @override
   ConsumerState<_UserDialog> createState() => _UserDialogState();
@@ -378,6 +408,9 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
   );
   late UserRole _role = widget.user?.role ?? UserRole.team;
   late int? _staffId = widget.user?.staffId;
+  late int? _departmentId = widget.user?.departmentId;
+  late ReportAccess _access =
+      widget.user?.reportAccess ?? ReportAccess.employee;
   late bool _usernameEdited = widget.user != null;
   bool _busy = false;
   String? _error;
@@ -440,6 +473,8 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
             fullName: name,
             role: _role,
             staffId: _staffId,
+            departmentId: _departmentId,
+            reportAccess: _access,
             active: widget.user?.active ?? true,
             password: _isNew ? _password.text : null,
           );
@@ -539,6 +574,53 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
               ),
               const SizedBox(height: 4),
               Text('${_role.summary}.$roleNote', style: muted),
+              if (widget.departments.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Text('DAILY REPORTS', style: microLabel(theme)),
+                const SizedBox(height: 4),
+                DropdownButtonFormField<int?>(
+                  key: const ValueKey('user-department'),
+                  initialValue: _departmentId,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Department'),
+                  items: [
+                    const DropdownMenuItem<int?>(
+                      value: null,
+                      child: Text('No department'),
+                    ),
+                    for (final d in widget.departments)
+                      if (d.active || d.id == _departmentId)
+                        DropdownMenuItem<int?>(
+                          value: d.id,
+                          child: Text(d.name),
+                        ),
+                  ],
+                  onChanged: _busy
+                      ? null
+                      : (v) => setState(() => _departmentId = v),
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<ReportAccess>(
+                  key: const ValueKey('user-access'),
+                  initialValue: _access,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Report access'),
+                  items: [
+                    for (final a in ReportAccess.values)
+                      DropdownMenuItem(value: a, child: Text(a.label)),
+                  ],
+                  onChanged: _busy
+                      ? null
+                      : (v) => setState(() => _access = v ?? _access),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _role == UserRole.admin || _role == UserRole.director
+                      ? '${_role.label}s always see every department.'
+                      : '${_access.summary}.',
+                  style: muted,
+                ),
+              ],
               if (_isNew) ...[
                 const SizedBox(height: 10),
                 TextField(

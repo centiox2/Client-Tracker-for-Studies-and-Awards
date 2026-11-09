@@ -62,6 +62,31 @@ with **their own username and password**:
 
 Builds without the online database keep the four shared profiles on the device.
 
+## Daily reports (Operations Management, phase 1)
+
+From the Operations Management requirements brief: everyone records the work
+they did each day, and management sees it without chasing WhatsApp, email or
+spreadsheet updates. On the **Daily reports** page:
+
+- **My reports** — *Add activity*: what was done, the department's measurable outputs (e.g. Applications submitted, COEs issued, Visa lodgements), status (Completed, In progress, Pending, Blocked, Escalated), priority, next action, challenge / blocker, an optional reference, and a due / follow-up date (needed for anything not completed). The person, department and time are recorded automatically. Open items stay listed until done (*Mark done*). Entries can be added up to 7 days back.
+- **Overview** (department heads, the Operations Manager, admins, the director) — Today / This week / This month / any dates, by department and person: totals by status, **submission compliance** (who has and hasn't submitted), department summaries with output totals, **needs attention** (overdue, blocked, escalated), and every entry with filters and search.
+- **Export** the current view as **PDF or Excel**: Daily Operations, Weekly Performance, Monthly Operations, Staff Activity, Pending Tasks or Exception / Escalation report, depending on the period and filters. Every figure comes from submitted reports, with the period and filters printed on it.
+
+Who sees what is enforced by the online database on every request:
+
+| Report access (Settings › Users) | Sees |
+| --- | --- |
+| Employee | Their own reports |
+| Department head | Everyone in their department |
+| Operations manager | Every department |
+| Admin / Director role | Every department |
+
+Admins set up **Settings › Departments** (the seven from the brief to start with; rename, add, switch off, and choose the outputs each one counts) and give each person a department in **Settings › Users**. Every add, change and delete is kept in an audit trail (shown on each entry).
+
+Reports are kept **online only** (not copied to every device), so they need an internet connection. Set up with `supabase/migrations/20261109120000_daily_reports.sql`.
+
+Not in phase 1 yet (phase 2 of the brief): assigning tasks, an approval step, reminders and overdue alerts by email, and attachments.
+
 ## Data safety
 
 - **SQLite** storage (WAL mode, foreign keys ON) — tables `staff`, `weeks`, `work_days`, `client_counts`.
