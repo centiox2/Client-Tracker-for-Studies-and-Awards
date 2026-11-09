@@ -16,6 +16,20 @@ enum UserRole {
 
   final String label;
 
+  /// The role the online database calls [name]; Team for anything unknown.
+  static UserRole fromServerName(String name) => UserRole.values.firstWhere(
+    (r) => r.serverName == name,
+    orElse: () => UserRole.team,
+  );
+
+  /// What each role may do, in a few words (for the admin giving it).
+  String get summary => switch (this) {
+    UserRole.admin => 'Everything, including revenue, settings and accounts',
+    UserRole.adminTeam => 'Enters and edits numbers; no revenue',
+    UserRole.director => 'Sees everything, revenue included; changes nothing',
+    UserRole.team => 'Sees everything except revenue; changes nothing',
+  };
+
   /// The name the online database knows the profile by.
   final String serverName;
 

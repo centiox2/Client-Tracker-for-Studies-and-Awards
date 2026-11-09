@@ -97,18 +97,41 @@ class CloudSyncController extends Notifier<CloudSyncState> {
   String? _directorToken;
   String? _viewerToken;
 
-  /// What changes are sent with: the admin's token if this device has one.
-  String? get _pushToken => _token ?? _teamToken;
+  /// Personal accounts: the signed-in person's online sign-in (null before
+  /// anyone signs in, or when they signed in without internet and it
+  /// hasn't been made online yet).
+  String? _userToken;
+
+  /// Signed in without internet: made online once the connection is back
+  /// (the password is kept in memory only, until then).
+  ({String username, String password, bool remember})? _pendingLogin;
+
+  /// Whether the person ticked "Remember me".
+  bool _remember = false;
+  DateTime? _lastSessionCheck;
+
+  bool get _accounts => ref.read(accountsEnabledProvider);
+
+  /// What changes are sent with: the admin's token if this device has one
+  /// (personal accounts: the person's own, if their role may change data).
+  String? get _pushToken {
+    if (_accounts) {
+      return (ref.read(sessionProvider)?.canEdit ?? false) ? _userToken : null;
+    }
+    return _token ?? _teamToken;
+  }
 
   /// What the data is read with: the open profile's own token, so each
   /// profile gets only what it may see.
-  String? get _readToken => switch (ref.read(sessionProvider)) {
-    UserRole.admin => _token,
-    UserRole.adminTeam => _teamToken,
-    UserRole.director => _directorToken,
-    UserRole.team => _viewerToken,
-    null => null,
-  };
+  String? get _readToken => _accounts
+      ? (ref.read(currentUserProvider) == null ? null : _userToken)
+      : switch (ref.read(sessionProvider)) {
+          UserRole.admin => _token,
+          UserRole.adminTeam => _teamToken,
+          UserRole.director => _directorToken,
+          UserRole.team => _viewerToken,
+          null => null,
+        };
 
   /// Whether the open profile can read the online data on this device.
   bool get canRead => _readToken != null;
@@ -144,6 +167,10 @@ class CloudSyncController extends Notifier<CloudSyncState> {
       }
       _scheduleFlush();
     });
+    // Signed out (from the account menu, say): end it online too.
+    ref.listen(currentUserProvider, (before, now) {
+      if (before != null && now == null) _endUserSession();
+    });
     // Another profile opened: its own data (revenue or not).
     ref.listen(sessionProvider, (before, now) {
       if (now != null && now != before) _connect();
@@ -160,6 +187,13 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     if (api == null) return;
     _api = api;
     _engine = SyncEngine(ref.read(databaseProvider), api);
+    if (_accounts && _userToken == null) {
+      final kept = ref.read(authRepositoryProvider).rememberedUser;
+      if (kept != null && kept.user.id == ref.read(currentUserProvider)?.id) {
+        _userToken = kept.token;
+        _remember = true;
+      }
+    }
     try {
       final prefs = await SharedPreferences.getInstance();
       _token = prefs.getString(_tokenKey);
@@ -184,6 +218,14 @@ class CloudSyncController extends Notifier<CloudSyncState> {
       }
     });
     _heartbeat = Timer.periodic(const Duration(minutes: 1), (_) {
+      // Now and then, check the sign-in is still good (and keep it going).
+      final checked = _lastSessionCheck;
+      if (_accounts &&
+          _userToken != null &&
+          (checked == null ||
+              DateTime.now().difference(checked) > const Duration(hours: 6))) {
+        unawaited(checkSession());
+      }
       if (state.phase == SyncPhase.offline || state.phase == SyncPhase.error) {
         _connect();
       } else if ((_engine?.pending ?? 0) > 0) {
@@ -207,7 +249,10 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     _connecting = true;
     _again = false;
     try {
-      final claimed = (await api.adminStatus()) == 'claimed';
+      final claimed = _accounts
+          ? (await api.usersStatus()) == 'ready'
+          : (await api.adminStatus()) == 'claimed';
+      if (_accounts && !await _finishOfflineSignIn(api)) return;
       final read = _readToken;
       // Before a profile is open there is nothing to read with.
       final changed = read != null
@@ -290,6 +335,14 @@ class CloudSyncController extends Notifier<CloudSyncState> {
 
   void _refused(CloudException e) {
     if (!ref.mounted) return;
+    if (_accounts && e.code == 'not_signed_in') {
+      // Ended online: signed out elsewhere, a new role or password set by
+      // an admin, or the account switched off.
+      unawaited(
+        signOutUser(notice: 'Your sign-in has ended. Please sign in again.'),
+      );
+      return;
+    }
     if (e.code == 'not_signed_in') {
       // This profile's sign-in ran out (or its password was changed).
       final role = ref.read(sessionProvider);
@@ -312,6 +365,249 @@ class CloudSyncController extends Notifier<CloudSyncState> {
       message: 'The online database refused a change ($e).',
     );
   }
+
+  // ---- Personal accounts ------------------------------------------------
+
+  /// 'empty' (no accounts yet: the first one is set up), 'ready', or null
+  /// when it can't be asked (offline).
+  Future<String?> usersStatus() async {
+    final api = _api;
+    if (api == null) return null;
+    try {
+      return await api.usersStatus();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Checks [username] and [password] online. Throws [CloudException]
+  /// (wrong_password, locked, deactivated) or, offline, any other error.
+  /// The caller finishes with [completeSignIn] (after a first-time new
+  /// password, if the account needs one).
+  Future<UserSignIn> checkSignIn(
+    String username,
+    String password, {
+    required bool remember,
+  }) {
+    final api = _api;
+    if (api == null) throw StateError('Online sync is off');
+    return api.userLogin(username.trim().toLowerCase(), password, remember);
+  }
+
+  /// A brand-new online database: the first account, an admin.
+  Future<UserSignIn> setupFirstAdmin(
+    String username,
+    String fullName,
+    String password,
+  ) {
+    final api = _api;
+    if (api == null) throw StateError('Online sync is off');
+    return api.userSetup(username.trim().toLowerCase(), fullName, password);
+  }
+
+  /// The person chooses their own password in place of the temporary one
+  /// the admin gave them (at their first sign-in).
+  Future<UserSignIn> replaceTemporaryPassword(
+    UserSignIn signIn,
+    String temporary,
+    String next,
+  ) async {
+    final api = _api;
+    if (api == null) throw StateError('Online sync is off');
+    await api.userChangePassword(signIn.token, temporary, next);
+    return UserSignIn(signIn.token, signIn.user.copyWith(mustChange: false));
+  }
+
+  /// Opens the app as [signIn]'s user.
+  void completeSignIn(
+    UserSignIn signIn,
+    String password, {
+    required bool remember,
+  }) {
+    _userToken = signIn.token;
+    _remember = remember;
+    _pendingLogin = null;
+    _lastSessionCheck = DateTime.now();
+    ref
+        .read(authRepositoryProvider)
+        .saveSignIn(
+          signIn.user,
+          password,
+          token: signIn.token,
+          remember: remember,
+        );
+    ref.read(signInNoticeProvider.notifier).set(null);
+    ref.read(currentUserProvider.notifier).signedIn(signIn.user);
+    state = state.copyWith(adminLinked: _pushToken != null);
+    unawaited(_connect());
+  }
+
+  /// No internet: opens the app as [user], who signed in on this device
+  /// before with this [password]. Signs in online once the connection is
+  /// back.
+  void signInOffline(AppUser user, String password, {required bool remember}) {
+    _userToken = null;
+    _remember = remember;
+    _pendingLogin = (
+      username: user.username,
+      password: password,
+      remember: remember,
+    );
+    ref.read(authRepositoryProvider).forgetSignIn();
+    ref.read(signInNoticeProvider.notifier).set(null);
+    ref.read(currentUserProvider.notifier).signedIn(user);
+    state = state.copyWith(adminLinked: false);
+  }
+
+  /// Signed in without internet: does it online now. False when that
+  /// ended the sign-in (the password was changed, say).
+  Future<bool> _finishOfflineSignIn(CloudApi api) async {
+    final pending = _pendingLogin;
+    if (pending == null ||
+        _userToken != null ||
+        ref.read(currentUserProvider) == null) {
+      return true;
+    }
+    try {
+      final signIn = await api.userLogin(
+        pending.username,
+        pending.password,
+        pending.remember,
+      );
+      if (!ref.mounted) return false;
+      if (signIn.user.mustChange) {
+        await signOutUser(
+          notice: 'An admin gave you a new password. Sign in with it.',
+        );
+        return false;
+      }
+      _userToken = signIn.token;
+      _pendingLogin = null;
+      _lastSessionCheck = DateTime.now();
+      ref
+          .read(authRepositoryProvider)
+          .saveSignIn(
+            signIn.user,
+            pending.password,
+            token: signIn.token,
+            remember: pending.remember,
+          );
+      ref.read(currentUserProvider.notifier).update(signIn.user);
+      state = state.copyWith(adminLinked: _pushToken != null);
+      return true;
+    } on CloudException {
+      // Wrong password now, locked or switched off: sign in again.
+      ref.read(authRepositoryProvider).forgetUser(pending.username);
+      await signOutUser(
+        notice: 'Your password or account changed. Please sign in again.',
+      );
+      return false;
+    }
+  }
+
+  /// Checks the person's sign-in online: their latest details (a new name
+  /// shows straight away) and another 30 days (or a day). Signs them out
+  /// if it has ended; offline, nothing changes.
+  Future<void> checkSession() async {
+    final api = _api;
+    final token = _userToken;
+    if (!_accounts || api == null || token == null) return;
+    _lastSessionCheck = DateTime.now();
+    try {
+      final user = await api.userSession(token);
+      if (!ref.mounted || _userToken != token) return;
+      ref.read(authRepositoryProvider).updateUser(user);
+      ref.read(currentUserProvider.notifier).update(user);
+    } on CloudException catch (e) {
+      if (e.code == 'not_signed_in' && ref.mounted && _userToken == token) {
+        await signOutUser(
+          notice: 'Your sign-in has ended. Please sign in again.',
+        );
+      }
+    } catch (_) {
+      // Offline: stay signed in.
+    }
+  }
+
+  /// Signs the person out, back to the sign-in screen ([notice] says why).
+  Future<void> signOutUser({String? notice}) async {
+    ref.read(authRepositoryProvider).forgetSignIn();
+    ref.read(signInNoticeProvider.notifier).set(notice);
+    if (ref.read(currentUserProvider) != null) {
+      ref.read(currentUserProvider.notifier).signedOut(); // → _endUserSession
+    } else {
+      await _endUserSession();
+    }
+  }
+
+  /// Nobody is signed in any more: forget the sign-in here and online.
+  Future<void> _endUserSession() async {
+    final token = _userToken;
+    _userToken = null;
+    _pendingLogin = null;
+    _remember = false;
+    state = state.copyWith(
+      adminLinked: false,
+      clearMessage: true,
+      phase: state.phase == SyncPhase.error ? SyncPhase.live : null,
+    );
+    final api = _api;
+    if (token != null && api != null) {
+      try {
+        await api.userLogout(token);
+      } catch (_) {}
+    }
+  }
+
+  String _needToken() {
+    final token = _userToken;
+    if (token == null) throw CloudException('not_signed_in');
+    return token;
+  }
+
+  CloudApi _needApi() => _api ?? (throw StateError('Online sync is off'));
+
+  /// The person's own new password (needs their current one). Throws
+  /// [CloudException] (wrong_password, password_too_short, same_password).
+  Future<void> changeOwnPassword(String current, String next) async {
+    await _needApi().userChangePassword(_needToken(), current, next);
+    final user = ref.read(currentUserProvider);
+    if (user != null) {
+      ref
+          .read(authRepositoryProvider)
+          .saveSignIn(user, next, token: _userToken, remember: _remember);
+    }
+  }
+
+  /// Admin: every account.
+  Future<List<AppUser>> listUsers() => _needApi().adminListUsers(_needToken());
+
+  /// Admin: creates (no [id]; [password] is the temporary one) or changes
+  /// an account.
+  Future<AppUser> saveUser({
+    int? id,
+    required String username,
+    required String fullName,
+    required UserRole role,
+    int? staffId,
+    bool active = true,
+    String? password,
+  }) async {
+    final saved = await _needApi().adminSaveUser(_needToken(), {
+      'id': ?id,
+      'username': username.trim().toLowerCase(),
+      'full_name': fullName.trim(),
+      'role': role.serverName,
+      'staff_id': staffId,
+      'active': active,
+    }, password: password);
+    ref.read(currentUserProvider.notifier).update(saved);
+    return saved;
+  }
+
+  /// Admin: a temporary password for someone who forgot theirs.
+  Future<void> resetUserPassword(int userId, String password) =>
+      _needApi().adminResetPassword(_needToken(), userId, password);
 
   /// Signs this device in online with the admin [password]: the first time
   /// anywhere it becomes the online password. Then sends waiting changes.

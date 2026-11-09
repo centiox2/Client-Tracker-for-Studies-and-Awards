@@ -137,7 +137,7 @@ class FakeCloud implements CloudApi {
         ? 'admin'
         : teamTokens.contains(token)
         ? 'admin_team'
-        : viewTokens[token];
+        : viewTokens[token] ?? _userRole(token);
     if (role == null) throw CloudException('not_signed_in');
     reads.add(role);
     final money = role == 'admin' || role == 'director';
@@ -152,8 +152,9 @@ class FakeCloud implements CloudApi {
   @override
   Future<void> push(String token, Map<String, Object?> payload) async {
     _online();
-    final team = teamTokens.contains(token);
-    if (!tokens.contains(token) && !team) {
+    final userRole = _userRole(token);
+    final team = teamTokens.contains(token) || userRole == 'admin_team';
+    if (!tokens.contains(token) && !team && userRole != 'admin') {
       throw CloudException('not_signed_in');
     }
     final deletes = (payload['deletes'] as Map? ?? {}).cast<String, List>();
@@ -217,6 +218,206 @@ class FakeCloud implements CloudApi {
   Future<void> setPassword(String token, String p) async {
     if (!tokens.contains(token)) throw CloudException('not_signed_in');
     password = p;
+  }
+
+  // ---- Personal accounts (same rules as the database functions) --------
+
+  final users = <int, AppUser>{};
+  final userPasswords = <int, String>{};
+  final failed = <int, int>{};
+
+  /// Signed-in tokens: token -> user id.
+  final userTokens = <String, int>{};
+  final logins = <String>[];
+
+  AppUser addUser(
+    String username,
+    String password, {
+    UserRole role = UserRole.team,
+    String? name,
+    bool mustChange = false,
+    bool active = true,
+  }) {
+    final id = users.length + 1;
+    final user = AppUser(
+      id: id,
+      username: username,
+      fullName: name ?? username,
+      role: role,
+      mustChange: mustChange,
+      active: active,
+    );
+    users[id] = user;
+    userPasswords[id] = password;
+    return user;
+  }
+
+  String? _userRole(String token) {
+    final id = userTokens[token];
+    final user = id == null ? null : users[id];
+    return user == null || !user.active ? null : user.role.serverName;
+  }
+
+  int _tokenUser(String token) {
+    final id = userTokens[token];
+    if (id == null || !(users[id]?.active ?? false)) {
+      throw CloudException('not_signed_in');
+    }
+    return id;
+  }
+
+  UserSignIn _newSignIn(int id) {
+    final t = 'user-$id-${userTokens.length}';
+    userTokens[t] = id;
+    return UserSignIn(t, users[id]!);
+  }
+
+  void _signOutEverywhere(int id, {String? except}) =>
+      userTokens.removeWhere((t, u) => u == id && t != except);
+
+  void _needAdmin(String token) {
+    if (_userRole(token) != 'admin' && !tokens.contains(token)) {
+      throw CloudException('not_signed_in');
+    }
+  }
+
+  @override
+  Future<String> usersStatus() async {
+    _online();
+    return users.isEmpty ? 'empty' : 'ready';
+  }
+
+  @override
+  Future<UserSignIn> userSetup(String username, String name, String p) async {
+    _online();
+    if (users.isNotEmpty) throw CloudException('already_claimed');
+    if (p.length < 8) throw CloudException('password_too_short');
+    final u = addUser(username, p, role: UserRole.admin, name: name);
+    return _newSignIn(u.id);
+  }
+
+  @override
+  Future<UserSignIn> userLogin(String username, String p, bool remember) async {
+    _online();
+    logins.add(username);
+    final user = users.values.where((u) => u.username == username).firstOrNull;
+    if (user == null) throw CloudException('wrong_password');
+    if ((failed[user.id] ?? 0) >= 5) throw CloudException('locked');
+    if (userPasswords[user.id] != p) {
+      failed[user.id] = (failed[user.id] ?? 0) + 1;
+      throw CloudException(failed[user.id]! >= 5 ? 'locked' : 'wrong_password');
+    }
+    if (!user.active) throw CloudException('deactivated');
+    failed[user.id] = 0;
+    return _newSignIn(user.id);
+  }
+
+  @override
+  Future<AppUser> userSession(String token) async {
+    _online();
+    return users[_tokenUser(token)]!;
+  }
+
+  @override
+  Future<void> userLogout(String token) async {
+    _online();
+    userTokens.remove(token);
+  }
+
+  @override
+  Future<void> userChangePassword(String token, String cur, String n) async {
+    _online();
+    final id = _tokenUser(token);
+    if (n.length < 8) throw CloudException('password_too_short');
+    if (userPasswords[id] != cur) throw CloudException('wrong_password');
+    if (n == cur) throw CloudException('same_password');
+    userPasswords[id] = n;
+    final u = users[id]!;
+    users[id] = AppUser(
+      id: id,
+      username: u.username,
+      fullName: u.fullName,
+      role: u.role,
+      staffId: u.staffId,
+      active: u.active,
+    );
+    _signOutEverywhere(id, except: token);
+  }
+
+  @override
+  Future<List<AppUser>> adminListUsers(String token) async {
+    _online();
+    _needAdmin(token);
+    return users.values.toList();
+  }
+
+  @override
+  Future<AppUser> adminSaveUser(
+    String token,
+    Map<String, Object?> user, {
+    String? password,
+  }) async {
+    _online();
+    _needAdmin(token);
+    final username = user['username'] as String;
+    final id = user['id'] as int?;
+    if (!AppUser.usernamePattern.hasMatch(username)) {
+      throw CloudException('bad_username');
+    }
+    if (users.values.any((u) => u.username == username && u.id != id)) {
+      throw CloudException('username_taken');
+    }
+    final role = UserRole.fromServerName(user['role'] as String);
+    if (id == null) {
+      if ((password ?? '').length < 8) {
+        throw CloudException('password_too_short');
+      }
+      return addUser(
+        username,
+        password!,
+        role: role,
+        name: user['full_name'] as String,
+        mustChange: true,
+      );
+    }
+    final before = users[id]!;
+    final active = user['active'] as bool? ?? true;
+    if (userTokens[token] == id && (!active || role != UserRole.admin)) {
+      throw CloudException('own_account');
+    }
+    users[id] = AppUser(
+      id: id,
+      username: username,
+      fullName: user['full_name'] as String,
+      role: role,
+      staffId: user['staff_id'] as int?,
+      active: active,
+      mustChange: before.mustChange,
+    );
+    if (before.role != role || (before.active && !active)) {
+      _signOutEverywhere(id);
+    }
+    return users[id]!;
+  }
+
+  @override
+  Future<void> adminResetPassword(String token, int id, String p) async {
+    _online();
+    _needAdmin(token);
+    if (p.length < 8) throw CloudException('password_too_short');
+    userPasswords[id] = p;
+    failed[id] = 0;
+    final u = users[id]!;
+    users[id] = AppUser(
+      id: id,
+      username: u.username,
+      fullName: u.fullName,
+      role: u.role,
+      staffId: u.staffId,
+      active: u.active,
+      mustChange: true,
+    );
+    _signOutEverywhere(id);
   }
 
   @override
@@ -673,5 +874,320 @@ void main() {
       findsOneWidget,
     );
     container.dispose();
+  });
+
+  // ------------------------------------------------- personal accounts ---
+
+  Future<ProviderContainer> pumpAccounts(
+    WidgetTester tester,
+    AppDatabase db, {
+    Size size = const Size(1600, 1000),
+  }) async {
+    tester.view.physicalSize = size;
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final container = ProviderContainer(
+      overrides: [
+        databaseProvider.overrideWithValue(db),
+        cloudApiFactoryProvider.overrideWithValue(() => cloud),
+        accountsEnabledProvider.overrideWithValue(true),
+      ],
+    );
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const ClientTrackerApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    return container;
+  }
+
+  Future<void> settle(WidgetTester tester) async {
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> signIn(
+    WidgetTester tester,
+    String username,
+    String password, {
+    bool remember = false,
+  }) async {
+    await tester.enterText(
+      find.byKey(const ValueKey('login-username')),
+      username,
+    );
+    await tester.enterText(
+      find.descendant(
+        of: find.byKey(const ValueKey('login-password')),
+        matching: find.byType(TextField),
+      ),
+      password,
+    );
+    if (remember) {
+      await tester.tap(find.byKey(const ValueKey('login-remember')));
+      await tester.pump();
+    }
+    await tester.tap(find.byKey(const ValueKey('login-submit')));
+    await tester.pumpAndSettle();
+    await settle(tester);
+  }
+
+  Finder field(String key) => find.descendant(
+    of: find.byKey(ValueKey(key)),
+    matching: find.byType(TextField),
+  );
+
+  testWidgets('accounts: sign in with username and password', (tester) async {
+    cloud.addUser('mary.wanjiku', 'mary-pass-1', name: 'Mary Wanjiku');
+    final container = await pumpAccounts(tester, boss);
+    expect(find.text('Sign in'), findsWidgets);
+    expect(find.text('Remember me'), findsOneWidget);
+
+    await signIn(tester, 'mary.wanjiku', 'wrong-pass');
+    expect(find.text('Username or password is incorrect.'), findsOneWidget);
+    expect(container.read(currentUserProvider), isNull);
+
+    // Typed in capitals: usernames are lower case.
+    await signIn(tester, 'Mary.Wanjiku', 'mary-pass-1');
+    final user = container.read(currentUserProvider);
+    expect(user?.fullName, 'Mary Wanjiku');
+    expect(container.read(sessionProvider), UserRole.team);
+    expect(cloud.reads.last, 'team');
+    // Not remembered: nothing kept to open straight in next time.
+    expect(AuthRepository(boss).rememberedUser, isNull);
+    expect(find.textContaining('Mary Wanjiku'), findsWidgets);
+    container.dispose();
+  });
+
+  testWidgets('accounts: Remember me opens straight in next time', (
+    tester,
+  ) async {
+    cloud.addUser('ian', 'ian-pass-12', role: UserRole.adminTeam);
+    var container = await pumpAccounts(tester, boss);
+    await signIn(tester, 'ian', 'ian-pass-12', remember: true);
+    expect(container.read(sessionProvider), UserRole.adminTeam);
+    expect(AuthRepository(boss).rememberedUser?.user.username, 'ian');
+    container.dispose();
+
+    // The app opened again: no sign-in screen, and the session checked.
+    await tester.pumpWidget(const SizedBox());
+    final loginsBefore = cloud.logins.length;
+    container = await pumpAccounts(tester, boss);
+    await settle(tester);
+    expect(container.read(currentUserProvider)?.username, 'ian');
+    expect(cloud.logins.length, loginsBefore, reason: 'no password asked');
+    expect(container.read(cloudSyncProvider).adminLinked, isTrue);
+
+    // Signing out forgets it, online too.
+    final tokensBefore = cloud.userTokens.length;
+    await tester.tap(find.byKey(const ValueKey('sign-out')));
+    await settle(tester);
+    expect(container.read(currentUserProvider), isNull);
+    expect(AuthRepository(boss).rememberedUser, isNull);
+    expect(cloud.userTokens.length, tokensBefore - 1);
+    expect(find.byKey(const ValueKey('login-username')), findsOneWidget);
+    container.dispose();
+  });
+
+  testWidgets('accounts: a temporary password must be replaced first', (
+    tester,
+  ) async {
+    cloud.addUser('joy', 'temp-1234', mustChange: true, name: 'Joy');
+    final container = await pumpAccounts(tester, boss);
+    await signIn(tester, 'joy', 'temp-1234');
+    expect(container.read(currentUserProvider), isNull);
+    expect(find.text('Welcome, Joy'), findsOneWidget);
+
+    // Too short, then the same as the temporary one: refused.
+    await tester.enterText(field('new-password'), 'short');
+    await tester.enterText(field('new-password-again'), 'short');
+    await tester.tap(find.byKey(const ValueKey('new-password-save')));
+    await tester.pumpAndSettle();
+    expect(find.text('Use at least 8 characters.'), findsOneWidget);
+    await tester.enterText(field('new-password'), 'temp-1234');
+    await tester.enterText(field('new-password-again'), 'temp-1234');
+    await tester.tap(find.byKey(const ValueKey('new-password-save')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('different from the temporary'), findsOneWidget);
+
+    await tester.enterText(field('new-password'), 'joy-own-pass');
+    await tester.enterText(field('new-password-again'), 'joy-own-pass');
+    await tester.tap(find.byKey(const ValueKey('new-password-save')));
+    await settle(tester);
+    expect(container.read(currentUserProvider)?.username, 'joy');
+    expect(cloud.userPasswords[1], 'joy-own-pass');
+    expect(cloud.users[1]!.mustChange, isFalse);
+    container.dispose();
+  });
+
+  testWidgets('accounts: locked, switched off, and the first admin', (
+    tester,
+  ) async {
+    // A brand-new online database asks for the first admin account.
+    var container = await pumpAccounts(tester, boss);
+    expect(find.text('Create the first admin account'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('setup-name')),
+      'Collins Korir',
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('setup-username')))
+          .controller!
+          .text,
+      'collins.korir',
+    );
+    await tester.enterText(field('setup-password'), 'admin-pass-1');
+    await tester.enterText(field('setup-confirm'), 'admin-pass-1');
+    await tester.tap(find.byKey(const ValueKey('setup-submit')));
+    await settle(tester);
+    expect(container.read(sessionProvider), UserRole.admin);
+    expect(cloud.users.values.single.username, 'collins.korir');
+    container.dispose();
+
+    cloud.addUser('dennis', 'dennis-pass', active: false);
+    await tester.pumpWidget(const SizedBox());
+    container = await pumpAccounts(tester, admin);
+    await signIn(tester, 'dennis', 'dennis-pass');
+    expect(find.textContaining('switched off'), findsOneWidget);
+    for (var i = 0; i < 5; i++) {
+      await signIn(tester, 'collins.korir', 'nope-nope');
+    }
+    expect(find.textContaining('Too many wrong passwords'), findsOneWidget);
+    expect(container.read(currentUserProvider), isNull);
+    container.dispose();
+  });
+
+  testWidgets('accounts: no internet — only a device signed in before', (
+    tester,
+  ) async {
+    cloud.addUser('whitney', 'whitney-pw1', role: UserRole.adminTeam);
+    var container = await pumpAccounts(tester, boss);
+    await signIn(tester, 'whitney', 'whitney-pw1');
+    container.dispose();
+
+    cloud.offline = true;
+    await tester.pumpWidget(const SizedBox());
+    container = await pumpAccounts(tester, boss);
+    await signIn(tester, 'someone.new', 'whatever-1');
+    expect(find.textContaining('No internet connection'), findsOneWidget);
+    await signIn(tester, 'whitney', 'wrong-pass-1');
+    expect(find.text('Username or password is incorrect.'), findsOneWidget);
+    await signIn(tester, 'whitney', 'whitney-pw1');
+    expect(container.read(currentUserProvider)?.username, 'whitney');
+
+    // Back online: signed in online by itself, and changes can go up.
+    cloud.offline = false;
+    final logins = cloud.logins.length;
+    await tester.runAsync(
+      () => container.read(cloudSyncProvider.notifier).syncNow(),
+    );
+    await tester.pumpAndSettle();
+    expect(cloud.logins.length, logins + 1);
+    expect(container.read(cloudSyncProvider).adminLinked, isTrue);
+    container.dispose();
+  });
+
+  testWidgets('accounts: an ended sign-in goes back to the sign-in screen', (
+    tester,
+  ) async {
+    cloud.addUser('talaam', 'talaam-pw1', role: UserRole.director);
+    final container = await pumpAccounts(tester, boss);
+    await signIn(tester, 'talaam', 'talaam-pw1', remember: true);
+    expect(container.read(sessionProvider), UserRole.director);
+
+    // The admin resets the password elsewhere.
+    cloud.userTokens.clear();
+    await tester.runAsync(
+      () => container.read(cloudSyncProvider.notifier).checkSession(),
+    );
+    await tester.pumpAndSettle();
+    expect(container.read(currentUserProvider), isNull);
+    expect(find.byKey(const ValueKey('signin-notice')), findsOneWidget);
+    expect(AuthRepository(boss).rememberedUser, isNull);
+    container.dispose();
+  });
+
+  testWidgets('accounts: the admin adds a user and resets a password', (
+    tester,
+  ) async {
+    cloud.addUser('admin', 'admin-pass-1', role: UserRole.admin, name: 'Admin');
+    final container = await pumpAccounts(
+      tester,
+      admin,
+      size: const Size(1600, 2400),
+    );
+    await signIn(tester, 'admin', 'admin-pass-1');
+    container.read(navTabProvider.notifier).set(AppTab.settings);
+    await settle(tester);
+    expect(find.text('Users'), findsWidgets);
+    expect(find.text('Profiles'), findsNothing);
+    expect(find.byKey(const ValueKey('user-admin')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('add-user')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('user-name')),
+      'Beatrice Achieng',
+    );
+    await tester.pump();
+    final temp = tester
+        .widget<TextField>(find.byKey(const ValueKey('user-password')))
+        .controller!
+        .text;
+    expect(temp.length, greaterThanOrEqualTo(8));
+    await tester.tap(find.byKey(const ValueKey('user-save')));
+    await settle(tester);
+    final created = cloud.users.values.firstWhere(
+      (u) => u.fullName == 'Beatrice Achieng',
+    );
+    expect(created.username, 'beatrice.achieng');
+    expect(created.mustChange, isTrue);
+    expect(cloud.userPasswords[created.id], temp);
+    expect(find.textContaining('Temporary password: $temp'), findsOneWidget);
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
+    // Forgot it: a new temporary password.
+    await tester.tap(find.byKey(const ValueKey('user-menu-beatrice.achieng')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Reset password'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('confirm-reset')));
+    await settle(tester);
+    expect(cloud.userPasswords[created.id], isNot(temp));
+    expect(find.text('Password reset'), findsOneWidget);
+    container.dispose();
+  });
+
+  testWidgets('accounts: the sign-in screen fits a phone', (tester) async {
+    cloud.addUser('rhab', 'rhab-pass-1', role: UserRole.adminTeam);
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(360, 740),
+    );
+    expect(find.byKey(const ValueKey('login-remember')), findsOneWidget);
+    await signIn(tester, 'rhab', 'rhab-pass-1', remember: true);
+    expect(container.read(currentUserProvider)?.username, 'rhab');
+    container.dispose();
+  });
+
+  test('usernames are suggested from names', () {
+    expect(AppUser.suggestUsername('Mary Wanjiku'), 'mary.wanjiku');
+    expect(AppUser.suggestUsername('  Director/Eve '), 'director.eve');
+    expect(AppUser.suggestUsername('Canisius Yego'), 'canisius.yego');
+    expect(AppUser.suggestUsername('Jo'), 'jo1');
+    expect(AppUser.suggestUsername('Joy', taken: ['joy']), 'joy2');
+    expect(AppUser.suggestUsername('Zoë O’Neil'), 'zoe.oneil');
+    for (final n in ['Mary Wanjiku', 'Director/Eve', 'Jo', 'Zoë O’Neil']) {
+      expect(
+        AppUser.usernamePattern.hasMatch(AppUser.suggestUsername(n)),
+        true,
+      );
+    }
   });
 }

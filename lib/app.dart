@@ -11,6 +11,7 @@ import 'screens/history/history_screen.dart';
 import 'screens/quick_search/quick_search_dialog.dart';
 import 'screens/quick_search/shortcuts_dialog.dart';
 import 'screens/applications/applications_screen.dart';
+import 'screens/auth/login_screen.dart';
 import 'screens/auth/profile_picker.dart';
 import 'screens/auth/sign_in_screen.dart';
 import 'screens/reports/reports_screen.dart';
@@ -41,11 +42,15 @@ class ClientTrackerApp extends ConsumerWidget {
       theme: buildAppTheme(Brightness.light),
       darkTheme: buildAppTheme(Brightness.dark),
       themeMode: themeMode,
-      // First the profiles (Admin, Admin team, Director, Team); then the
-      // app as that profile allows. Keyed so switching starts afresh.
+      // First sign in (personal accounts) or pick a profile (no online
+      // database); then the app as that role allows. Keyed so switching
+      // starts afresh.
       home: switch (ref.watch(sessionProvider)) {
+        null when ref.watch(accountsEnabledProvider) => const LoginScreen(),
         null => const ProfilePickerScreen(),
-        final role => HomeShell(key: ValueKey(role)),
+        final role => HomeShell(
+          key: ValueKey((role, ref.watch(currentUserProvider)?.id)),
+        ),
       },
     );
   }
@@ -175,6 +180,14 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   /// Kept signed in on this device: if the admin has since changed this
   /// profile's password, ask for it again.
   Future<void> _checkKeptSignIn() async {
+    if (ref.read(accountsEnabledProvider)) {
+      // Personal accounts: still signed in online (the account wasn't
+      // switched off, the password not reset), and another 30 days.
+      final sync = ref.read(cloudSyncProvider.notifier);
+      await sync.ready;
+      if (mounted) await sync.checkSession();
+      return;
+    }
     final auth = ref.read(authRepositoryProvider);
     final role = ref.read(sessionProvider);
     if (role == null || auth.rememberedProfile != role) return;
@@ -223,6 +236,13 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   /// Adding needs the admin, so sign in first if needed.
   Future<void> _onShared(SharedItems items) async {
     if (!mounted) return;
+    if (!ref.read(isAdminProvider) && ref.read(accountsEnabledProvider)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Only an admin can add payments.')),
+      );
+      await deleteSharedCopies(items.photos);
+      return;
+    }
     if (!ref.read(isAdminProvider)) {
       await showAdminSignIn(context);
       if (!mounted || !ref.read(isAdminProvider)) {
@@ -649,20 +669,46 @@ class _AccountMenu extends ConsumerWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final role = ref.watch(sessionProvider);
+    final user = ref.watch(currentUserProvider);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: PopupMenuButton<String>(
+        key: const ValueKey('account-menu'),
         tooltip: 'Account',
         position: PopupMenuPosition.under,
-        onSelected: (_) => ref.read(sessionProvider.notifier).signOut(),
-        itemBuilder: (_) => const [
+        onSelected: (action) => action == 'password'
+            ? showChangeOwnPassword(context)
+            : ref.read(sessionProvider.notifier).signOut(),
+        itemBuilder: (_) => [
+          if (user != null) ...[
+            PopupMenuItem(
+              enabled: false,
+              child: Text(
+                '${user.fullName} · @${user.username}',
+                style: theme.textTheme.labelMedium,
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'password',
+              child: Row(
+                children: [
+                  Icon(Icons.key_outlined, size: 16),
+                  SizedBox(width: 10),
+                  Text('Change password'),
+                ],
+              ),
+            ),
+          ],
           PopupMenuItem(
             value: 'account',
             child: Row(
               children: [
-                Icon(Icons.switch_account_outlined, size: 16),
-                SizedBox(width: 10),
-                Text('Switch profile'),
+                Icon(
+                  user != null ? Icons.logout : Icons.switch_account_outlined,
+                  size: 16,
+                ),
+                const SizedBox(width: 10),
+                Text(user != null ? 'Sign out' : 'Switch profile'),
               ],
             ),
           ),
@@ -686,7 +732,13 @@ class _AccountMenu extends ConsumerWidget {
                       ),
                     ),
                     Text(
-                      role == null ? '' : 'Signed in as ${role.label}',
+                      user != null
+                          ? '${user.fullName} · ${user.role.label}'
+                          : role == null
+                          ? ''
+                          : 'Signed in as ${role.label}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.labelSmall?.copyWith(
                         fontSize: 10.5,
                         color: scheme.onSurfaceVariant,
@@ -818,15 +870,24 @@ class _TopBar extends ConsumerWidget {
                   onPressed: () => showShortcutsDialog(context),
                   icon: const Icon(Icons.help_outline, size: 17),
                 ),
-              TextButton.icon(
-                key: const ValueKey('switch-profile'),
-                onPressed: () => ref.read(sessionProvider.notifier).signOut(),
-                style: TextButton.styleFrom(foregroundColor: color),
-                icon: const Icon(Icons.switch_account_outlined, size: 15),
-                label: Text(
-                  '${ref.watch(sessionProvider)?.label ?? ''} · Switch',
+              if (ref.watch(currentUserProvider) case final user?)
+                TextButton.icon(
+                  key: const ValueKey('sign-out'),
+                  onPressed: () => ref.read(sessionProvider.notifier).signOut(),
+                  style: TextButton.styleFrom(foregroundColor: color),
+                  icon: const Icon(Icons.logout, size: 15),
+                  label: Text('${user.fullName} · Sign out'),
+                )
+              else
+                TextButton.icon(
+                  key: const ValueKey('switch-profile'),
+                  onPressed: () => ref.read(sessionProvider.notifier).signOut(),
+                  style: TextButton.styleFrom(foregroundColor: color),
+                  icon: const Icon(Icons.switch_account_outlined, size: 15),
+                  label: Text(
+                    '${ref.watch(sessionProvider)?.label ?? ''} · Switch',
+                  ),
                 ),
-              ),
             ],
           ),
         ),
@@ -859,13 +920,21 @@ class _MobileTopBar extends ConsumerWidget {
                 ref.read(appActionsProvider).selectTab(AppTab.settings);
               } else if (action == 'refresh') {
                 ref.read(dataVersionProvider.notifier).bump();
+              } else if (action == 'password') {
+                showChangeOwnPassword(context);
               } else if (action == 'signout') {
                 ref.read(sessionProvider.notifier).signOut();
               }
             },
             itemBuilder: (context) {
               final role = ref.read(sessionProvider);
+              final user = ref.read(currentUserProvider);
               return [
+                if (user != null)
+                  PopupMenuItem(
+                    enabled: false,
+                    child: Text('${user.fullName} · ${user.role.label}'),
+                  ),
                 if (role?.canEdit ?? false)
                   const PopupMenuItem(value: 'search', child: Text('Search')),
                 if (role?.isAdmin ?? false)
@@ -877,9 +946,18 @@ class _MobileTopBar extends ConsumerWidget {
                   value: 'refresh',
                   child: Text('Refresh data'),
                 ),
+                if (user != null)
+                  const PopupMenuItem(
+                    value: 'password',
+                    child: Text('Change password'),
+                  ),
                 PopupMenuItem(
                   value: 'signout',
-                  child: Text('Switch profile (${role?.label ?? ''})'),
+                  child: Text(
+                    user != null
+                        ? 'Sign out'
+                        : 'Switch profile (${role?.label ?? ''})',
+                  ),
                 ),
               ];
             },

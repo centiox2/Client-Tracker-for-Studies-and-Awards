@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../config/cloud_config.dart';
+import '../models/app_user.dart';
 import '../models/staff.dart';
 import '../models/user_role.dart';
 import '../repositories/client_count_repository.dart';
@@ -10,6 +12,7 @@ import '../repositories/revenue_repository.dart';
 import '../repositories/week_repository.dart';
 import 'providers.dart';
 
+export '../models/app_user.dart';
 export '../models/user_role.dart';
 export 'providers.dart';
 
@@ -31,8 +34,60 @@ final staffListProvider = Provider<List<Staff>>((ref) {
   return ref.read(staffRepositoryProvider).getAll();
 });
 
-/// The profile in use, chosen on the profile screen at launch; null until
-/// one is chosen. Only a profile kept signed in on this device skips it.
+/// Everyone signs in with their own username and password when this build
+/// has the online database (where the accounts are kept). Without it, the
+/// app keeps the four shared profiles on this device.
+final accountsEnabledProvider = Provider<bool>((ref) => CloudConfig.active);
+
+/// The person signed in (personal accounts); null before anyone signs in,
+/// and always null with the shared profiles.
+final currentUserProvider = NotifierProvider<CurrentUserNotifier, AppUser?>(
+  CurrentUserNotifier.new,
+);
+
+class CurrentUserNotifier extends Notifier<AppUser?> {
+  /// Opens straight in for the account kept signed in on this device
+  /// ("Remember me"); otherwise the sign-in screen.
+  @override
+  AppUser? build() {
+    if (!ref.read(accountsEnabledProvider)) return null;
+    return ref.read(authRepositoryProvider).rememberedUser?.user;
+  }
+
+  /// [user] signed in (their password, and any first-time new password,
+  /// already done).
+  void signedIn(AppUser user) {
+    ref
+        .read(navTabProvider.notifier)
+        .set(user.role.canEdit ? AppTab.home : AppTab.reports);
+    state = user;
+  }
+
+  /// Their latest details from the online database (a new name, say).
+  void update(AppUser user) {
+    if (state?.id == user.id) state = user;
+  }
+
+  void signedOut() {
+    ref.read(navTabProvider.notifier).set(AppTab.reports);
+    state = null;
+  }
+}
+
+/// A message for the sign-in screen: why someone was signed out.
+final signInNoticeProvider = NotifierProvider<SignInNoticeNotifier, String?>(
+  SignInNoticeNotifier.new,
+);
+
+class SignInNoticeNotifier extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  void set(String? notice) => state = notice;
+}
+
+/// The role in use: the signed-in person's (personal accounts), or the
+/// profile chosen on the profile screen at launch. Null until then.
 final sessionProvider = NotifierProvider<SessionNotifier, UserRole?>(
   SessionNotifier.new,
 );
@@ -61,7 +116,12 @@ class SessionNotifier extends Notifier<UserRole?> {
   /// Opens straight into a profile kept signed in on this device (the
   /// director's, say); otherwise the profile screen.
   @override
-  UserRole? build() => ref.read(authRepositoryProvider).rememberedProfile;
+  UserRole? build() {
+    if (ref.read(accountsEnabledProvider)) {
+      return ref.watch(currentUserProvider)?.role;
+    }
+    return ref.read(authRepositoryProvider).rememberedProfile;
+  }
 
   /// Checks the admin [password] and signs in on success.
   bool signIn(String password) {
@@ -81,8 +141,15 @@ class SessionNotifier extends Notifier<UserRole?> {
     state = role;
   }
 
-  /// Back to the profile screen (and no longer kept signed in here).
+  /// Back to the profile screen (and no longer kept signed in here). With
+  /// personal accounts: signs the person out, back to the sign-in screen.
   void signOut() {
+    if (ref.read(accountsEnabledProvider)) {
+      // Online sync notices and ends the sign-in online too.
+      ref.read(authRepositoryProvider).forgetSignIn();
+      ref.read(currentUserProvider.notifier).signedOut();
+      return;
+    }
     ref.read(authRepositoryProvider).forgetProfile();
     ref.read(navTabProvider.notifier).set(AppTab.reports);
     state = null;

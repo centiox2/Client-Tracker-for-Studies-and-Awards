@@ -58,7 +58,7 @@ class AppDatabase {
   final String file;
   final common.CommonDatabase _db;
 
-  static const int schemaVersion = 12;
+  static const int schemaVersion = 13;
   static const int rollingBackupCount = 5;
 
   /// Runs [action] inside a transaction; rolls back on any error.
@@ -328,6 +328,23 @@ class AppDatabase {
       db.execute('''
         CREATE INDEX IF NOT EXISTS idx_application_changes_import
           ON application_changes(import_id);
+      ''');
+
+      // v13: personal accounts signed in on this device. A row is kept for
+      // each account that signed in here, with a hash of its password so it
+      // can also sign in without internet. [token] is the online sign-in,
+      // kept only with "Remember me" (remembered = 1). Like app_accounts,
+      // never synced and never put in backups.
+      db.execute('''
+        CREATE TABLE IF NOT EXISTS user_signins (
+          username      TEXT PRIMARY KEY,
+          user_json     TEXT NOT NULL,
+          password_hash TEXT,
+          salt          TEXT,
+          token         TEXT,
+          remembered    INTEGER NOT NULL DEFAULT 0,
+          updated_at    TEXT NOT NULL
+        );
       ''');
 
       _createSyncTables(db);

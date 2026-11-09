@@ -1,3 +1,5 @@
+import '../../models/app_user.dart';
+
 /// What the app needs from the online database. The real one talks to
 /// Supabase ([SupabaseCloudApi]); tests use an in-memory fake.
 abstract class CloudApi {
@@ -47,6 +49,48 @@ abstract class CloudApi {
   /// The admin sets a profile's password; '' leaves it open.
   Future<void> setProfilePassword(String token, String role, String password);
 
+  // ---- Personal accounts ------------------------------------------------
+
+  /// 'empty' until the first account exists (a brand-new online database),
+  /// then 'ready'.
+  Future<String> usersStatus();
+
+  /// A brand-new online database: creates the first account, an admin, and
+  /// signs it in.
+  Future<UserSignIn> userSetup(
+    String username,
+    String fullName,
+    String password,
+  );
+
+  /// Signs in. Throws [CloudException] wrong_password (also for an unknown
+  /// username), locked or deactivated.
+  Future<UserSignIn> userLogin(String username, String password, bool remember);
+
+  /// The signed-in user's latest details; also keeps the sign-in going
+  /// (another 30 days, or a day without "Remember me"). Throws
+  /// not_signed_in when it has ended.
+  Future<AppUser> userSession(String token);
+
+  Future<void> userLogout(String token);
+
+  /// The user's own new password (needs the current one).
+  Future<void> userChangePassword(String token, String current, String next);
+
+  /// Admin only: every account.
+  Future<List<AppUser>> adminListUsers(String token);
+
+  /// Admin only: creates (no id; [password] is the temporary one) or
+  /// changes an account.
+  Future<AppUser> adminSaveUser(
+    String token,
+    Map<String, Object?> user, {
+    String? password,
+  });
+
+  /// Admin only: a temporary password for a user who forgot theirs.
+  Future<void> adminResetPassword(String token, int userId, String password);
+
   /// A signal each time any device changes the data (no data in it: the
   /// latest is then read with [snapshot]).
   Stream<CloudChange> changes();
@@ -55,6 +99,15 @@ abstract class CloudApi {
   Stream<bool> connection();
 
   void dispose();
+}
+
+/// A successful sign-in: the token the app reads (and writes) with, and
+/// who signed in.
+class UserSignIn {
+  const UserSignIn(this.token, this.user);
+
+  final String token;
+  final AppUser user;
 }
 
 /// One row changed online.
@@ -74,7 +127,9 @@ class CloudChange {
 
 /// A refusal from the online database, with a short [code]:
 /// wrong_password, not_signed_in, already_claimed, unclaimed,
-/// wrong_recovery_code, password_too_short, or other.
+/// wrong_recovery_code, password_too_short, locked, deactivated,
+/// bad_username, username_taken, last_admin, own_account, same_password,
+/// or other.
 class CloudException implements Exception {
   CloudException(this.code, [this.detail]);
 

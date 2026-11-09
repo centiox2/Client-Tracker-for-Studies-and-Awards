@@ -42,6 +42,26 @@ The UI follows an **Editorial** direction: a warm, print-inspired look (think a 
 
 To change the look, edit the tokens in `buildAppTheme` / `Dt` — every screen follows automatically.
 
+## Signing in: personal accounts
+
+When the app is built with the online database (Supabase), everyone signs in
+with **their own username and password**:
+
+- **Username** comes from the person's name (`Mary Wanjiku` → `mary.wanjiku`); the admin can change it.
+- **Remember me** keeps the person signed in on that device for 30 days of not using the app. Unticked, they are signed out when the app closes — use that on shared computers.
+- **Only an admin** creates accounts, gives roles (Admin, Admin team, Director, Team) and resets forgotten passwords, in **Settings › Users**. A new account (or a reset) gets a temporary password; the person chooses their own at their next sign-in.
+- **Switch off** an account when someone leaves: they can't sign in, and everything they entered stays.
+- Passwords are stored **only in Supabase, as bcrypt hashes**, in a schema the app's public key can't read. Five wrong passwords in a row lock that account for 15 minutes.
+- Without internet, a person can still sign in on a device where they signed in before; the app signs them in online once the connection is back.
+
+### Turning it on (once)
+
+1. In Supabase › SQL Editor, run `supabase/migrations/20261109090000_user_accounts.sql`. The existing admin password becomes the account **`admin`** (same password). Old app versions keep working with the shared profiles.
+2. Install the new app on every device. Sign in as `admin`, then add everyone in **Settings › Users**.
+3. Once **every** device has the new app, run `supabase/migrations/20261109090100_user_accounts_step2.sql`. It switches the old shared profiles off for good.
+
+Builds without the online database keep the four shared profiles on the device.
+
 ## Data safety
 
 - **SQLite** storage (WAL mode, foreign keys ON) — tables `staff`, `weeks`, `work_days`, `client_counts`.

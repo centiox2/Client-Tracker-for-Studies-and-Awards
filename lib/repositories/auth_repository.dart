@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 
 import '../database/database.dart';
+import '../models/app_user.dart';
 import '../models/user_role.dart';
 
 /// The admin password that guards the workspace (data entry and editing).
@@ -180,6 +181,111 @@ class AuthRepository {
       ],
     );
   }
+
+  // ---- Personal accounts on this device ------------------------------------
+
+  /// The account kept signed in here ("Remember me"), with its online
+  /// token; null when nobody is.
+  ({AppUser user, String token})? get rememberedUser {
+    final rows = _db.raw.select(
+      'SELECT user_json, token FROM user_signins '
+      'WHERE remembered = 1 AND token IS NOT NULL LIMIT 1;',
+    );
+    if (rows.isEmpty) return null;
+    try {
+      final user = AppUser.fromJson(
+        (jsonDecode(rows.first['user_json']! as String) as Map)
+            .cast<String, Object?>(),
+      );
+      return (user: user, token: rows.first['token']! as String);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Notes a successful sign-in on this device: the user's details and a
+  /// hash of [password] (so they can sign in here without internet), and,
+  /// with [remember], the online [token] to open straight in next time.
+  /// Only one account is kept signed in at a time.
+  void saveSignIn(
+    AppUser user,
+    String password, {
+    required String? token,
+    required bool remember,
+  }) {
+    final salt = _randomSalt();
+    _db.transaction(() {
+      _db.raw.execute('UPDATE user_signins SET remembered = 0, token = NULL;');
+      _db.raw.execute(
+        'INSERT INTO user_signins (username, user_json, password_hash, salt, '
+        'token, remembered, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) '
+        'ON CONFLICT(username) DO UPDATE SET user_json = excluded.user_json, '
+        'password_hash = excluded.password_hash, salt = excluded.salt, '
+        'token = excluded.token, remembered = excluded.remembered, '
+        'updated_at = excluded.updated_at;',
+        [
+          user.username,
+          jsonEncode(user.toJson()),
+          _hash(password, salt),
+          base64Encode(salt),
+          remember ? token : null,
+          remember && token != null ? 1 : 0,
+          DateTime.now().toIso8601String(),
+        ],
+      );
+    });
+  }
+
+  /// The user's latest details (role, name…) from the online database.
+  void updateUser(AppUser user) => _db.raw.execute(
+    'UPDATE user_signins SET user_json = ? WHERE username = ?;',
+    [jsonEncode(user.toJson()), user.username],
+  );
+
+  /// A new online token for the account kept signed in.
+  void updateToken(String username, String token) => _db.raw.execute(
+    'UPDATE user_signins SET token = ? WHERE username = ? AND remembered = 1;',
+    [token, username],
+  );
+
+  /// Nobody is kept signed in here any more.
+  void forgetSignIn() =>
+      _db.raw.execute('UPDATE user_signins SET remembered = 0, token = NULL;');
+
+  /// Forgets [username] on this device altogether (its password changed
+  /// or the account was switched off), so it can't sign in offline.
+  void forgetUser(String username) => _db.raw.execute(
+    'DELETE FROM user_signins WHERE username = ?;',
+    [username.trim().toLowerCase()],
+  );
+
+  /// Without internet: the account, if [username] signed in on this device
+  /// before with this [password]; null otherwise.
+  AppUser? verifyOffline(String username, String password) {
+    final rows = _db.raw.select(
+      'SELECT user_json, password_hash, salt FROM user_signins '
+      'WHERE username = ?;',
+      [username.trim().toLowerCase()],
+    );
+    if (rows.isEmpty) return null;
+    final hash = rows.first['password_hash'] as String?;
+    final salt = rows.first['salt'] as String?;
+    if (hash == null || salt == null) return null;
+    if (!_constantTimeEquals(_hash(password, base64Decode(salt)), hash)) {
+      return null;
+    }
+    final user = AppUser.fromJson(
+      (jsonDecode(rows.first['user_json']! as String) as Map)
+          .cast<String, Object?>(),
+    );
+    return user.active ? user : null;
+  }
+
+  /// Whether [username] has signed in on this device before.
+  bool knowsUser(String username) => _db.raw.select(
+    'SELECT 1 FROM user_signins WHERE username = ?;',
+    [username.trim().toLowerCase()],
+  ).isNotEmpty;
 
   static Uint8List _randomSalt() {
     final rng = Random.secure();

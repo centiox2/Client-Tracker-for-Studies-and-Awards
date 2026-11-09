@@ -17,6 +17,7 @@ import '../../widgets/panels.dart';
 import '../../widgets/sync_status.dart';
 import '../history/change_history_dialog.dart';
 import 'import_dialog.dart';
+import 'users_section.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -106,6 +107,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           )
         : Icon(icon, size: 16);
 
+    final accounts = ref.watch(accountsEnabledProvider);
     final sections = <Widget>[
       _Section(
         title: 'Appearance',
@@ -319,22 +321,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ),
       ),
-      const _ProfilesSection(),
-      _Section(
-        title: 'Admin password',
-        icon: Icons.key_outlined,
-        description:
-            'Needed to open the Admin profile (the admin portal: revenue '
-            'and settings).',
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: OutlinedButton.icon(
-            onPressed: _changePassword,
-            icon: const Icon(Icons.key_outlined, size: 16),
-            label: const Text('Change admin password'),
+      // Personal accounts replace the shared profiles and their passwords.
+      if (accounts)
+        const UsersSection()
+      else ...[
+        const _ProfilesSection(),
+        _Section(
+          title: 'Admin password',
+          icon: Icons.key_outlined,
+          description:
+              'Needed to open the Admin profile (the admin portal: revenue '
+              'and settings).',
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: _changePassword,
+              icon: const Icon(Icons.key_outlined, size: 16),
+              label: const Text('Change admin password'),
+            ),
           ),
         ),
-      ),
+      ],
       _Section(
         title: 'About',
         icon: Icons.info_outline,
@@ -552,7 +559,7 @@ class _OnlineSyncSection extends ConsumerWidget {
           ),
           const SizedBox(height: 4),
           Text(tip, style: muted),
-          if (!s.adminLinked) ...[
+          if (!s.adminLinked && !ref.watch(accountsEnabledProvider)) ...[
             const SizedBox(height: 4),
             Text(
               'This device isn’t signed in online yet — sign out and in '
@@ -570,7 +577,7 @@ class _OnlineSyncSection extends ConsumerWidget {
                 icon: const Icon(Icons.sync, size: 16),
                 label: const Text('Sync now'),
               ),
-              if (s.adminLinked)
+              if (s.adminLinked && !ref.watch(accountsEnabledProvider))
                 OutlinedButton.icon(
                   key: const ValueKey('create-recovery'),
                   onPressed: () => _createRecoveryCode(context, ref),
