@@ -11,6 +11,10 @@ env:
   SUPABASE_URL_DEFAULT: https://dpmluuckgstycdctqwym.supabase.co
   SUPABASE_KEY_DEFAULT: sb_publishable_qsw0KVpDbNr616WaSmG70w_QplfFMPs
 
+# Publishing the installer to a GitHub Release needs write access.
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -51,13 +55,6 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY || env.SUPABASE_KEY_DEFAULT }}
         run: flutter build windows --release --dart-define=SUPABASE_URL="$env:SUPABASE_URL" --dart-define=SUPABASE_KEY="$env:SUPABASE_KEY"
 
-      - name: Upload Windows build
-        uses: actions/upload-artifact@v4
-        with:
-          name: client_tracker-windows-x64
-          path: build/windows/x64/runner/Release/
-          if-no-files-found: error
-
       # A proper installer: per-user, Start menu + desktop shortcuts, an
       # uninstaller, and in-place upgrades (Inno Setup).
       - name: Build installer
@@ -70,9 +67,24 @@ jobs:
           & $iscc "/DAppVersion=$version" installer\client_tracker.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Upload installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: client_tracker-windows-installer
-          path: installer/Output/ClientTrackerSetup.exe
-          if-no-files-found: error
+      # Only the installer is kept, and on a GitHub Release rather than as a
+      # build artifact: artifacts count against the Actions storage quota
+      # (which ran out), releases don't. Pushes to main (and manual runs)
+      # replace the "installer-latest" release; other branches only check
+      # that the installer builds.
+      - name: Publish installer
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9.]+)').Matches[0].Groups[1].Value
+          $short = "$env:GITHUB_SHA".Substring(0, 7)
+          # The first time there's no earlier release to remove: carry on.
+          $PSNativeCommandUseErrorActionPreference = $false
+          gh release delete installer-latest --cleanup-tag --yes 2>&1 | Out-Null
+          gh release create installer-latest installer/Output/ClientTrackerSetup.exe `
+            --target "$env:GITHUB_SHA" `
+            --title "Client Tracker for Windows $version ($short)" `
+            --notes "Windows installer built from $env:GITHUB_REF_NAME at $short. Download ClientTrackerSetup.exe and run it; it upgrades an existing install in place." `
+            --latest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
