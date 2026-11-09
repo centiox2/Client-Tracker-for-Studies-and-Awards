@@ -89,6 +89,8 @@ Admins set up **Settings › Departments** (the seven from the brief to start wi
 
 Reports are kept **online only** (not copied to every device), so they need an internet connection. Set up with `supabase/migrations/20261109120000_daily_reports.sql`.
 
+For the team: department heads and the Operations Manager can **Assign task** (Overview) to anyone they can see, with a due date; it lands in that person's *My open items* marked *Assigned by …*, they update it like their own work, and whoever assigned it can still change it. Anyone who can see an entry can **comment** on it (questions, clarification, feedback). Open items are sorted by due date with *Due today* / *Overdue* labels, and their status changes in one tap. The editor has one-tap due dates (Today, Tomorrow, Friday, Next Monday), and **My week** shows your own days reported, entries, completed and output totals.
+
 Handy extras: a **dot on Daily reports** when you haven't recorded anything today; **Ctrl+Enter** saves an activity; closing a half-filled activity asks first; **Add again today** repeats recurring work; and **Copy reminder** (Overview › Submission compliance) copies a ready-to-send message for everyone who hasn't submitted today.
 
 Not in phase 1 yet (phase 2 of the brief): assigning tasks, an approval step, reminders and overdue alerts by email, and attachments.

@@ -66,6 +66,31 @@ class DailyReportsService {
     ];
   }
 
+  Future<List<ReportComment>> comments(int reportId) async =>
+      _comments(await _call('report_comments', {'p_report': reportId}));
+
+  /// Adds a comment; returns all the report's comments.
+  Future<List<ReportComment>> addComment(int reportId, String body) async {
+    final all = _comments(
+      await _call('report_comment_add', {
+        'p_report': reportId,
+        'p_body': body.trim(),
+      }),
+    );
+    onChanged?.call();
+    return all;
+  }
+
+  Future<void> deleteComment(int commentId) async {
+    await _call('report_comment_delete', {'p_comment': commentId});
+    onChanged?.call();
+  }
+
+  static List<ReportComment> _comments(Object? rows) => [
+    for (final r in (rows as List? ?? const []))
+      ReportComment.fromJson(_map(r)),
+  ];
+
   /// Admin: creates (no [id]) or changes a department.
   Future<Department> saveDepartment({
     int? id,
@@ -148,7 +173,10 @@ String describeReportError(Object e) {
     'due_date_required' =>
       'Anything not completed needs a due / follow-up date.',
     'description_required' => 'Describe the activity or task.',
-    'not_allowed' => 'Only the person who wrote a report can change it.',
+    'not_allowed' =>
+      'Only the person it belongs to, whoever assigned it, or an admin can '
+          'change it.',
+    'unknown_user' => 'That person’s account no longer exists.',
     'unknown_report' => 'That report no longer exists.',
     'bad_outputs' => 'Each output needs a name (letters, numbers and spaces).',
     'name_taken' => 'There’s already a department with that name.',

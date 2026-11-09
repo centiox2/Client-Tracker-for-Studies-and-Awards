@@ -152,6 +152,9 @@ class ActivityReport {
     this.dueDate,
     this.createdAt,
     this.updatedAt,
+    this.assignedBy,
+    this.assignedByName = '',
+    this.commentCount = 0,
   });
 
   final int? id;
@@ -170,6 +173,18 @@ class ActivityReport {
   final DateTime? dueDate;
   final DateTime? createdAt;
   final DateTime? updatedAt;
+
+  /// Who gave this task to the person (a head or manager); null when they
+  /// added it themselves.
+  final int? assignedBy;
+  final String assignedByName;
+  final int commentCount;
+
+  bool get isAssigned => assignedBy != null || assignedByName.isNotEmpty;
+
+  /// Open and due on [today].
+  bool isDueToday(DateTime today) =>
+      status.isOpen && dueDate != null && dueDate == today;
 
   /// Open and past its due date (on [today]).
   bool isOverdue(DateTime today) =>
@@ -197,12 +212,39 @@ class ActivityReport {
     dueDate: _date(json['due_date']),
     createdAt: _date(json['created_at'])?.toLocal(),
     updatedAt: _date(json['updated_at'])?.toLocal(),
+    assignedBy: (json['assigned_by'] as num?)?.toInt(),
+    assignedByName: json['assigned_by_name'] as String? ?? '',
+    commentCount: (json['comment_count'] as num?)?.toInt() ?? 0,
+  );
+
+  /// The same report with another status (one-tap status changes).
+  ActivityReport withStatus(ReportStatus next) => ActivityReport(
+    id: id,
+    userId: userId,
+    userName: userName,
+    departmentId: departmentId,
+    departmentName: departmentName,
+    date: date,
+    description: description,
+    reference: reference,
+    outputs: outputs,
+    status: next,
+    nextAction: nextAction,
+    blocker: blocker,
+    priority: priority,
+    dueDate: dueDate,
+    assignedBy: assignedBy,
+    assignedByName: assignedByName,
+    commentCount: commentCount,
   );
 
   /// What is sent to save it (the person and department come from the
   /// sign-in, online).
+  ///
+  /// A new report with [userId] set is a task assigned to that person.
   Map<String, Object?> toSaveJson() => {
     'id': ?id,
+    if (id == null && userId != null) 'user_id': userId,
     'report_date': dateKey(date),
     'description': description.trim(),
     'reference': reference.trim(),
@@ -213,6 +255,31 @@ class ActivityReport {
     'priority': priority.code,
     'due_date': dueDate == null ? null : dateKey(dueDate!),
   };
+}
+
+/// A comment on a report (a question, an answer, feedback).
+class ReportComment {
+  const ReportComment({
+    required this.id,
+    required this.body,
+    required this.createdAt,
+    this.userId,
+    this.userName = '',
+  });
+
+  final int id;
+  final String body;
+  final DateTime createdAt;
+  final int? userId;
+  final String userName;
+
+  factory ReportComment.fromJson(Map<String, Object?> json) => ReportComment(
+    id: (json['id'] as num).toInt(),
+    body: json['body'] as String? ?? '',
+    createdAt: _date(json['created_at'])!.toLocal(),
+    userId: (json['user_id'] as num?)?.toInt(),
+    userName: json['user_name'] as String? ?? '',
+  );
 }
 
 /// One person in the reports, for filters and compliance.

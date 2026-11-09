@@ -484,9 +484,13 @@ class FakeCloud implements CloudApi {
 
   String _day(DateTime d) => dateKey(d);
 
+  final comments = <Map<String, Object?>>[];
+
   Map<String, Object?> _reportJson(Map<String, Object?> r) => {
     ...r,
     'user_name': users[r['user_id']]!.fullName,
+    'assigned_by_name': users[r['assigned_by']]?.fullName,
+    'comment_count': comments.where((c) => c['report_id'] == r['id']).length,
     'department_name': departments.firstWhere(
       (d) => d['id'] == r['department_id'],
     )['name'],
@@ -657,10 +661,25 @@ class FakeCloud implements CloudApi {
         }
         if (before != null &&
             before['user_id'] != uid &&
+            before['assigned_by'] != uid &&
             me.role != UserRole.admin) {
           throw CloudException('not_allowed');
         }
-        final dept = before?['department_id'] ?? me.departmentId;
+        // Assigning a task to someone else.
+        final forId = before == null ? r['user_id'] as int? : null;
+        final owner = forId == null || forId == uid ? null : users[forId];
+        if (forId != null && forId != uid) {
+          if (owner == null) throw CloudException('unknown_user');
+          if (_scope(uid) == 'own' ||
+              !_canSee(uid, owner.id, owner.departmentId)) {
+            throw CloudException('not_allowed');
+          }
+          if (r['due_date'] == null) {
+            throw CloudException('due_date_required');
+          }
+        }
+        final dept =
+            before?['department_id'] ?? owner?.departmentId ?? me.departmentId;
         if (dept == null) throw CloudException('no_department');
         final date = r['report_date'] as String? ?? _day(today);
         if (date.compareTo(_day(today)) > 0) {
@@ -683,7 +702,8 @@ class FakeCloud implements CloudApi {
         ];
         final saved = <String, Object?>{
           'id': id ?? reports.length + 100,
-          'user_id': before?['user_id'] ?? uid,
+          'user_id': before?['user_id'] ?? owner?.id ?? uid,
+          'assigned_by': before?['assigned_by'] ?? (owner == null ? null : uid),
           'department_id': dept,
           'report_date': date,
           'description': '${r['description']}'.trim(),
@@ -712,7 +732,9 @@ class FakeCloud implements CloudApi {
         final id = p['p_report'] as int;
         final r = reports[id];
         if (r == null) return null;
-        if (r['user_id'] != uid && me.role != UserRole.admin) {
+        if (r['user_id'] != uid &&
+            r['assigned_by'] != uid &&
+            me.role != UserRole.admin) {
           throw CloudException('not_allowed');
         }
         reports.remove(id);
@@ -728,6 +750,36 @@ class FakeCloud implements CloudApi {
           for (final c in reportChanges)
             if (c['report_id'] == p['p_report']) c,
         ];
+      case 'report_comments':
+      case 'report_comment_add':
+        final rid = p['p_report'] as int;
+        final r = reports[rid];
+        final visible =
+            r != null &&
+            _canSee(uid, r['user_id'] as int, r['department_id'] as int?);
+        if (name == 'report_comment_add') {
+          if (!visible) throw CloudException('not_allowed');
+          comments.add({
+            'id': comments.length + 1,
+            'report_id': rid,
+            'user_id': uid,
+            'user_name': me.fullName,
+            'body': (p['p_body'] as String).trim(),
+            'created_at': '2026-11-09T09:30:00Z',
+          });
+        }
+        if (!visible) return [];
+        return [
+          for (final c in comments)
+            if (c['report_id'] == rid) c,
+        ];
+      case 'report_comment_delete':
+        comments.removeWhere(
+          (c) =>
+              c['id'] == p['p_comment'] &&
+              (c['user_id'] == uid || me.role == UserRole.admin),
+        );
+        return null;
       case 'admin_delete_user':
         _needAdmin(p['p_token'] as String);
         final id = p['p_user_id'] as int;
@@ -2240,6 +2292,129 @@ void main() {
       anyOf(contains('Hi Ian and Joy'), contains('Hi Joy and Ian')),
     );
     expect(copied, contains('S&A Hub'));
+    container.dispose();
+  });
+
+  // ------------------------------------------------ team: daily reports ---
+
+  testWidgets('team: a head assigns a task; the person works it; comments', (
+    tester,
+  ) async {
+    cloud.addUser('zawadi', 'zawadi-pass1', name: 'Zawadi', departmentId: 2);
+    cloud.addUser(
+      'grace',
+      'grace-pass-1',
+      name: 'Grace',
+      departmentId: 2,
+      reportAccess: ReportAccess.head,
+    );
+    var container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1600, 2600),
+    );
+    await signIn(tester, 'grace', 'grace-pass-1');
+    await settle(tester);
+    await tester.tap(find.text('Overview'));
+    await settle(tester);
+
+    // Grace assigns Zawadi a task, due tomorrow (one tap).
+    await tester.tap(find.byKey(const ValueKey('assign-task')));
+    await tester.pumpAndSettle();
+    expect(find.text('Assign a task'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('assign-person')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Zawadi ·').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('report-description')),
+      'Audit January files',
+    );
+    await tester.tap(find.byKey(const ValueKey('due-Tomorrow')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('report-save')));
+    await settle(tester);
+    final task = cloud.reports.values.single;
+    expect(task['user_id'], 1);
+    expect(task['assigned_by'], 2);
+    expect(task['status'], 'pending');
+    expect(task['due_date'], '2026-11-10');
+
+    // Grace asks a question on it.
+    await tester.tap(find.text('Audit January files').first);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('comment-field')),
+      'Start with the Australian ones',
+    );
+    await tester.tap(find.byKey(const ValueKey('comment-send')));
+    await settle(tester);
+    expect(
+      find.textContaining('Start with the Australian ones', findRichText: true),
+      findsOneWidget,
+    );
+    container.dispose();
+
+    // Zawadi sees it among her open items, assigned by Grace, with the
+    // comment, and moves it on in one tap.
+    await tester.pumpWidget(const SizedBox());
+    container = await pumpAccounts(tester, admin, size: const Size(1600, 2600));
+    await signIn(tester, 'zawadi', 'zawadi-pass1');
+    await settle(tester);
+    expect(find.textContaining('Assigned by Grace'), findsWidgets);
+    await tester.tap(find.byKey(ValueKey('status-menu-${task['id']}')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('In progress').last);
+    await settle(tester);
+    expect(cloud.reports[task['id']]!['status'], 'in_progress');
+    expect(cloud.reports[task['id']]!['assigned_by'], 2);
+
+    // She replies.
+    await tester.tap(find.text('Audit January files').first);
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Start with the Australian ones', findRichText: true),
+      findsOneWidget,
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('comment-field')),
+      'Will do',
+    );
+    await tester.tap(find.byKey(const ValueKey('comment-send')));
+    await settle(tester);
+    expect(cloud.comments, hasLength(2));
+    container.dispose();
+  });
+
+  testWidgets('team: My week adds up the person’s own week', (tester) async {
+    cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
+    cloud.addUser('otieno', 'otieno-pass-1', name: 'Otieno', departmentId: 1);
+    seedReport(10, 1, 2, date: '2026-11-09', outputs: {'visa_lodgements': 3});
+    seedReport(11, 1, 2, date: '2026-11-09', outputs: {'visa_lodgements': 2});
+    seedReport(12, 1, 2, status: 'pending', due: '2026-11-12');
+    seedReport(13, 2, 1, date: '2026-11-09'); // someone else's
+    seedReport(14, 1, 2, date: '2026-11-08'); // Sunday: last week
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1600, 2200),
+    );
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    final week = find.byKey(const ValueKey('my-week'));
+    expect(week, findsOneWidget);
+    // 9 Nov 2026 is a Monday: one working day so far and reported, 3
+    // entries this week, 2 completed.
+    expect(
+      find.descendant(of: week, matching: find.text('1 of 1')),
+      findsOneWidget,
+    );
+    expect(find.descendant(of: week, matching: find.text('3')), findsOneWidget);
+    expect(find.descendant(of: week, matching: find.text('2')), findsOneWidget);
+    expect(
+      find.descendant(of: week, matching: find.text('Visa lodgements 5')),
+      findsOneWidget,
+    );
     container.dispose();
   });
 }

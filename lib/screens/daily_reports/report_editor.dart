@@ -27,6 +27,7 @@ class ReportTile extends StatelessWidget {
     this.showPerson = false,
     this.showDate = false,
     this.action,
+    this.onStatus,
   });
 
   final ActivityReport report;
@@ -36,6 +37,9 @@ class ReportTile extends StatelessWidget {
   final bool showPerson;
   final bool showDate;
   final Widget? action;
+
+  /// Set: the status chip is a menu that changes the status in one tap.
+  final ValueChanged<ReportStatus>? onStatus;
 
   @override
   Widget build(BuildContext context) {
@@ -47,7 +51,10 @@ class ReportTile extends StatelessWidget {
     final r = report;
     final dept = meta.department(r.departmentId);
     final overdue = r.isOverdue(today);
+    final dueToday = r.isDueToday(today);
     final details = [
+      if (r.isAssigned)
+        'Assigned by ${r.assignedByName.isEmpty ? 'a manager' : r.assignedByName}',
       if (showPerson) r.userName,
       if (showPerson && r.departmentName.isNotEmpty) r.departmentName,
       if (showDate) _dayFormat.format(r.date),
@@ -103,7 +110,27 @@ class ReportTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyMedium,
                   ),
-                  if (details.isNotEmpty) Text(details, style: muted),
+                  if (details.isNotEmpty || r.commentCount > 0)
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(text: details),
+                          if (r.commentCount > 0) ...[
+                            if (details.isNotEmpty) const TextSpan(text: ' · '),
+                            WidgetSpan(
+                              alignment: PlaceholderAlignment.middle,
+                              child: Icon(
+                                Icons.chat_bubble_outline,
+                                size: 12,
+                                color: Dt.textMuted(theme),
+                              ),
+                            ),
+                            TextSpan(text: ' ${r.commentCount}'),
+                          ],
+                        ],
+                      ),
+                      style: muted,
+                    ),
                   if (outputs.isNotEmpty)
                     Text(outputs, style: theme.textTheme.bodySmall),
                   if (r.blocker.isNotEmpty && r.status.isOpen)
@@ -125,7 +152,28 @@ class ReportTile extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (overdue) chip('Overdue', scheme.error),
-                    chip(r.status.label, statusColor(r.status, theme)),
+                    if (dueToday) chip('Due today', Dt.brand(theme.brightness)),
+                    if (onStatus == null)
+                      chip(r.status.label, statusColor(r.status, theme))
+                    else
+                      PopupMenuButton<ReportStatus>(
+                        key: r.id == null
+                            ? null
+                            : ValueKey('status-menu-${r.id}'),
+                        tooltip: 'Change status',
+                        initialValue: r.status,
+                        onSelected: (s) {
+                          if (s != r.status) onStatus!(s);
+                        },
+                        itemBuilder: (_) => [
+                          for (final s in ReportStatus.values)
+                            PopupMenuItem(value: s, child: Text(s.label)),
+                        ],
+                        child: chip(
+                          '${r.status.label} ▾',
+                          statusColor(r.status, theme),
+                        ),
+                      ),
                   ],
                 ),
                 ?action,
@@ -147,6 +195,8 @@ Future<ActivityReport?> showReportEditor(
   DateTime? day,
   ActivityReport? existing,
   ActivityReport? template,
+  bool assign = false,
+  int? assignTo,
 }) => showDialog<ActivityReport>(
   context: context,
   barrierDismissible: false,
@@ -155,6 +205,8 @@ Future<ActivityReport?> showReportEditor(
     day: day,
     existing: existing,
     template: template,
+    assign: assign,
+    assignTo: assignTo,
   ),
 );
 
@@ -164,12 +216,19 @@ class _ReportEditor extends ConsumerStatefulWidget {
     this.day,
     this.existing,
     this.template,
+    this.assign = false,
+    this.assignTo,
   });
 
   final ReportsMeta meta;
   final DateTime? day;
   final ActivityReport? existing;
   final ActivityReport? template;
+
+  /// A head or manager giving someone a task ([assignTo] chosen first, if
+  /// known): picks the person; no outputs; a due date is needed.
+  final bool assign;
+  final int? assignTo;
 
   @override
   ConsumerState<_ReportEditor> createState() => _ReportEditorState();
@@ -186,17 +245,23 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
   late final _reference = TextEditingController(text: _from?.reference);
   late final _nextAction = TextEditingController(text: _from?.nextAction);
   late final _blocker = TextEditingController(text: _from?.blocker);
-  late ReportStatus _status = _from?.status ?? ReportStatus.completed;
+  late final bool _assign = widget.assign && _e == null;
+  late int? _personId = widget.assignTo;
+  late ReportStatus _status =
+      _from?.status ??
+      (_assign ? ReportStatus.pending : ReportStatus.completed);
   late ReportPriority _priority = _from?.priority ?? ReportPriority.medium;
   late DateTime? _due = _e?.dueDate;
   late final Department? _dept = widget.meta.department(
     _e?.departmentId ?? widget.meta.myDepartmentId,
   );
   late final Map<String, TextEditingController> _outputs = {
-    for (final o in _dept?.outputs ?? const <OutputField>[])
-      o.key: TextEditingController(
-        text: _e?.outputs[o.key] == null ? '' : '${_e!.outputs[o.key]}',
-      ),
+    // A task being assigned has no counts yet.
+    if (!_assign)
+      for (final o in _dept?.outputs ?? const <OutputField>[])
+        o.key: TextEditingController(
+          text: _e?.outputs[o.key] == null ? '' : '${_e!.outputs[o.key]}',
+        ),
   };
   bool _busy = false;
   String? _error;
@@ -213,6 +278,7 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
     _status,
     _priority,
     _due,
+    _personId,
     for (final c in _outputs.values) c.text,
   ].join('\u0000');
 
@@ -280,6 +346,20 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
     if (picked != null) setState(() => _date = picked);
   }
 
+  /// One-tap due dates: today, tomorrow, this Friday, next Monday.
+  List<(String, DateTime)> get _quickDues {
+    final t = _today;
+    DateTime day(int add) => DateTime(t.year, t.month, t.day + add);
+    final toFriday = (DateTime.friday - t.weekday) % 7;
+    final toMonday = (DateTime.monday - t.weekday + 7) % 7;
+    return [
+      ('Today', t),
+      ('Tomorrow', day(1)),
+      if (toFriday > 1) ('Friday', day(toFriday)),
+      ('Next Monday', day(toMonday == 0 ? 7 : toMonday)),
+    ];
+  }
+
   Future<void> _pickDue() async {
     final initial = _due ?? _today.add(const Duration(days: 1));
     // The range always includes the date already set, however old or far
@@ -298,9 +378,11 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
 
   Future<void> _save() async {
     String? error;
-    if (_description.text.trim().isEmpty) {
+    if (_assign && _personId == null) {
+      error = 'Choose who the task is for.';
+    } else if (_description.text.trim().isEmpty) {
       error = 'Describe the activity or task.';
-    } else if (_status.isOpen && _due == null) {
+    } else if ((_status.isOpen || _assign) && _due == null) {
       error =
           'Anything not completed needs a due / follow-up date, so it can '
           'be followed up.';
@@ -310,6 +392,7 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
     setState(() => _busy = true);
     final report = ActivityReport(
       id: _e?.id,
+      userId: _assign ? _personId : null,
       date: _date,
       description: _description.text,
       reference: _reference.text,
@@ -371,7 +454,13 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
     Department? dept,
   ) {
     return AlertDialog(
-      title: Text(_e == null ? 'Add activity' : 'Edit activity'),
+      title: Text(
+        _assign
+            ? 'Assign a task'
+            : _e == null
+            ? 'Add activity'
+            : 'Edit activity',
+      ),
       scrollable: true,
       content: SizedBox(
         width: 560,
@@ -379,12 +468,42 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (_assign) ...[
+              DropdownButtonFormField<int>(
+                key: const ValueKey('assign-person'),
+                initialValue: _personId,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'For'),
+                items: [
+                  for (final p in widget.meta.people)
+                    if (p.active && p.departmentId != null)
+                      DropdownMenuItem(
+                        value: p.id,
+                        child: Text(
+                          [
+                            p.fullName,
+                            widget.meta.department(p.departmentId)?.name,
+                          ].nonNulls.join(' · '),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                ],
+                onChanged: _busy ? null : (v) => setState(() => _personId = v),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'It goes on their open items, marked as assigned by you. '
+                'They update it as they work; you can still change it.',
+                style: muted,
+              ),
+              const SizedBox(height: 8),
+            ],
             Wrap(
               spacing: 8,
               runSpacing: 4,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Text(dept?.name ?? '', style: muted),
+                if (!_assign) Text(dept?.name ?? '', style: muted),
                 TextButton.icon(
                   key: const ValueKey('report-date'),
                   onPressed: _busy ? null : _pickDate,
@@ -407,11 +526,12 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
               maxLines: 5,
               maxLength: 2000,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                labelText: 'Activity / task',
-                hintText:
-                    'What you did, e.g. Followed up on 12 applications with '
-                    'universities',
+              decoration: InputDecoration(
+                labelText: _assign ? 'Task' : 'Activity / task',
+                hintText: _assign
+                    ? 'What needs doing, e.g. Follow up the 5 pending COEs'
+                    : 'What you did, e.g. Followed up on 12 applications '
+                          'with universities',
               ),
             ),
             if (dept != null && dept.outputs.isNotEmpty) ...[
@@ -524,6 +644,20 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
                 ),
               ],
             ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                for (final (label, day) in _quickDues)
+                  ActionChip(
+                    key: ValueKey('due-$label'),
+                    label: Text(label),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: _busy ? null : () => setState(() => _due = day),
+                  ),
+              ],
+            ),
             const SizedBox(height: 10),
             TextField(
               key: const ValueKey('report-next'),
@@ -622,10 +756,70 @@ class _ReportDetails extends ConsumerStatefulWidget {
 
 class _ReportDetailsState extends ConsumerState<_ReportDetails> {
   List<ReportChange>? _history;
+  List<ReportComment>? _comments;
+  final _comment = TextEditingController();
+  bool _sending = false;
+
+  /// A comment was added or removed: the lists behind need refreshing.
+  bool _changed = false;
+
+  @override
+  void dispose() {
+    _comment.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadComments() async {
+    final id = widget.report.id;
+    if (id == null) return;
+    try {
+      final c = await ref.read(dailyReportsProvider).comments(id);
+      if (mounted) setState(() => _comments = c);
+    } catch (_) {
+      if (mounted) setState(() => _comments = const []);
+    }
+  }
+
+  Future<void> _sendComment() async {
+    final id = widget.report.id;
+    final body = _comment.text.trim();
+    if (id == null || body.isEmpty || _sending) return;
+    setState(() => _sending = true);
+    try {
+      final all = await ref.read(dailyReportsProvider).addComment(id, body);
+      if (!mounted) return;
+      setState(() {
+        _comments = all;
+        _comment.clear();
+        _changed = true;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(describeReportError(e))));
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _deleteComment(ReportComment c) async {
+    try {
+      await ref.read(dailyReportsProvider).deleteComment(c.id);
+      _changed = true;
+      await _loadComments();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(describeReportError(e))));
+      }
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    _loadComments();
     final id = widget.report.id;
     if (id != null) {
       ref
@@ -641,7 +835,9 @@ class _ReportDetailsState extends ConsumerState<_ReportDetails> {
   }
 
   bool get _canChange =>
-      widget.report.userId == widget.meta.myId || ref.read(isAdminProvider);
+      widget.report.userId == widget.meta.myId ||
+      widget.report.assignedBy == widget.meta.myId ||
+      ref.read(isAdminProvider);
 
   Future<void> _edit() async {
     final saved = await showReportEditor(
@@ -756,6 +952,81 @@ class _ReportDetailsState extends ConsumerState<_ReportDetails> {
             field('Pending work / next action', r.nextAction),
             field('Challenge / blocker', r.blocker),
             field('Reference', r.reference),
+            if (r.isAssigned)
+              field(
+                'Assigned by',
+                r.assignedByName.isEmpty ? 'A manager' : r.assignedByName,
+              ),
+            Text('COMMENTS', style: microLabel(theme)),
+            const SizedBox(height: 4),
+            if (_comments == null)
+              const LinearProgressIndicator()
+            else ...[
+              if (_comments!.isEmpty)
+                Text(
+                  'No comments yet. Ask a question or leave feedback.',
+                  style: muted,
+                ),
+              for (final c in _comments!)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(
+                                text: c.userName.isEmpty
+                                    ? 'A deleted account'
+                                    : c.userName,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              TextSpan(
+                                text: '  ${stamp.format(c.createdAt)}\n',
+                                style: muted,
+                              ),
+                              TextSpan(text: c.body),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (c.userId == widget.meta.myId ||
+                          ref.read(isAdminProvider))
+                        IconButton(
+                          tooltip: 'Delete comment',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => _deleteComment(c),
+                          icon: const Icon(Icons.delete_outline, size: 16),
+                        ),
+                    ],
+                  ),
+                ),
+              TextField(
+                key: const ValueKey('comment-field'),
+                controller: _comment,
+                enabled: !_sending,
+                minLines: 1,
+                maxLines: 4,
+                maxLength: 1000,
+                textCapitalization: TextCapitalization.sentences,
+                onSubmitted: (_) => _sendComment(),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: 'Add a comment',
+                  suffixIcon: IconButton(
+                    key: const ValueKey('comment-send'),
+                    tooltip: 'Send',
+                    onPressed: _sending ? null : _sendComment,
+                    icon: const Icon(Icons.send, size: 18),
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
             Text('HISTORY', style: microLabel(theme)),
             const SizedBox(height: 4),
             if (history == null)
@@ -796,7 +1067,7 @@ class _ReportDetailsState extends ConsumerState<_ReportDetails> {
           ),
         ],
         FilledButton(
-          onPressed: () => Navigator.pop(context, false),
+          onPressed: () => Navigator.pop(context, _changed),
           child: const Text('Close'),
         ),
       ],

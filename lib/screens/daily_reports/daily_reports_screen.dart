@@ -189,9 +189,15 @@ class _MyReportsState extends ConsumerState<_MyReports> {
   late DateTime _day = widget.meta.today;
   List<ActivityReport>? _entries;
   List<ActivityReport>? _open;
+
+  /// This week's reports (Monday to today), for "My week".
+  List<ActivityReport>? _week;
   Object? _error;
 
   ReportsMeta get meta => widget.meta;
+
+  DateTime get _monday =>
+      meta.today.subtract(Duration(days: meta.today.weekday - 1));
 
   /// The newest load; an older one finishing late is ignored.
   int _loadSeq = 0;
@@ -220,11 +226,21 @@ class _MyReportsState extends ConsumerState<_MyReports> {
       final results = await Future.wait([
         service.list(ReportFilter(from: _day, to: _day, userId: meta.myId)),
         service.list(ReportFilter(userId: meta.myId, openOnly: true)),
+        service.list(
+          ReportFilter(from: _monday, to: meta.today, userId: meta.myId),
+        ),
       ]);
       if (!mounted || seq != _loadSeq) return;
       setState(() {
         _entries = results[0];
-        _open = results[1];
+        // Soonest due first; anything without a date last.
+        _open = [...results[1]]
+          ..sort((a, b) {
+            final x = a.dueDate, y = b.dueDate;
+            if (x == null || y == null) return x == null ? 1 : -1;
+            return x.compareTo(y);
+          });
+        _week = results[2];
         _error = null;
       });
     } catch (e) {
@@ -247,27 +263,23 @@ class _MyReportsState extends ConsumerState<_MyReports> {
     if (saved != null) await _load();
   }
 
-  Future<void> _markDone(ActivityReport report) async {
+  Future<void> _markDone(ActivityReport report) =>
+      _setStatus(report, ReportStatus.completed);
+
+  /// One tap: a new status, everything else as it was.
+  Future<void> _setStatus(ActivityReport report, ReportStatus status) async {
     try {
-      await ref
-          .read(dailyReportsProvider)
-          .save(
-            ActivityReport(
-              id: report.id,
-              date: report.date,
-              description: report.description,
-              reference: report.reference,
-              outputs: report.outputs,
-              status: ReportStatus.completed,
-              nextAction: report.nextAction,
-              blocker: report.blocker,
-              priority: report.priority,
-              dueDate: report.dueDate,
-            ),
-          );
+      await ref.read(dailyReportsProvider).save(report.withStatus(status));
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Marked completed')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              status == ReportStatus.completed
+                  ? 'Marked completed'
+                  : 'Now ${status.label.toLowerCase()}',
+            ),
+          ),
+        );
       }
       await _load();
     } catch (e) {
@@ -435,6 +447,7 @@ class _MyReportsState extends ConsumerState<_MyReports> {
                           today: meta.today,
                           showDate: true,
                           onTap: () => _show(e),
+                          onStatus: (s) => _setStatus(e, s),
                           action: TextButton(
                             onPressed: () => _markDone(e),
                             child: const Text('Mark done'),
@@ -444,7 +457,103 @@ class _MyReportsState extends ConsumerState<_MyReports> {
                   ),
           ),
         ),
+        if (_week case final week?) ...[
+          const SizedBox(height: 12),
+          _MyWeek(
+            week: week,
+            from: _monday,
+            today: meta.today,
+            department: dept,
+          ),
+        ],
       ],
+    );
+  }
+}
+
+/// "My week": the person's own figures, Monday to today.
+class _MyWeek extends StatelessWidget {
+  const _MyWeek({
+    required this.week,
+    required this.from,
+    required this.today,
+    required this.department,
+  });
+
+  final List<ActivityReport> week;
+  final DateTime from;
+  final DateTime today;
+  final Department department;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: Dt.textMuted(theme),
+    );
+    var workingDays = 0;
+    for (var d = from; !d.isAfter(today); d = d.add(const Duration(days: 1))) {
+      if (d.weekday <= DateTime.friday) workingDays++;
+    }
+    // Working days with a report, to compare with the working days so far
+    // (a Saturday entry still counts as an entry, not as a working day).
+    final days = {
+      for (final r in week)
+        if (r.date.weekday <= DateTime.friday) r.date,
+    }.length;
+    final completed = week
+        .where((r) => r.status == ReportStatus.completed)
+        .length;
+    final totals = <String, int>{};
+    for (final r in week) {
+      r.outputs.forEach((k, v) => totals[k] = (totals[k] ?? 0) + v);
+    }
+    Widget figure(String label, String value) => Padding(
+      padding: const EdgeInsets.only(right: 24, bottom: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label.toUpperCase(), style: microLabel(theme)),
+          Text(
+            value,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+    return AppPanel(
+      key: const ValueKey('my-week'),
+      title: 'My week',
+      icon: Icons.insights_outlined,
+      trailing: DateFormat('d MMM').format(from),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              children: [
+                figure('Days reported', '$days of $workingDays'),
+                figure('Entries', '${week.length}'),
+                figure('Completed', '$completed'),
+              ],
+            ),
+            if (totals.isNotEmpty)
+              Text(
+                [
+                  for (final e in totals.entries)
+                    '${department.outputLabel(e.key)} ${e.value}',
+                ].join(' · '),
+                style: theme.textTheme.bodySmall,
+              )
+            else
+              Text('No counts recorded yet this week.', style: muted),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -717,6 +826,23 @@ class _OverviewState extends ConsumerState<_Overview> {
     }
   }
 
+  /// A head or manager gives someone a task (the person filter, if set,
+  /// is chosen already).
+  Future<void> _assign() async {
+    final saved = await showReportEditor(
+      context,
+      meta: meta,
+      day: meta.today,
+      assign: true,
+      assignTo: _userId,
+    );
+    if (saved == null || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Task assigned to ${saved.userName}')),
+    );
+    await _load();
+  }
+
   Future<void> _openReport(ActivityReport report) async {
     final changed = await showReportDetails(
       context,
@@ -790,6 +916,12 @@ class _OverviewState extends ConsumerState<_Overview> {
           tooltip: 'Refresh',
           onPressed: _loading ? null : _load,
           icon: const Icon(Icons.refresh, size: 18),
+        ),
+        FilledButton.icon(
+          key: const ValueKey('assign-task'),
+          onPressed: _assign,
+          icon: const Icon(Icons.assignment_ind_outlined, size: 16),
+          label: const Text('Assign task'),
         ),
         MenuAnchor(
           menuChildren: [
