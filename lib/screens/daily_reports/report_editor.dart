@@ -138,24 +138,38 @@ class ReportTile extends StatelessWidget {
   }
 }
 
-/// Adds a report for [day] (or changes [existing]). Returns the saved one.
+/// Adds a report for [day] (or changes [existing]). With [template], a new
+/// report starts as a copy of it (recurring work), without its counts or
+/// due date. Returns the saved one.
 Future<ActivityReport?> showReportEditor(
   BuildContext context, {
   required ReportsMeta meta,
   DateTime? day,
   ActivityReport? existing,
+  ActivityReport? template,
 }) => showDialog<ActivityReport>(
   context: context,
   barrierDismissible: false,
-  builder: (_) => _ReportEditor(meta: meta, day: day, existing: existing),
+  builder: (_) => _ReportEditor(
+    meta: meta,
+    day: day,
+    existing: existing,
+    template: template,
+  ),
 );
 
 class _ReportEditor extends ConsumerStatefulWidget {
-  const _ReportEditor({required this.meta, this.day, this.existing});
+  const _ReportEditor({
+    required this.meta,
+    this.day,
+    this.existing,
+    this.template,
+  });
 
   final ReportsMeta meta;
   final DateTime? day;
   final ActivityReport? existing;
+  final ActivityReport? template;
 
   @override
   ConsumerState<_ReportEditor> createState() => _ReportEditorState();
@@ -163,13 +177,17 @@ class _ReportEditor extends ConsumerStatefulWidget {
 
 class _ReportEditorState extends ConsumerState<_ReportEditor> {
   late final ActivityReport? _e = widget.existing;
+
+  /// Where the fields start from: the report being changed, or the one
+  /// being repeated.
+  late final ActivityReport? _from = _e ?? widget.template;
   late DateTime _date = _e?.date ?? widget.day ?? widget.meta.today;
-  late final _description = TextEditingController(text: _e?.description);
-  late final _reference = TextEditingController(text: _e?.reference);
-  late final _nextAction = TextEditingController(text: _e?.nextAction);
-  late final _blocker = TextEditingController(text: _e?.blocker);
-  late ReportStatus _status = _e?.status ?? ReportStatus.completed;
-  late ReportPriority _priority = _e?.priority ?? ReportPriority.medium;
+  late final _description = TextEditingController(text: _from?.description);
+  late final _reference = TextEditingController(text: _from?.reference);
+  late final _nextAction = TextEditingController(text: _from?.nextAction);
+  late final _blocker = TextEditingController(text: _from?.blocker);
+  late ReportStatus _status = _from?.status ?? ReportStatus.completed;
+  late ReportPriority _priority = _from?.priority ?? ReportPriority.medium;
   late DateTime? _due = _e?.dueDate;
   late final Department? _dept = widget.meta.department(
     _e?.departmentId ?? widget.meta.myDepartmentId,
@@ -182,6 +200,56 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
   };
   bool _busy = false;
   String? _error;
+
+  /// What the form held when it opened, to tell whether anything changed.
+  late final String _opened = _snapshot;
+
+  String get _snapshot => [
+    _date,
+    _description.text,
+    _reference.text,
+    _nextAction.text,
+    _blocker.text,
+    _status,
+    _priority,
+    _due,
+    for (final c in _outputs.values) c.text,
+  ].join('\u0000');
+
+  /// Cancel, Esc or Back: asks first if something was typed.
+  Future<void> _close() async {
+    if (_busy) return;
+    if (_snapshot != _opened) {
+      final discard = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Discard your changes?'),
+          content: const Text(
+            'What you typed in this activity won’t be saved.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Keep editing'),
+            ),
+            FilledButton(
+              key: const ValueKey('discard-report'),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Discard'),
+            ),
+          ],
+        ),
+      );
+      if (discard != true || !mounted) return;
+    }
+    Navigator.of(context).pop();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _opened; // note the starting point
+  }
 
   @override
   void dispose() {
@@ -280,6 +348,28 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
       color: Dt.textMuted(theme),
     );
     final dept = _dept;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _close();
+      },
+      // Ctrl+Enter (Cmd+Enter on a Mac) saves.
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.enter, control: true): _save,
+          const SingleActivator(LogicalKeyboardKey.enter, meta: true): _save,
+        },
+        child: _dialog(context, theme, muted, dept),
+      ),
+    );
+  }
+
+  Widget _dialog(
+    BuildContext context,
+    ThemeData theme,
+    TextStyle? muted,
+    Department? dept,
+  ) {
     return AlertDialog(
       title: Text(_e == null ? 'Add activity' : 'Edit activity'),
       scrollable: true,
@@ -489,7 +579,7 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
       ),
       actions: [
         TextButton(
-          onPressed: _busy ? null : () => Navigator.pop(context),
+          onPressed: _busy ? null : _close,
           child: const Text('Cancel'),
         ),
         FilledButton(
@@ -558,6 +648,17 @@ class _ReportDetailsState extends ConsumerState<_ReportDetails> {
       context,
       meta: widget.meta,
       existing: widget.report,
+    );
+    if (saved != null && mounted) Navigator.pop(context, true);
+  }
+
+  /// Recurring work: a new activity for today, starting as a copy of this.
+  Future<void> _repeat() async {
+    final saved = await showReportEditor(
+      context,
+      meta: widget.meta,
+      day: widget.meta.today,
+      template: widget.report,
     );
     if (saved != null && mounted) Navigator.pop(context, true);
   }
@@ -668,13 +769,20 @@ class _ReportDetailsState extends ConsumerState<_ReportDetails> {
                     'created' => 'Added',
                     'edited' => 'Changed',
                     _ => 'Deleted',
-                  }} by ${h.changedBy} · ${stamp.format(h.changedAt)}',
+                  }} by ${h.changedBy.isEmpty ? 'a deleted account' : h.changedBy} · ${stamp.format(h.changedAt)}',
                   style: muted,
                 ),
           ],
         ),
       ),
       actions: [
+        if (widget.report.userId == widget.meta.myId &&
+            widget.meta.myDepartmentId != null)
+          TextButton(
+            key: const ValueKey('repeat-report'),
+            onPressed: _repeat,
+            child: const Text('Add again today'),
+          ),
         if (_canChange) ...[
           TextButton(
             key: const ValueKey('delete-report'),

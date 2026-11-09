@@ -229,7 +229,7 @@ Future<Uint8List> operationsReportToPdf(
   final doc = pw.Document(
     title: report.title,
     author: report.generatedBy,
-    creator: 'Client Tracker',
+    creator: 'S&A Hub',
     theme: theme,
   );
   const navy = PdfColor.fromInt(0xFF001A45);

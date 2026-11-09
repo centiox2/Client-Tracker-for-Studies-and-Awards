@@ -1,4 +1,4 @@
-; Windows installer for Client Tracker (Inno Setup 6), built by CI:
+; Windows installer for S&A Hub (Inno Setup 6), built by CI:
 ;   ISCC.exe /DAppVersion=1.1.0 installer\client_tracker.iss
 ; Installs for the current user (no admin rights needed), with Start menu
 ; and optional desktop shortcuts and an uninstaller. Running a newer
@@ -12,22 +12,23 @@
 [Setup]
 ; Fixed id: every version of the installer upgrades the same app.
 AppId={{5B7E2C64-8F3A-4C2D-9E1B-6A4D0C3F7A21}
-AppName=Client Tracker
+AppName=S&A Hub
 AppVersion={#AppVersion}
-AppVerName=Client Tracker {#AppVersion}
+AppVerName=S&A Hub {#AppVersion}
 AppPublisher=Studies and Awards Limited
-DefaultDirName={autopf}\Client Tracker
-DefaultGroupName=Client Tracker
+; An existing install keeps its folder (same AppId), so upgrades land in place.
+DefaultDirName={autopf}\SA Hub
+DefaultGroupName=S&A Hub
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=Output
-OutputBaseFilename=ClientTrackerSetup
+OutputBaseFilename=SAHubSetup
 SetupIconFile=..\windows\runner\resources\app_icon.ico
 UninstallDisplayIcon={app}\client_tracker.exe
-UninstallDisplayName=Client Tracker
+UninstallDisplayName=S&A Hub
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -44,9 +45,14 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 [Files]
 Source: "..\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+; The app used to be called Client Tracker: remove its old shortcuts.
+[InstallDelete]
+Type: files; Name: "{autoprograms}\Client Tracker.lnk"
+Type: files; Name: "{autodesktop}\Client Tracker.lnk"
+
 [Icons]
-Name: "{autoprograms}\Client Tracker"; Filename: "{app}\client_tracker.exe"
-Name: "{autodesktop}\Client Tracker"; Filename: "{app}\client_tracker.exe"; Tasks: desktopicon
+Name: "{autoprograms}\S&A Hub"; Filename: "{app}\client_tracker.exe"
+Name: "{autodesktop}\S&A Hub"; Filename: "{app}\client_tracker.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\client_tracker.exe"; Description: "Open Client Tracker"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\client_tracker.exe"; Description: "Open S&A Hub"; Flags: nowait postinstall skipifsilent

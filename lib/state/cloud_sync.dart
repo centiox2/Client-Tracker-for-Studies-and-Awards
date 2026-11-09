@@ -627,6 +627,14 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     return saved;
   }
 
+  /// Admin: deletes account [userId]. Someone with daily reports is only
+  /// deleted with [withReports]; otherwise this throws
+  /// CloudException('has_reports') whose detail holds how many.
+  Future<void> deleteUser(int userId, {bool withReports = false}) => callAsUser(
+    'admin_delete_user',
+    {'p_user_id': userId, 'p_with_reports': withReports},
+  );
+
   /// Admin: a temporary password for someone who forgot theirs.
   Future<void> resetUserPassword(int userId, String password) =>
       _needApi().adminResetPassword(_needToken(), userId, password);

@@ -46,6 +46,7 @@ class SupabaseCloudApi implements CloudApi {
     'name_taken',
     'unknown_department',
     'bad_access',
+    'has_reports',
   ];
 
   Future<T> _call<T>(String fn, [Map<String, Object?>? params]) async {

@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 
 import 'design/app_theme.dart';
 import 'screens/daily_reports/daily_reports_screen.dart';
+import 'services/daily_reports_service.dart';
 import 'screens/dashboard/dashboard_screen.dart';
 import 'screens/history/history_screen.dart';
 import 'screens/quick_search/quick_search_dialog.dart';
@@ -38,7 +39,7 @@ class ClientTrackerApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
     return MaterialApp(
-      title: 'Client Tracker · ${Dt.companyName}',
+      title: '${Dt.appName} · ${Dt.companyName}',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(Brightness.light),
       darkTheme: buildAppTheme(Brightness.dark),
@@ -168,6 +169,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
       final now = _dateOnly(DateTime.now());
       if (now != _today) {
+        // A new day: the daily report reminder checks again.
+        ref.read(reportsChangedProvider.notifier).bump();
         // Revenue was showing "today": move it on to the new day too.
         final revenueDay = ref.read(revenueDateProvider.notifier);
         if (ref.read(revenueDateProvider) == _today) revenueDay.set(now);
@@ -184,7 +187,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       ref.read(autoBackupProvider.notifier).ensureToday();
       // Online sync: download the latest, then live updates.
       ref.read(cloudSyncProvider.notifier).start();
-      // Share → Client Tracker (phones): payment photos or an M-Pesa SMS.
+      // Share → S&A Hub (phones): payment photos or an M-Pesa SMS.
       listenForShares(_onShared);
       _checkKeptSignIn();
     });
@@ -391,6 +394,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final isViewer = !ref.watch(canEditProvider);
     final requested = ref.watch(navTabProvider);
     final allowed = _tabs;
+    // Nothing recorded today yet: a dot on Daily reports.
+    final reportDue = ref.watch(reportDueTodayProvider).value ?? false;
     // Never render a page this profile may not see, whatever the nav state.
     final tab = allowed.any((t) => t.tab == requested)
         ? requested
@@ -454,7 +459,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           destinations: [
             for (final item in barTabs)
               NavigationDestination(
-                icon: Icon(item.icon),
+                icon: Badge(
+                  isLabelVisible: reportDue && item.tab == AppTab.dailyReports,
+                  smallSize: 8,
+                  child: Icon(item.icon),
+                ),
                 selectedIcon: Icon(item.icon),
                 label: item.shortLabel ?? item.label,
                 tooltip: item.label,
@@ -478,6 +487,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       body: Row(
         children: [
           _AppSidebar(
+            reportDue: reportDue,
             tabs: _tabs,
             selected: tab,
             onSelect: (value) => ref.read(navTabProvider.notifier).set(value),
@@ -516,12 +526,16 @@ class _AppTabInfo {
 
 class _AppSidebar extends StatelessWidget {
   const _AppSidebar({
+    this.reportDue = false,
     required this.tabs,
     required this.selected,
     required this.onSelect,
     required this.onSearch,
   });
   final List<_AppTabInfo> tabs;
+
+  /// Nothing recorded today yet: a dot on Daily reports.
+  final bool reportDue;
   final AppTab selected;
   final ValueChanged<AppTab> onSelect;
 
@@ -580,6 +594,19 @@ class _AppSidebar extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (item.tab == AppTab.dailyReports && reportDue)
+                        Tooltip(
+                          message: 'Nothing recorded today yet',
+                          child: Container(
+                            key: const ValueKey('report-due-dot'),
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: Dt.brand(theme.brightness),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
                       if (item.tab == AppTab.week)
                         Icon(
                           Icons.chevron_right,
@@ -745,7 +772,7 @@ class _AccountMenu extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Client Tracker',
+                      Dt.appName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.labelMedium?.copyWith(
@@ -929,7 +956,7 @@ class _MobileTopBar extends ConsumerWidget {
         children: [
           const _BrandMark(),
           const SizedBox(width: 8),
-          Text('Client Tracker', style: Theme.of(context).textTheme.titleSmall),
+          Text(Dt.appName, style: Theme.of(context).textTheme.titleSmall),
           const Spacer(),
           const SyncStatusBadge(compact: true),
           PopupMenuButton<String>(

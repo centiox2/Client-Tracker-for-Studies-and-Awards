@@ -348,7 +348,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: 'About',
         icon: Icons.info_outline,
         description:
-            'Client Tracker replaces the weekly Excel tracking spreadsheet. '
+            '${Dt.appName} replaces the weekly Excel tracking spreadsheet. '
             'All data is stored on this device; totals are always calculated '
             'live from the entered numbers.',
       ),

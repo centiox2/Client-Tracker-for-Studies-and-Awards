@@ -1,4 +1,4 @@
-name: Client Tracker – Windows build
+name: S&A Hub – Windows build
 
 on:
   push:
@@ -82,9 +82,9 @@ jobs:
           # The first time there's no earlier release to remove: carry on.
           $PSNativeCommandUseErrorActionPreference = $false
           gh release delete installer-latest --cleanup-tag --yes 2>&1 | Out-Null
-          gh release create installer-latest installer/Output/ClientTrackerSetup.exe `
+          gh release create installer-latest installer/Output/SAHubSetup.exe `
             --target "$env:GITHUB_SHA" `
-            --title "Client Tracker for Windows $version ($short)" `
-            --notes "Windows installer built from $env:GITHUB_REF_NAME at $short. Download ClientTrackerSetup.exe and run it; it upgrades an existing install in place." `
+            --title "S&A Hub for Windows $version ($short)" `
+            --notes "Windows installer built from $env:GITHUB_REF_NAME at $short. Download SAHubSetup.exe and run it; it upgrades an existing install in place." `
             --latest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

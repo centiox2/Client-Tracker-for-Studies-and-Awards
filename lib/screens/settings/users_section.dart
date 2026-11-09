@@ -32,6 +32,27 @@ class _UsersSectionState extends ConsumerState<UsersSection> {
   bool _loading = true;
   String? _error;
 
+  /// Narrows a long list: name, username, role or department.
+  final _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  bool _matches(AppUser u) {
+    final q = _search.text.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    final dept = _departments.where((d) => d.id == u.departmentId).firstOrNull;
+    return [
+      u.fullName,
+      u.username,
+      u.role.label,
+      dept?.name ?? '',
+    ].any((t) => t.toLowerCase().contains(q));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -135,8 +156,106 @@ class _UsersSectionState extends ConsumerState<UsersSection> {
     );
   }
 
-  Future<void> _setActive(AppUser user, bool active) async {
-    if (!active) {
+  /// Deletes an account, after asking. Someone with daily reports: their
+  /// reports would go too, so switching the account off (which keeps
+  /// them) is offered first.
+  Future<void> _delete(AppUser user) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete ${user.fullName}’s account?'),
+        content: Text(
+          '@${user.username} will be removed for good and signed out '
+          'everywhere. This can’t be undone.\n\n'
+          'If they’ve only left, switching the account off is usually '
+          'better: it keeps everything they recorded.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('confirm-delete-user'),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete account'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final sync = ref.read(cloudSyncProvider.notifier);
+    try {
+      await sync.deleteUser(user.id);
+    } on CloudException catch (e) {
+      if (e.code != 'has_reports') {
+        if (mounted) _snack(describeAccountError(e));
+        return;
+      }
+      final count = RegExp(r'has_reports:(\d+)')
+          .firstMatch(e.detail ?? '')
+          ?.group(1);
+      if (!mounted) return;
+      final choice = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('${user.fullName} has daily reports'),
+          content: Text(
+            '${count ?? 'Some'} daily report${count == '1' ? ' was' : 's were'} '
+            'recorded by ${user.fullName}. Deleting the account deletes '
+            'them too (each is noted in the audit trail), and they drop out '
+            'of past figures and exports.\n\n'
+            'Switch the account off instead to keep them.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            if (user.active)
+              OutlinedButton(
+                key: const ValueKey('delete-switch-off-instead'),
+                onPressed: () => Navigator.pop(context, 'off'),
+                child: const Text('Switch off instead'),
+              ),
+            FilledButton(
+              key: const ValueKey('confirm-delete-with-reports'),
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+                foregroundColor: Theme.of(context).colorScheme.onError,
+              ),
+              onPressed: () => Navigator.pop(context, 'delete'),
+              child: const Text('Delete account and reports'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || choice == null) return;
+      if (choice == 'off') {
+        await _setActive(user, false, ask: false);
+        return;
+      }
+      try {
+        await sync.deleteUser(user.id, withReports: true);
+      } catch (e) {
+        if (mounted) _snack(describeAccountError(e));
+        return;
+      }
+    } catch (e) {
+      if (mounted) _snack(describeAccountError(e));
+      return;
+    }
+    if (!mounted) return;
+    _snack('${user.fullName}’s account was deleted');
+    await _load();
+  }
+
+  Future<void> _setActive(AppUser user, bool active, {bool ask = true}) async {
+    if (!active && ask) {
       final ok = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -224,8 +343,21 @@ class _UsersSectionState extends ConsumerState<UsersSection> {
               )
             else if (_error != null && users == null)
               Text(_error!, style: muted)
-            else if (users != null)
-              for (final u in users)
+            else if (users != null) ...[
+              if (users.length > 6) ...[
+                TextField(
+                  key: const ValueKey('users-search'),
+                  controller: _search,
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    prefixIcon: Icon(Icons.search, size: 18),
+                    hintText: 'Search name, username, role or department',
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+              for (final u in users.where(_matches))
                 _UserRow(
                   key: ValueKey('user-${u.username}'),
                   user: u,
@@ -237,7 +369,9 @@ class _UsersSectionState extends ConsumerState<UsersSection> {
                   onEdit: () => _edit(u),
                   onReset: () => _resetPassword(u),
                   onActive: (v) => _setActive(u, v),
+                  onDelete: () => _delete(u),
                 ),
+            ],
             const SizedBox(height: 12),
             Wrap(
               spacing: Dt.s8,
@@ -273,6 +407,7 @@ class _UserRow extends StatelessWidget {
     required this.onEdit,
     required this.onReset,
     required this.onActive,
+    required this.onDelete,
   });
 
   final AppUser user;
@@ -282,6 +417,7 @@ class _UserRow extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onReset;
   final ValueChanged<bool> onActive;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -358,6 +494,7 @@ class _UserRow extends StatelessWidget {
                 'reset' => onReset(),
                 'off' => onActive(false),
                 'on' => onActive(true),
+                'delete' => onDelete(),
                 _ => null,
               },
               itemBuilder: (_) => [
@@ -371,6 +508,16 @@ class _UserRow extends StatelessWidget {
                     value: user.active ? 'off' : 'on',
                     child: Text(
                       user.active ? 'Switch off account' : 'Switch back on',
+                    ),
+                  ),
+                if (!isMe)
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Text(
+                      'Delete account…',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
                     ),
                   ),
               ],
@@ -760,8 +907,9 @@ String describeAccountError(Object e) {
       'Passwords need at least ${AppUser.minPasswordLength} characters.',
     'last_admin' => 'There must always be at least one admin who can sign in.',
     'own_account' =>
-      'You can’t switch off your own account or remove your own admin '
-          'role. Ask another admin.',
+      'You can’t switch off or delete your own account, or remove your own '
+          'admin role. Ask another admin.',
+    'unknown_user' => 'That account no longer exists.',
     'not_signed_in' =>
       'Only an admin can manage accounts, and your sign-in may have ended. '
           'Sign out and in again.',

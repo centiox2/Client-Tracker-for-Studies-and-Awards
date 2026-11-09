@@ -4,7 +4,7 @@ import 'database.dart';
 /// `database_bootstrap.dart` replaces this on io and web platforms.
 Future<AppDatabase> openPlatformDatabase(String directory) async {
   throw UnsupportedError(
-    'This platform is not supported by Client Tracker (io and web only).',
+    'This platform is not supported by S&A Hub (io and web only).',
   );
 }
 

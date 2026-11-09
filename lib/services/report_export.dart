@@ -69,7 +69,7 @@ Uint8List reportToExcel(
   excel.delete('Sheet1');
   var r = 0;
   row(summary, r++, [title], style: CellStyle(bold: true, fontSize: 14));
-  row(summary, r++, ['Studies and Awards Limited · Client Tracker']);
+  row(summary, r++, ['Studies and Awards Limited · S&A Hub']);
   r++;
   for (final (label, value) in <(String, Object)>[
     ('Total clients', report.total),
@@ -274,7 +274,7 @@ Uint8List reportToPrintableHtml(
     </style></head><body>''')
     ..writeln('<h1>${esc(title)}</h1>')
     ..writeln(
-      '<p class="sub">Studies and Awards Limited · Client Tracker report · '
+      '<p class="sub">Studies and Awards Limited · S&amp;A Hub report · '
       'printed '
       '${esc(DateFormat('d MMM y, HH:mm').format(DateTime.now()))}</p>',
     )

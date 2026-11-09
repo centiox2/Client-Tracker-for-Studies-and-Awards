@@ -2,7 +2,7 @@
     <!-- Needed for online sync (Supabase); release builds have no network without it. -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="Client Tracker"
+        android:label="S&amp;A Hub"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -26,7 +26,7 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-            <!-- Share → Client Tracker: payment photos (one or many) and
+            <!-- Share → S&amp;A Hub: payment photos (one or many) and
                  message text (an M-Pesa SMS) go straight to Revenue. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND"/>

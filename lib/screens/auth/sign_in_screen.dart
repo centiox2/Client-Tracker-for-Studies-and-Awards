@@ -70,7 +70,7 @@ class _Brand extends StatelessWidget {
         ),
         const SizedBox(height: Dt.s12),
         Text(
-          'Client Tracker',
+          Dt.appName,
           style: theme.textTheme.titleLarge?.copyWith(
             fontWeight: FontWeight.w700,
           ),

@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -728,6 +728,19 @@ class FakeCloud implements CloudApi {
           for (final c in reportChanges)
             if (c['report_id'] == p['p_report']) c,
         ];
+      case 'admin_delete_user':
+        _needAdmin(p['p_token'] as String);
+        final id = p['p_user_id'] as int;
+        if (id == uid) throw CloudException('own_account');
+        if (!users.containsKey(id)) throw CloudException('unknown_user');
+        final n = reports.values.where((r) => r['user_id'] == id).length;
+        if (n > 0 && p['p_with_reports'] != true) {
+          throw CloudException('has_reports', 'has_reports:$n');
+        }
+        reports.removeWhere((_, r) => r['user_id'] == id);
+        users.remove(id);
+        userTokens.removeWhere((_, u) => u == id);
+        return null;
       case 'admin_save_department':
         _needAdmin(p['p_token'] as String);
         final d = (p['p_department'] as Map).cast<String, Object?>();
@@ -2036,6 +2049,197 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(container.read(cloudSyncProvider).adminLinked, isTrue);
+    container.dispose();
+  });
+
+  // ------------------------------------------------- quality of life ------
+
+  testWidgets('admin deletes accounts; reports need a second yes', (
+    tester,
+  ) async {
+    cloud.addUser('admin', 'admin-pass-1', role: UserRole.admin, name: 'Admin');
+    cloud.addUser('temp', 'temp-pass-1', name: 'Temp Person');
+    cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
+    seedReport(10, 3, 2);
+    final container = await pumpAccounts(
+      tester,
+      admin,
+      size: const Size(1600, 3000),
+    );
+    await signIn(tester, 'admin', 'admin-pass-1');
+    container.read(navTabProvider.notifier).set(AppTab.settings);
+    await settle(tester);
+
+    // No reports: deleted after one confirmation.
+    await tester.tap(find.byKey(const ValueKey('user-menu-temp')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete account…'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('confirm-delete-user')));
+    await settle(tester);
+    expect(cloud.users.values.any((u) => u.username == 'temp'), isFalse);
+    expect(find.byKey(const ValueKey('user-temp')), findsNothing);
+
+    // With reports: offered "switch off instead"; that keeps everything.
+    await tester.tap(find.byKey(const ValueKey('user-menu-amina')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete account…'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('confirm-delete-user')));
+    await settle(tester);
+    expect(find.textContaining('1 daily report was recorded'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('delete-switch-off-instead')));
+    await settle(tester);
+    expect(cloud.users[3]!.active, isFalse);
+    expect(cloud.reports, hasLength(1));
+
+    // Or deleted with the reports.
+    await tester.tap(find.byKey(const ValueKey('user-menu-amina')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete account…'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('confirm-delete-user')));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('confirm-delete-with-reports')));
+    await settle(tester);
+    expect(cloud.users.containsKey(3), isFalse);
+    expect(cloud.reports, isEmpty);
+
+    // Never your own account.
+    await tester.tap(find.byKey(const ValueKey('user-menu-admin')));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete account…'), findsNothing);
+    container.dispose();
+  });
+
+  testWidgets('the last username is filled in next time', (tester) async {
+    cloud.addUser('mary.wanjiku', 'mary-pass-1', name: 'Mary');
+    var container = await pumpAccounts(tester, boss);
+    await signIn(tester, 'mary.wanjiku', 'mary-pass-1');
+    await tester.tap(find.byKey(const ValueKey('sign-out')));
+    await settle(tester);
+    container.dispose();
+
+    await tester.pumpWidget(const SizedBox());
+    container = await pumpAccounts(tester, boss);
+    await settle(tester);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('login-username')))
+          .controller!
+          .text,
+      'mary.wanjiku',
+    );
+    container.dispose();
+  });
+
+  testWidgets('daily reports: reminder dot, Ctrl+Enter, add again, discard', (
+    tester,
+  ) async {
+    cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1600, 1400),
+    );
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    // Nothing yet today: a dot on Daily reports.
+    expect(find.byKey(const ValueKey('report-due-dot')), findsOneWidget);
+
+    // Ctrl+Enter saves.
+    await tester.tap(find.byKey(const ValueKey('add-activity')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('report-description')),
+      'Weekly visa audit',
+    );
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await settle(tester);
+    expect(cloud.reports.values.single['description'], 'Weekly visa audit');
+    expect(find.byKey(const ValueKey('report-due-dot')), findsNothing);
+
+    // Add again today: a copy to start from.
+    await tester.tap(find.text('Weekly visa audit'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('repeat-report')));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('report-description')))
+          .controller!
+          .text,
+      'Weekly visa audit',
+    );
+    await tester.tap(find.byKey(const ValueKey('report-save')));
+    await settle(tester);
+    expect(cloud.reports, hasLength(2));
+
+    // Cancel after typing asks first.
+    await tester.tap(find.byKey(const ValueKey('add-activity')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('report-description')),
+      'Half typed',
+    );
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Discard your changes?'), findsOneWidget);
+    await tester.tap(find.text('Keep editing'));
+    await tester.pumpAndSettle();
+    expect(find.text('Half typed'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('discard-report')));
+    await tester.pumpAndSettle();
+    expect(find.text('Add activity').hitTestable(), findsOneWidget);
+    expect(cloud.reports, hasLength(2));
+    container.dispose();
+  });
+
+  testWidgets('overview: copy a reminder for who hasn’t submitted', (
+    tester,
+  ) async {
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String;
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    cloud.addUser('joy', 'joy-pass-1', name: 'Joy', departmentId: 1);
+    cloud.addUser('ian', 'ian-pass-1', name: 'Ian', departmentId: 2);
+    cloud.addUser(
+      'ruth',
+      'ruth-pass-1',
+      name: 'Ruth',
+      reportAccess: ReportAccess.manager,
+    );
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1600, 2600),
+    );
+    await signIn(tester, 'ruth', 'ruth-pass-1');
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('copy-reminder')));
+    await tester.pumpAndSettle();
+    expect(
+      copied,
+      anyOf(contains('Hi Ian and Joy'), contains('Hi Joy and Ian')),
+    );
+    expect(copied, contains('S&A Hub'));
     container.dispose();
   });
 }

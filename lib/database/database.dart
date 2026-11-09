@@ -623,7 +623,7 @@ class AppDatabase {
       throw DatabaseExceptionApp('Backup file is not valid JSON: $e');
     }
     if (doc['format'] != 'client-tracker-backup') {
-      throw DatabaseExceptionApp('Not a Client Tracker backup file.');
+      throw DatabaseExceptionApp('Not an S&A Hub backup file.');
     }
     final tables = doc['tables'];
     if (tables is! Map<String, Object?>) {

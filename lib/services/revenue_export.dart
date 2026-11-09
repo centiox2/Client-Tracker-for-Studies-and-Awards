@@ -139,7 +139,7 @@ Uint8List revenueToExcel(
   excel.delete('Sheet1');
   var r = 0;
   _row(summary, r++, [title], style: CellStyle(bold: true, fontSize: 14));
-  _row(summary, r++, ['Studies and Awards Limited · Client Tracker']);
+  _row(summary, r++, ['Studies and Awards Limited · S&A Hub']);
   r++;
   for (final (label, value) in revenueSummaryRows(entries, currency)) {
     _row(summary, r++, [label, value]);

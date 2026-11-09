@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Design system for Client Tracker.
+/// Design system for S&A Hub.
 ///
 /// Dark operational dashboard theme with compact navigation, slate panels,
 /// restrained borders, and clear new/existing client colors.
@@ -43,6 +43,9 @@ abstract final class Dt {
 
   /// The company behind the app, shown beside the logo.
   static const String companyName = 'Studies and Awards Limited';
+
+  /// The app's name, everywhere people see it.
+  static const String appName = 'S&A Hub';
 
   /// The "sa" logo on its own light square — readable on light and dark
   /// backgrounds alike (the navy letters alone vanish on the dark theme).

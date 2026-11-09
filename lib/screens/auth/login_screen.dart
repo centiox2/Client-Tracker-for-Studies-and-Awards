@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../design/app_theme.dart';
 import '../../services/cloud/cloud_api.dart';
@@ -132,7 +133,7 @@ class _Brand extends StatelessWidget {
         ),
         const SizedBox(height: Dt.s12),
         Text(
-          'Client Tracker',
+          Dt.appName,
           style: theme.textTheme.titleLarge?.copyWith(
             fontWeight: FontWeight.w700,
           ),
@@ -223,9 +224,11 @@ class PasswordField extends StatefulWidget {
     this.enabled = true,
     this.newPassword = false,
     this.onSubmitted,
+    this.focusNode,
   });
 
   final TextEditingController controller;
+  final FocusNode? focusNode;
   final String label;
   final String? errorText;
   final bool autofocus;
@@ -242,9 +245,36 @@ class PasswordField extends StatefulWidget {
 class _PasswordFieldState extends State<PasswordField> {
   bool _show = false;
 
+  /// Caps Lock is on: said under the field, since a password typed in
+  /// capitals is the commonest "wrong password".
+  bool _capsLock = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _capsLock = _capsOn;
+    HardwareKeyboard.instance.addHandler(_onKey);
+  }
+
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKey);
+    super.dispose();
+  }
+
+  static bool get _capsOn => HardwareKeyboard.instance.lockModesEnabled
+      .contains(KeyboardLockMode.capsLock);
+
+  bool _onKey(KeyEvent event) {
+    final on = _capsOn;
+    if (on != _capsLock && mounted) setState(() => _capsLock = on);
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) => TextField(
     controller: widget.controller,
+    focusNode: widget.focusNode,
     autofocus: widget.autofocus,
     enabled: widget.enabled,
     obscureText: !_show,
@@ -258,6 +288,9 @@ class _PasswordFieldState extends State<PasswordField> {
       labelText: widget.label,
       errorText: widget.errorText,
       errorMaxLines: 4,
+      helperText: _capsLock && widget.errorText == null
+          ? 'Caps Lock is on'
+          : null,
       suffixIcon: IconButton(
         tooltip: _show ? 'Hide password' : 'Show password',
         icon: Icon(
@@ -288,14 +321,43 @@ class _SignInForm extends ConsumerStatefulWidget {
 class _SignInFormState extends ConsumerState<_SignInForm> {
   final _username = TextEditingController();
   final _password = TextEditingController();
+  final _passwordFocus = FocusNode();
   bool _remember = false;
   bool _busy = false;
   String? _error;
+
+  /// The username last signed in with on this device (never the password).
+  static const _lastUsernameKey = 'last_username';
+
+  @override
+  void initState() {
+    super.initState();
+    _prefillUsername();
+  }
+
+  /// Fills in the username last used here and goes straight to the password.
+  Future<void> _prefillUsername() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final last = prefs.getString(_lastUsernameKey);
+      if (!mounted || last == null || _username.text.isNotEmpty) return;
+      _username.text = last;
+      _passwordFocus.requestFocus();
+    } catch (_) {}
+  }
+
+  Future<void> _rememberUsername(String username) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_lastUsernameKey, username);
+    } catch (_) {}
+  }
 
   @override
   void dispose() {
     _username.dispose();
     _password.dispose();
+    _passwordFocus.dispose();
     super.dispose();
   }
 
@@ -319,6 +381,7 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
           .timeout(const Duration(seconds: 15));
       if (!mounted) return;
       TextInput.finishAutofillContext();
+      unawaited(_rememberUsername(username));
       if (signIn.user.mustChange) {
         widget.onTemporaryPassword(signIn, password, _remember);
         return;
@@ -349,6 +412,7 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
       final auth = ref.read(authRepositoryProvider);
       final user = auth.verifyOffline(username, password);
       if (user != null) {
+        unawaited(_rememberUsername(username));
         sync.signInOffline(user, password, remember: _remember);
         return;
       }
@@ -394,6 +458,7 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
         PasswordField(
           key: const ValueKey('login-password'),
           controller: _password,
+          focusNode: _passwordFocus,
           label: 'Password',
           enabled: !_busy,
           errorText: _error,

@@ -1,4 +1,6 @@
-# Client Tracker
+# S&A Hub
+
+*Formerly Client Tracker.* The operations app of Studies and Awards Limited: client numbers, revenue, applications, and everyone's daily reports.
 
 A cross-platform **weekly client tracking** app built with **Flutter** — designed to replace the weekly Excel spreadsheet used to record how many **New** and **Existing** clients each staff member handles per day.
 
@@ -51,6 +53,8 @@ with **their own username and password**:
 - **Remember me** keeps the person signed in on that device for 30 days of not using the app. Unticked, they are signed out when the app closes — use that on shared computers.
 - **Only an admin** creates accounts, gives roles (Admin, Admin team, Director, Team) and resets forgotten passwords, in **Settings › Users**. A new account (or a reset) gets a temporary password; the person chooses their own at their next sign-in.
 - **Switch off** an account when someone leaves: they can't sign in, and everything they entered stays.
+- **Delete** an account (Settings › Users › ⋮ › Delete account…) to remove it for good. Someone with daily reports can only be deleted together with their reports, so the app offers *Switch off instead*. Nobody can delete their own account or the last admin.
+- The sign-in screen remembers the last **username** used on the device (never the password) and warns when **Caps Lock** is on.
 - Passwords are stored **only in Supabase, as bcrypt hashes**, in a schema the app's public key can't read. Five wrong passwords in a row lock that account for 15 minutes.
 - Without internet, a person can still sign in on a device where they signed in before; the app signs them in online once the connection is back.
 
@@ -84,6 +88,8 @@ Who sees what is enforced by the online database on every request:
 Admins set up **Settings › Departments** (the seven from the brief to start with; rename, add, switch off, and choose the outputs each one counts) and give each person a department in **Settings › Users**. Every add, change and delete is kept in an audit trail (shown on each entry).
 
 Reports are kept **online only** (not copied to every device), so they need an internet connection. Set up with `supabase/migrations/20261109120000_daily_reports.sql`.
+
+Handy extras: a **dot on Daily reports** when you haven't recorded anything today; **Ctrl+Enter** saves an activity; closing a half-filled activity asks first; **Add again today** repeats recurring work; and **Copy reminder** (Overview › Submission compliance) copies a ready-to-send message for everyone who hasn't submitted today.
 
 Not in phase 1 yet (phase 2 of the brief): assigning tasks, an approval step, reminders and overdue alerts by email, and attachments.
 

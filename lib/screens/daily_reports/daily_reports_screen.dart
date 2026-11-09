@@ -914,7 +914,19 @@ class _OverviewState extends ConsumerState<_Overview> {
                       const SizedBox(height: 6),
                       _names(submittedToday, theme, done: true),
                       const SizedBox(height: 12),
-                      Text('Not yet', style: microLabel(theme)),
+                      Row(
+                        children: [
+                          Text('Not yet', style: microLabel(theme)),
+                          const Spacer(),
+                          if (notYet.isNotEmpty)
+                            TextButton.icon(
+                              key: const ValueKey('copy-reminder'),
+                              onPressed: () => _copyReminder(notYet),
+                              icon: const Icon(Icons.copy, size: 14),
+                              label: const Text('Copy reminder'),
+                            ),
+                        ],
+                      ),
                       const SizedBox(height: 6),
                       _names(notYet, theme, done: false),
                     ],
@@ -1061,6 +1073,29 @@ class _OverviewState extends ConsumerState<_Overview> {
           ),
         ),
       ],
+    );
+  }
+
+  /// A message to paste into WhatsApp or email for those who haven't
+  /// submitted today.
+  Future<void> _copyReminder(List<ComplianceRow> notYet) async {
+    final names = [for (final c in notYet) c.fullName];
+    final list = names.length == 1
+        ? names.first
+        : '${names.sublist(0, names.length - 1).join(', ')} and ${names.last}';
+    final text =
+        'Hi $list, a reminder to add today’s daily report in ${Dt.appName} '
+        '(Daily reports › Add activity). Thank you!';
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Reminder for ${names.length} '
+          '${names.length == 1 ? 'person' : 'people'} copied — paste it in '
+          'WhatsApp or email.',
+        ),
+      ),
     );
   }
 

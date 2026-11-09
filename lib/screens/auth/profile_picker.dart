@@ -107,7 +107,7 @@ class _ProfilePickerScreenState extends ConsumerState<ProfilePickerScreen> {
                   ),
                   const SizedBox(height: Dt.s12),
                   Text(
-                    'Client Tracker',
+                    Dt.appName,
                     textAlign: TextAlign.center,
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w700,

@@ -1,16 +1,19 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/daily_report.dart';
+import '../state/app_state.dart';
 import '../state/cloud_sync.dart';
 import 'cloud/cloud_api.dart';
 
 /// Daily activity reports, read and written online as the signed-in person.
 /// The online database decides what each person may see and change.
 class DailyReportsService {
-  DailyReportsService(this._call);
+  DailyReportsService(this._call, {this.onChanged});
 
   final Future<Object?> Function(String name, [Map<String, Object?>? params])
   _call;
+
+  /// Called after a report is added, changed or deleted.
+  final void Function()? onChanged;
 
   static Map<String, Object?> _map(Object? v) =>
       (v as Map).cast<String, Object?>();
@@ -42,12 +45,18 @@ class DailyReportsService {
     ),
   );
 
-  Future<ActivityReport> save(ActivityReport report) async =>
-      ActivityReport.fromJson(
-        _map(await _call('report_save', {'p_report': report.toSaveJson()})),
-      );
+  Future<ActivityReport> save(ActivityReport report) async {
+    final saved = ActivityReport.fromJson(
+      _map(await _call('report_save', {'p_report': report.toSaveJson()})),
+    );
+    onChanged?.call();
+    return saved;
+  }
 
-  Future<void> delete(int id) => _call('report_delete', {'p_report': id});
+  Future<void> delete(int id) async {
+    await _call('report_delete', {'p_report': id});
+    onChanged?.call();
+  }
 
   Future<List<ReportChange>> history(int id) async {
     final rows = await _call('report_history', {'p_report': id});
@@ -78,8 +87,49 @@ class DailyReportsService {
 }
 
 final dailyReportsProvider = Provider<DailyReportsService>(
-  (ref) => DailyReportsService(ref.read(cloudSyncProvider.notifier).callAsUser),
+  (ref) => DailyReportsService(
+    ref.read(cloudSyncProvider.notifier).callAsUser,
+    onChanged: () => ref.read(reportsChangedProvider.notifier).bump(),
+  ),
 );
+
+/// Goes up when the person's reports change (or a new day starts), so the
+/// "nothing recorded today" reminder checks again.
+final reportsChangedProvider = NotifierProvider<ReportsChangedNotifier, int>(
+  ReportsChangedNotifier.new,
+);
+
+class ReportsChangedNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void bump() => state++;
+}
+
+/// True when the signed-in person has a department and hasn't recorded
+/// anything today: the Daily reports page shows a reminder dot. False when
+/// it can't be checked (offline, no department, no accounts).
+final reportDueTodayProvider = FutureProvider<bool>((ref) async {
+  ref.watch(reportsChangedProvider);
+  if (!ref.watch(accountsEnabledProvider)) return false;
+  final user = ref.watch(currentUserProvider);
+  if (user == null || user.departmentId == null) return false;
+  // Asked again once the connection is up (the sign-in may only be usable
+  // online after the app has started).
+  if (!ref.watch(cloudSyncProvider.select((s) => s.phase == SyncPhase.live))) {
+    return false;
+  }
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  try {
+    final mine = await ref
+        .read(dailyReportsProvider)
+        .list(ReportFilter(from: today, to: today, userId: user.id));
+    return mine.isEmpty;
+  } catch (_) {
+    return false;
+  }
+});
 
 /// A short, plain message for a report action that didn't work.
 String describeReportError(Object e) {

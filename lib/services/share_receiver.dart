@@ -1,5 +1,5 @@
 /// Photos or text shared into the app from another app (e.g. WhatsApp's or
-/// Messages' Share → Client Tracker). Android only; elsewhere nothing
+/// Messages' Share → S&A Hub). Android only; elsewhere nothing
 /// arrives.
 library;
 
