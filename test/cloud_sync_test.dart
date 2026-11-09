@@ -304,9 +304,16 @@ class FakeCloud implements CloudApi {
     return _newSignIn(u.id);
   }
 
+  /// The next sign-in fails with this code (once).
+  String? failNextLogin;
+
   @override
   Future<UserSignIn> userLogin(String username, String p, bool remember) async {
     _online();
+    if (failNextLogin case final code?) {
+      failNextLogin = null;
+      throw CloudException(code);
+    }
     logins.add(username);
     final user = users.values.where((u) => u.username == username).firstOrNull;
     if (user == null) throw CloudException('wrong_password');
@@ -543,11 +550,13 @@ class FakeCloud implements CloudApi {
         final from = p['p_from'] as String;
         final to = p['p_to'] as String;
         final deptFilter = p['p_department'] as int?;
+        final userFilter = p['p_user'] as int?;
         final inRange = visible().where((r) {
           final d = r['report_date'] as String;
           return d.compareTo(from) >= 0 &&
               d.compareTo(to) <= 0 &&
-              (deptFilter == null || r['department_id'] == deptFilter);
+              (deptFilter == null || r['department_id'] == deptFilter) &&
+              (userFilter == null || r['user_id'] == userFilter);
         }).toList();
         final status = <String, int>{};
         for (final r in inRange) {
@@ -555,7 +564,11 @@ class FakeCloud implements CloudApi {
               (status[r['status'] as String] ?? 0) + 1;
         }
         final scope = _scope(uid);
-        final open = visible().where((r) => r['status'] != 'completed');
+        final open = visible().where(
+          (r) =>
+              r['status'] != 'completed' &&
+              (userFilter == null || r['user_id'] == userFilter),
+        );
         return {
           'from': from,
           'to': to,
@@ -598,6 +611,7 @@ class FakeCloud implements CloudApi {
             for (final u in users.values)
               if (u.active &&
                   u.departmentId != null &&
+                  (userFilter == null || u.id == userFilter) &&
                   (deptFilter == null || u.departmentId == deptFilter) &&
                   (scope == 'all' ||
                       u.id == uid ||
@@ -664,6 +678,8 @@ class FakeCloud implements CloudApi {
               in departments.firstWhere((d) => d['id'] == dept)['outputs']!
                   as List)
             (o as Map)['key'],
+          // An edit keeps keys the report already had.
+          ...((before?['outputs'] as Map?) ?? const {}).keys,
         ];
         final saved = <String, Object?>{
           'id': id ?? reports.length + 100,
@@ -1842,6 +1858,184 @@ void main() {
       const Offset(0, -1500),
     );
     await tester.pumpAndSettle();
+    container.dispose();
+  });
+
+  // ------------------------------------------------------- review fixes ---
+
+  testWidgets('daily reports: a new day and Refresh reload the page', (
+    tester,
+  ) async {
+    cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1600, 1400),
+    );
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    expect(find.textContaining('Monday, 9 November 2026'), findsOneWidget);
+
+    // Left open overnight: the app notices the new day (data version).
+    cloud.reportsToday = DateTime(2026, 11, 10);
+    container.read(dataVersionProvider.notifier).bump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await settle(tester);
+    expect(find.textContaining('Tuesday, 10 November 2026'), findsOneWidget);
+
+    // A new entry now goes on the new day.
+    await tester.tap(find.byKey(const ValueKey('add-activity')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('report-description')),
+      'Next day work',
+    );
+    await tester.tap(find.byKey(const ValueKey('report-save')));
+    await settle(tester);
+    expect(cloud.reports.values.single['report_date'], '2026-11-10');
+    container.dispose();
+  });
+
+  testWidgets('daily reports: filters stay in step; one person’s figures', (
+    tester,
+  ) async {
+    cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
+    cloud.addUser('otieno', 'otieno-pass-1', name: 'Otieno', departmentId: 1);
+    cloud.addUser(
+      'ruth',
+      'ruth-pass-1',
+      name: 'Ruth',
+      reportAccess: ReportAccess.manager,
+    );
+    seedReport(10, 1, 2, status: 'blocked', due: '2026-11-08');
+    seedReport(11, 2, 1);
+    seedReport(12, 2, 1);
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1600, 2600),
+    );
+    await signIn(tester, 'ruth', 'ruth-pass-1');
+    await settle(tester);
+    Finder stat(String value) => find.descendant(
+      of: find.byKey(const ValueKey('stat-total')),
+      matching: find.text(value),
+    );
+    expect(stat('3'), findsOneWidget);
+
+    // Tapping a department row: the dropdown says so too.
+    await tester.tap(find.text('Admissions & Applications').last);
+    await settle(tester);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('report-department')),
+        matching: find.text('Admissions & Applications'),
+      ),
+      findsOneWidget,
+    );
+    expect(stat('2'), findsOneWidget);
+
+    // Back to all, then one person: the figures are that person's.
+    await tester.tap(find.byKey(const ValueKey('report-department')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('All departments').last);
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('report-person')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Amina').last);
+    await settle(tester);
+    expect(stat('1'), findsOneWidget);
+    container.dispose();
+  });
+
+  testWidgets('daily reports: editing keeps counts for removed outputs', (
+    tester,
+  ) async {
+    cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
+    seedReport(
+      10,
+      1,
+      2,
+      status: 'pending',
+      outputs: {'visa_grants': 2, 'visa_lodgements': 1},
+      description: 'Old style report',
+      due: '2024-01-15',
+    );
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1600, 1400),
+    );
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    await tester.tap(find.text('Old style report').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('edit-report')));
+    await tester.pumpAndSettle();
+    // A due date far in the past still opens the picker.
+    await tester.tap(find.byKey(const ValueKey('report-due')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('report-description')),
+      'Old style report, fixed',
+    );
+    await tester.tap(find.byKey(const ValueKey('report-save')));
+    await settle(tester);
+    expect(cloud.reports[10]!['description'], 'Old style report, fixed');
+    expect(cloud.reports[10]!['outputs'], {
+      'visa_grants': 2,
+      'visa_lodgements': 1,
+    });
+    container.dispose();
+  });
+
+  testWidgets('accounts: backing out of a temporary password ends it', (
+    tester,
+  ) async {
+    cloud.addUser('joy', 'temp-1234', mustChange: true, name: 'Joy');
+    final container = await pumpAccounts(tester, boss);
+    await signIn(tester, 'joy', 'temp-1234');
+    expect(find.text('Welcome, Joy'), findsOneWidget);
+    expect(cloud.userTokens, hasLength(1));
+    await tester.tap(find.text('Back'));
+    await settle(tester);
+    expect(cloud.userTokens, isEmpty);
+    expect(find.byKey(const ValueKey('login-username')), findsOneWidget);
+    container.dispose();
+  });
+
+  testWidgets('accounts: a server hiccup doesn’t end an offline sign-in', (
+    tester,
+  ) async {
+    cloud.addUser('whitney', 'whitney-pw1', role: UserRole.adminTeam);
+    var container = await pumpAccounts(tester, boss);
+    await signIn(tester, 'whitney', 'whitney-pw1');
+    container.dispose();
+
+    cloud.offline = true;
+    await tester.pumpWidget(const SizedBox());
+    container = await pumpAccounts(tester, boss);
+    await signIn(tester, 'whitney', 'whitney-pw1');
+    expect(container.read(currentUserProvider)?.username, 'whitney');
+
+    // Back online, but the server refuses for another reason.
+    cloud.offline = false;
+    cloud.failNextLogin = 'other';
+    await tester.runAsync(
+      () => container.read(cloudSyncProvider.notifier).syncNow(),
+    );
+    await tester.pumpAndSettle();
+    expect(container.read(currentUserProvider)?.username, 'whitney');
+    expect(AuthRepository(boss).knowsUser('whitney'), isTrue);
+
+    // Next time it works.
+    await tester.runAsync(
+      () => container.read(cloudSyncProvider.notifier).syncNow(),
+    );
+    await tester.pumpAndSettle();
+    expect(container.read(cloudSyncProvider).adminLinked, isTrue);
     container.dispose();
   });
 }

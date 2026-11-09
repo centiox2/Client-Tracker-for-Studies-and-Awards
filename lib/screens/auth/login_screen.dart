@@ -89,6 +89,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       temporary: _temporaryPassword,
                       remember: _remember,
                       onCancel: () => setState(() {
+                        // Not finished: end that sign-in online too.
+                        final temporary = _temporary;
+                        if (temporary != null) {
+                          ref
+                              .read(cloudSyncProvider.notifier)
+                              .discardSignIn(temporary);
+                        }
                         _temporary = null;
                         _temporaryPassword = '';
                         _stage = _Stage.signIn;

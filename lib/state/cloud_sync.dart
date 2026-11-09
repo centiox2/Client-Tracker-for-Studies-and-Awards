@@ -418,6 +418,14 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     return UserSignIn(signIn.token, signIn.user.copyWith(mustChange: false));
   }
 
+  /// The person backed out before finishing (e.g. choosing their own
+  /// password): end that sign-in online too.
+  Future<void> discardSignIn(UserSignIn signIn) async {
+    try {
+      await _api?.userLogout(signIn.token);
+    } catch (_) {}
+  }
+
   /// Opens the app as [signIn]'s user.
   void completeSignIn(
     UserSignIn signIn,
@@ -495,7 +503,12 @@ class CloudSyncController extends Notifier<CloudSyncState> {
       ref.read(currentUserProvider.notifier).update(signIn.user);
       state = state.copyWith(adminLinked: _pushToken != null);
       return true;
-    } on CloudException {
+    } on CloudException catch (e) {
+      // Anything else (a server hiccup, an update not applied yet): stay
+      // signed in here and try again on the next connection.
+      if (!const {'wrong_password', 'locked', 'deactivated'}.contains(e.code)) {
+        return true;
+      }
       // Wrong password now, locked or switched off: sign in again.
       ref.read(authRepositoryProvider).forgetUser(pending.username);
       await signOutUser(

@@ -30,12 +30,14 @@ class DailyReportsService {
     DateTime from,
     DateTime to, {
     int? departmentId,
+    int? userId,
   }) async => ReportSummary.fromJson(
     _map(
       await _call('report_summary', {
         'p_from': dateKey(from),
         'p_to': dateKey(to),
         'p_department': departmentId,
+        'p_user': ?userId,
       }),
     ),
   );

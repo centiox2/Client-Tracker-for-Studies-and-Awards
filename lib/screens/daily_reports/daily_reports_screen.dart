@@ -32,6 +32,17 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
   Object? _error;
   _Tab? _tab;
 
+  /// Goes up each time the page reloads (Refresh, a new day), so the views
+  /// below reload too.
+  int _refresh = 0;
+  Timer? _refreshDebounce;
+
+  @override
+  void dispose() {
+    _refreshDebounce?.cancel();
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -45,6 +56,7 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
       if (!mounted) return;
       setState(() {
         _meta = meta;
+        _refresh++;
         // People without a department (the Operations Manager, say) start
         // on the Overview; everyone else on their own day.
         _tab ??= meta.seesOthers && meta.myDepartmentId == null
@@ -58,6 +70,14 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Refresh in the top bar, and the app noticing a new day, bump the data
+    // version: read everything again (including what "today" is).
+    ref.listen(dataVersionProvider, (_, _) {
+      _refreshDebounce?.cancel();
+      _refreshDebounce = Timer(const Duration(milliseconds: 400), () {
+        if (mounted) _load();
+      });
+    });
     final meta = _meta;
     if (meta == null) {
       if (_error == null) {
@@ -135,9 +155,9 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
                   ),
                   const SizedBox(height: 14),
                   if (tab == _Tab.mine)
-                    _MyReports(meta: meta, phone: phone)
+                    _MyReports(meta: meta, phone: phone, refresh: _refresh)
                   else
-                    _Overview(meta: meta, phone: phone),
+                    _Overview(meta: meta, phone: phone, refresh: _refresh),
                 ],
               ),
             ),
@@ -151,10 +171,15 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
 // ---------------------------------------------------------------- My day ---
 
 class _MyReports extends ConsumerStatefulWidget {
-  const _MyReports({required this.meta, required this.phone});
+  const _MyReports({
+    required this.meta,
+    required this.phone,
+    required this.refresh,
+  });
 
   final ReportsMeta meta;
   final bool phone;
+  final int refresh;
 
   @override
   ConsumerState<_MyReports> createState() => _MyReportsState();
@@ -168,27 +193,42 @@ class _MyReportsState extends ConsumerState<_MyReports> {
 
   ReportsMeta get meta => widget.meta;
 
+  /// The newest load; an older one finishing late is ignored.
+  int _loadSeq = 0;
+
   @override
   void initState() {
     super.initState();
     _load();
   }
 
+  @override
+  void didUpdateWidget(_MyReports old) {
+    super.didUpdateWidget(old);
+    if (old.refresh == widget.refresh) return;
+    // A new day while the app was open: "today" moves on with it.
+    if (old.meta.today != widget.meta.today && _day == old.meta.today) {
+      _day = widget.meta.today;
+    }
+    _load();
+  }
+
   Future<void> _load() async {
+    final seq = ++_loadSeq;
     final service = ref.read(dailyReportsProvider);
     try {
       final results = await Future.wait([
         service.list(ReportFilter(from: _day, to: _day, userId: meta.myId)),
         service.list(ReportFilter(userId: meta.myId, openOnly: true)),
       ]);
-      if (!mounted) return;
+      if (!mounted || seq != _loadSeq) return;
       setState(() {
         _entries = results[0];
         _open = results[1];
         _error = null;
       });
     } catch (e) {
-      if (mounted) setState(() => _error = e);
+      if (mounted && seq == _loadSeq) setState(() => _error = e);
     }
   }
 
@@ -433,10 +473,15 @@ enum _EntryFilter {
 }
 
 class _Overview extends ConsumerStatefulWidget {
-  const _Overview({required this.meta, required this.phone});
+  const _Overview({
+    required this.meta,
+    required this.phone,
+    required this.refresh,
+  });
 
   final ReportsMeta meta;
   final bool phone;
+  final int refresh;
 
   @override
   ConsumerState<_Overview> createState() => _OverviewState();
@@ -473,17 +518,37 @@ class _OverviewState extends ConsumerState<_Overview> {
     super.dispose();
   }
 
+  @override
+  void didUpdateWidget(_Overview old) {
+    super.didUpdateWidget(old);
+    if (old.refresh == widget.refresh) return;
+    // A new day while the app was open: Today / This week / This month
+    // move on with it.
+    if (old.meta.today != widget.meta.today && _period != _Period.custom) {
+      final range = _rangeFor(_period, widget.meta.today);
+      _from = range.$1;
+      _to = range.$2;
+    }
+    _load();
+  }
+
+  static (DateTime, DateTime) _rangeFor(_Period p, DateTime today) =>
+      switch (p) {
+        _Period.week => (
+          today.subtract(Duration(days: today.weekday - 1)),
+          today,
+        ),
+        _Period.month => (DateTime(today.year, today.month), today),
+        _ => (today, today),
+      };
+
   void _setPeriod(_Period p) async {
     final today = meta.today;
     DateTime from;
     var to = today;
     switch (p) {
-      case _Period.today:
-        from = today;
-      case _Period.week:
-        from = today.subtract(Duration(days: today.weekday - 1));
-      case _Period.month:
-        from = DateTime(today.year, today.month);
+      case _Period.today || _Period.week || _Period.month:
+        (from, to) = _rangeFor(p, today);
       case _Period.custom:
         final range = await showDateRangePicker(
           context: context,
@@ -521,23 +586,37 @@ class _OverviewState extends ConsumerState<_Overview> {
     search: _search.text,
   );
 
+  /// The newest loads; older ones finishing late are ignored, so quick
+  /// filter changes never leave stale figures on screen.
+  int _loadSeq = 0;
+  int _entriesSeq = 0;
+
   Future<void> _load() async {
+    final seq = ++_loadSeq;
+    final entriesSeq = ++_entriesSeq;
     setState(() => _loading = true);
     final service = ref.read(dailyReportsProvider);
     try {
       final results = await Future.wait<Object>([
-        service.summary(_from, _to, departmentId: _departmentId),
+        service.summary(
+          _from,
+          _to,
+          departmentId: _departmentId,
+          userId: _userId,
+        ),
         service.list(_listFilter),
       ]);
-      if (!mounted) return;
+      if (!mounted || seq != _loadSeq) return;
       setState(() {
         _summary = results[0] as ReportSummary;
-        _entries = results[1] as List<ActivityReport>;
+        if (entriesSeq == _entriesSeq) {
+          _entries = results[1] as List<ActivityReport>;
+        }
         _error = null;
         _loading = false;
       });
     } catch (e) {
-      if (mounted) {
+      if (mounted && seq == _loadSeq) {
         setState(() {
           _error = e;
           _loading = false;
@@ -547,11 +626,12 @@ class _OverviewState extends ConsumerState<_Overview> {
   }
 
   Future<void> _reloadEntries() async {
+    final seq = ++_entriesSeq;
     try {
       final entries = await ref.read(dailyReportsProvider).list(_listFilter);
-      if (mounted) setState(() => _entries = entries);
+      if (mounted && seq == _entriesSeq) setState(() => _entries = entries);
     } catch (e) {
-      if (mounted) setState(() => _error = e);
+      if (mounted && seq == _entriesSeq) setState(() => _error = e);
     }
   }
 
@@ -703,7 +783,7 @@ class _OverviewState extends ConsumerState<_Overview> {
           items: {null: 'Everyone', for (final p in people) p.id: p.fullName},
           onChanged: (v) {
             setState(() => _userId = v);
-            _reloadEntries();
+            _load();
           },
         ),
         IconButton(
@@ -1036,6 +1116,10 @@ class _Dropdown<T> extends StatelessWidget {
   Widget build(BuildContext context) => ConstrainedBox(
     constraints: const BoxConstraints(maxWidth: 260),
     child: DropdownButtonFormField<T>(
+      // A form field reads its initial value once: keyed by the value, it
+      // follows changes made in code (a department row tapped, the person
+      // reset when the department changes).
+      key: ValueKey(value),
       initialValue: items.containsKey(value) ? value : items.keys.first,
       isExpanded: true,
       isDense: true,

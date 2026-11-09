@@ -9,7 +9,7 @@
 -- and treats them exactly as that role.
 --
 -- The old shared profiles keep working for app builds that don't know about
--- accounts yet; 20261109090100_user_accounts_step2.sql removes them once
+-- accounts yet; 20261109190000_user_accounts_step2.sql removes them once
 -- every device has the new app.
 
 create table if not exists private.app_users (

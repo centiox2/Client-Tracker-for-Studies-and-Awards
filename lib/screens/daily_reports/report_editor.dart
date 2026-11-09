@@ -214,11 +214,15 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
 
   Future<void> _pickDue() async {
     final initial = _due ?? _today.add(const Duration(days: 1));
+    // The range always includes the date already set, however old or far
+    // off (the picker refuses a starting date outside its range).
+    final first = DateTime(_today.year - 1);
+    final last = DateTime(_today.year + 2);
     final picked = await showDatePicker(
       context: context,
       initialDate: initial,
-      firstDate: DateTime(_today.year - 1),
-      lastDate: DateTime(_today.year + 2),
+      firstDate: initial.isBefore(first) ? initial : first,
+      lastDate: initial.isAfter(last) ? initial : last,
       helpText: 'Due / follow-up date',
     );
     if (picked != null) setState(() => _due = picked);
@@ -242,6 +246,10 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
       description: _description.text,
       reference: _reference.text,
       outputs: {
+        // Counts for outputs the department no longer has (renamed or
+        // removed since): kept as they were.
+        for (final e in (_e?.outputs ?? const <String, int>{}).entries)
+          if (!_outputs.containsKey(e.key)) e.key: e.value,
         for (final e in _outputs.entries)
           if ((int.tryParse(e.value.text.trim()) ?? 0) > 0)
             e.key: int.parse(e.value.text.trim()),

@@ -58,7 +58,7 @@ with **their own username and password**:
 
 1. In Supabase › SQL Editor, run `supabase/migrations/20261109090000_user_accounts.sql`. The existing admin password becomes the account **`admin`** (same password). Old app versions keep working with the shared profiles.
 2. Install the new app on every device. Sign in as `admin`, then add everyone in **Settings › Users**.
-3. Once **every** device has the new app, run `supabase/migrations/20261109090100_user_accounts_step2.sql`. It switches the old shared profiles off for good.
+3. Once **every** device has the new app, run `supabase/migrations/20261109190000_user_accounts_step2.sql`. It switches the old shared profiles off for good.
 
 Builds without the online database keep the four shared profiles on the device.
 
