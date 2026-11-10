@@ -55,17 +55,55 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY || env.SUPABASE_KEY_DEFAULT }}
         run: flutter build windows --release --dart-define=SUPABASE_URL="$env:SUPABASE_URL" --dart-define=SUPABASE_KEY="$env:SUPABASE_KEY"
 
+      # Code signing (Authenticode), when the certificate is in the
+      # repository secrets: WINDOWS_CERT_PFX_BASE64 (the .pfx file, base64)
+      # and WINDOWS_CERT_PASSWORD. The app itself is signed here; the
+      # installer and uninstaller while the installer is built. Without
+      # the secrets the build carries on unsigned, with a warning.
+      - name: Sign the app
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_CERT_PFX_BASE64 -or -not $env:WINDOWS_CERT_PASSWORD) {
+            Write-Output "::warning::No Windows code-signing certificate in the secrets (WINDOWS_CERT_PFX_BASE64, WINDOWS_CERT_PASSWORD): the app and installer are not signed."
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
+          if (-not $signtool) { Write-Error 'signtool.exe not found'; exit 1 }
+          & $signtool sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 /d "S&A Hub" build\windows\x64\runner\Release\client_tracker.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "SIGNTOOL=$signtool" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SIGN_PFX=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       # A proper installer: per-user, Start menu + desktop shortcuts, an
       # uninstaller, and in-place upgrades (Inno Setup).
       - name: Build installer
+        env:
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) {
             choco install innosetup -y --no-progress
           }
           $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9.]+)').Matches[0].Groups[1].Value
-          & $iscc "/DAppVersion=$version" installer\client_tracker.iss
+          if ($env:SIGNTOOL) {
+            # Inno Setup signs the installer and uninstaller with this
+            # ($f: the file, $q: a quote).
+            $cmd = "`$q$env:SIGNTOOL`$q sign /f `$q$env:SIGN_PFX`$q /p `$q$env:WINDOWS_CERT_PASSWORD`$q /fd sha256 /tr http://timestamp.digicert.com /td sha256 /d `$qS&A Hub`$q `$f"
+            & $iscc "/DAppVersion=$version" /DSign "/Ssahub=$cmd" installer\client_tracker.iss
+          } else {
+            & $iscc "/DAppVersion=$version" installer\client_tracker.iss
+          }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($env:SIGNTOOL) {
+            & $env:SIGNTOOL verify /pa /v installer\Output\SAHubSetup.exe
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            Remove-Item $env:SIGN_PFX -Force
+          }
 
       # Only the installer is kept, and on a GitHub Release rather than as a
       # build artifact: artifacts count against the Actions storage quota

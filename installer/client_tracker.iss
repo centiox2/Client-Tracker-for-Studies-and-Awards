@@ -35,6 +35,13 @@ WizardStyle=modern
 ; Close a running copy before replacing its files, and reopen it after.
 CloseApplications=yes
 RestartApplications=no
+#ifdef Sign
+; Signed by CI with the company's code-signing certificate ("sahub" is
+; the sign tool defined on the ISCC command line): the installer and the
+; uninstaller both carry the publisher's name.
+SignTool=sahub
+SignedUninstaller=yes
+#endif
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

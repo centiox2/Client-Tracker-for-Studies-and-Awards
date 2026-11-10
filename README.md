@@ -95,6 +95,13 @@ Handy extras: a **dot on Daily reports** when you haven't recorded anything toda
 
 Not in phase 1 yet (phase 2 of the brief): assigning tasks, an approval step, reminders and overdue alerts by email, and attachments.
 
+## Signed builds
+
+Both apps are signed by GitHub Actions as they're built; the keys live only in the repository's secrets (Settings › Secrets and variables › Actions), never in the code.
+
+- **Android** — every APK is signed with the company's release key, so each new one installs over the last. Secrets: `ANDROID_KEYSTORE_BASE64` (the `.jks` file, base64), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. Without them the Android build stops (it won't publish an APK that can't update the installed one). **Keep a safe copy of the `.jks` file and its password**: a lost key means phones must uninstall and reinstall to get updates.
+- **Windows** — the app, installer and uninstaller are signed (Authenticode, SHA-256, timestamped) when `WINDOWS_CERT_PFX_BASE64` (a code-signing certificate `.pfx`, base64) and `WINDOWS_CERT_PASSWORD` are set; without them the installer is built unsigned with a warning. The certificate comes from a certificate authority (an OV or EV code-signing certificate for Studies and Awards Limited).
+
 ## Data safety
 
 - **SQLite** storage (WAL mode, foreign keys ON) — tables `staff`, `weeks`, `work_days`, `client_counts`.

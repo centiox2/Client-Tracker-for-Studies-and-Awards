@@ -69,3 +69,10 @@ cloud.json
 
 # Flutter downloaded by the Vercel build (tool/vercel_build.sh)
 /.flutter/
+
+# Signing keys and their passwords: only ever in GitHub secrets.
+android/key.properties
+*.jks
+*.keystore
+*.pfx
+*.p12

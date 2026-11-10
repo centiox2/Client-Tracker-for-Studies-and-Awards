@@ -48,16 +48,51 @@ jobs:
             exit 1
           fi
 
+      # The release signing key, from repository secrets (Settings › Secrets
+      # and variables › Actions). Every APK is signed with the same key, so
+      # each new one installs over the last. No key: the build stops rather
+      # than publish an APK that can't update the installed one.
+      - name: Set up the signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ] || [ -z "$ANDROID_KEY_ALIAS" ]; then
+            echo "::error::Android signing secrets are missing (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD). Add them under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/release.jks"
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "keyPassword=${ANDROID_KEY_PASSWORD:-$ANDROID_KEYSTORE_PASSWORD}"
+          } > android/key.properties
+
       - name: Build APK
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL || env.SUPABASE_URL_DEFAULT }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY || env.SUPABASE_KEY_DEFAULT }}
         run: flutter build apk --release --dart-define=SUPABASE_URL="$SUPABASE_URL" --dart-define=SUPABASE_KEY="$SUPABASE_KEY"
 
+      # Proof the APK carries the release key (not the debug one).
+      - name: Check the signature
+        run: |
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
+          "$apksigner" verify --verbose --print-certs build/app/outputs/flutter-apk/app-release.apk | tee signature.txt
+          if grep -q "CN=Android Debug" signature.txt; then
+            echo "::error::The APK is signed with the debug key."
+            exit 1
+          fi
+          rm -f android/key.properties "$RUNNER_TEMP/release.jks"
+
       # Published to the "android-latest" GitHub Release (replacing the
       # previous one) rather than as a build artifact: artifacts count
       # against the Actions storage quota, releases don't.
       - name: Publish APK
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
