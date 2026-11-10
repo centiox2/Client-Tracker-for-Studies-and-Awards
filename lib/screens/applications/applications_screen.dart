@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../../design/airtable_tags.dart';
 import '../../design/app_theme.dart';
 import '../../repositories/application_repository.dart';
+import '../../services/airtable_sync_service.dart';
 import '../../services/file_delivery.dart';
 import '../../services/photo_text.dart' show photoDropSupported;
 import '../../state/app_state.dart';
@@ -38,6 +39,7 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
   bool _inProgressOnly = false;
   bool _dragging = false;
   bool _busy = false;
+  bool _syncing = false;
 
   /// The upload whose changes are shown (null: the latest).
   int? _importId;
@@ -195,17 +197,81 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
     );
   }
 
-  Widget _uploadButton() => FilledButton.icon(
-    key: const ValueKey('upload-applications'),
-    onPressed: _busy ? null : _pickCsv,
-    icon: _busy
-        ? const SizedBox.square(
-            dimension: 14,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          )
-        : const Icon(Icons.upload_file, size: 16),
-    label: const Text('Upload CSV'),
-  );
+  /// The Airtable sync is on: applications come in by themselves, and
+  /// "Sync now" fetches what changed straight away. The CSV upload stays as
+  /// a fallback (a smaller button).
+  bool get _airtable =>
+      ref.watch(airtableStatusProvider).value?.enabled ?? false;
+
+  Future<void> _syncNow() async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _syncing = true);
+    try {
+      final r = await ref.read(airtableSyncProvider).syncNow();
+      if (!mounted) return;
+      setState(() => _importId = null);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            r.error != null
+                ? describeAirtableError(r.error!)
+                : r.skipped == 'busy'
+                ? 'A sync is already running — the changes appear in a moment.'
+                : r.skipped != null
+                ? 'The Airtable sync is switched off.'
+                : r.nothingChanged
+                ? 'Up to date with Airtable (${r.total} applications)'
+                : [
+                    if (r.changed > 0) '${r.changed} updated',
+                    if (r.added > 0) '${r.added} new',
+                    if (r.removed > 0) '${r.removed} removed',
+                  ].join(' · '),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text(describeAirtableError(e))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
+  }
+
+  Widget _uploadButton() {
+    final spinner = const SizedBox.square(
+      dimension: 14,
+      child: CircularProgressIndicator(strokeWidth: 2),
+    );
+    if (_airtable) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            key: const ValueKey('upload-applications'),
+            tooltip: 'Upload a CSV instead',
+            onPressed: _busy || _syncing ? null : _pickCsv,
+            icon: _busy ? spinner : const Icon(Icons.upload_file, size: 18),
+          ),
+          const SizedBox(width: 4),
+          FilledButton.icon(
+            key: const ValueKey('sync-airtable'),
+            onPressed: _busy || _syncing ? null : _syncNow,
+            icon: _syncing ? spinner : const Icon(Icons.sync, size: 16),
+            label: const Text('Sync now'),
+          ),
+        ],
+      );
+    }
+    return FilledButton.icon(
+      key: const ValueKey('upload-applications'),
+      onPressed: _busy ? null : _pickCsv,
+      icon: _busy ? spinner : const Icon(Icons.upload_file, size: 16),
+      label: const Text('Upload CSV'),
+    );
+  }
 
   Widget _empty(BuildContext context) {
     final theme = Theme.of(context);
@@ -345,14 +411,48 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
       showSelectedIcon: false,
       onSelectionChanged: (v) => setState(() => _view = v.first),
     );
-    final updated = latest == null
+    final airtable = ref.watch(airtableStatusProvider).value;
+    final synced = airtable?.enabled ?? false;
+    final warn = synced && airtable!.failing && widget.canUpload;
+    final String? when = synced && airtable!.lastOkAt != null
+        ? 'Synced from Airtable ${_when(airtable.lastOkAt!)}'
+        : latest == null
         ? null
-        : Text(
-            'Updated ${_when(latest.at)}'
-            '${latest.device.isEmpty ? '' : ' on ${latest.device}'}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+        : 'Updated ${_when(latest.at)}'
+              '${latest.device.isEmpty ? '' : ' on ${latest.device}'}';
+    final updated = when == null && !warn
+        ? null
+        : Tooltip(
+            message: warn
+                ? describeAirtableError(airtable.lastError!)
+                : synced
+                ? 'Airtable is read every 30 minutes in working hours, and '
+                      'in full every night.'
+                : '',
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (warn) ...[
+                  Icon(
+                    Icons.warning_amber_rounded,
+                    size: 16,
+                    color: theme.colorScheme.error,
+                  ),
+                  const SizedBox(width: 4),
+                ],
+                Flexible(
+                  child: Text(
+                    warn ? 'Airtable sync isn’t working' : when!,
+                    key: const ValueKey('applications-updated'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: warn ? theme.colorScheme.error : muted,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           );
     if (phone) {
       // Phones: the switch on its own line, then when + upload.

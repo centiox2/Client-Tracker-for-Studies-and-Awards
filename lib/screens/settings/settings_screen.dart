@@ -16,6 +16,7 @@ import '../../state/cloud_sync.dart';
 import '../../widgets/panels.dart';
 import '../../widgets/sync_status.dart';
 import '../history/change_history_dialog.dart';
+import 'airtable_section.dart';
 import 'import_dialog.dart';
 import 'departments_section.dart';
 import 'users_section.dart';
@@ -323,6 +324,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ),
       ),
       // Personal accounts replace the shared profiles and their passwords.
+      if (accounts) const AirtableSection(),
       if (accounts) ...[
         const UsersSection(),
         const DepartmentsSection(),

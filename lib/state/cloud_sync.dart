@@ -597,6 +597,22 @@ class CloudSyncController extends Notifier<CloudSyncState> {
   Future<Object?> callAsUser(String name, [Map<String, Object?>? params]) =>
       _needApi().callFunction(name, {'p_token': _needToken(), ...?params});
 
+  /// Calls an online function with what this device reads the data with
+  /// (any signed-in person or open profile).
+  Future<Object?> callAsReader(String name, [Map<String, Object?>? params]) {
+    final token = _readToken;
+    if (token == null) throw CloudException('not_signed_in');
+    return _needApi().callFunction(name, {'p_token': token, ...?params});
+  }
+
+  /// Calls an online function with what this device sends changes with
+  /// (the admin and the admin team).
+  Future<Object?> callAsEditor(String name, [Map<String, Object?>? params]) {
+    final token = _pushToken;
+    if (token == null) throw CloudException('not_signed_in');
+    return _needApi().callFunction(name, {'p_token': token, ...?params});
+  }
+
   /// Admin: every account.
   Future<List<AppUser>> listUsers() => _needApi().adminListUsers(_needToken());
 
