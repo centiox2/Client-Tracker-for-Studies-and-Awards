@@ -426,8 +426,8 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
             message: warn
                 ? describeAirtableError(airtable.lastError!)
                 : synced
-                ? 'Airtable is read every 30 minutes in working hours, and '
-                      'in full every night.'
+                ? 'Airtable is read every 30 minutes on weekdays, hourly on '
+                      'Saturdays, and in full every night.'
                 : '',
             child: Row(
               mainAxisSize: MainAxisSize.min,

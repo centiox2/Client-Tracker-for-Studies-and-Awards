@@ -68,8 +68,9 @@ class _AirtableSectionState extends ConsumerState<AirtableSection> {
           children: [
             Text(
               'Applications come straight from the Airtable Applications '
-              'Tracker: what changed every 30 minutes (8 am to 6:30 pm, '
-              'Monday to Saturday), and everything every night at 2 am. '
+              'Tracker: what changed every 30 minutes on weekdays (8 am to '
+              '6:30 pm) and hourly on Saturdays (8 am to 6 pm), and '
+              'everything every night at 2 am. '
               'Airtable’s free plan allows ${s?.limit ?? 1000} API calls a '
               'month; above ${s?.slowAt ?? 700} it reads once an hour, and '
               'above ${s?.stopAt ?? 850} it waits for next month (the CSV '
