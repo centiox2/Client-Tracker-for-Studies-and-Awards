@@ -429,56 +429,80 @@ class ApplicationsQuickView extends ConsumerWidget {
             for (final p in people)
               Tooltip(
                 message: _stageSummary(byAssignee[p]!),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 110,
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: p == 'No assignee'
-                              ? Text(
-                                  p,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: muted,
-                                  ),
-                                )
-                              : TagChip(
-                                  p,
-                                  AirtableTags.assignee(p),
-                                  dense: true,
-                                ),
-                        ),
-                      ),
-                      Expanded(
-                        child: LayoutBuilder(
-                          builder: (context, box) => Align(
+                child: InkWell(
+                  key: ValueKey('handling-$p'),
+                  borderRadius: BorderRadius.circular(Dt.rSm),
+                  // Who they're handling, and what nobody is.
+                  onTap: () => showHandling(
+                    context,
+                    ref,
+                    person: p == 'No assignee' ? null : p,
+                    mine: p == 'No assignee' ? const [] : byAssignee[p]!,
+                    unassigned: byAssignee['No assignee'] ?? const [],
+                    lastActivity: lastActivity,
+                    today: today,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 110,
+                          child: Align(
                             alignment: Alignment.centerLeft,
-                            child: Container(
-                              height: 10,
-                              width:
-                                  box.maxWidth *
-                                  byAssignee[p]!.length /
-                                  maxLoad,
-                              decoration: BoxDecoration(
-                                color: Dt.brand(theme.brightness),
-                                borderRadius: BorderRadius.circular(3),
+                            child: p == 'No assignee'
+                                ? Text(
+                                    p,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: muted,
+                                    ),
+                                  )
+                                : TagChip(
+                                    p,
+                                    AirtableTags.assignee(p),
+                                    dense: true,
+                                  ),
+                          ),
+                        ),
+                        Expanded(
+                          child: LayoutBuilder(
+                            builder: (context, box) => Align(
+                              alignment: Alignment.centerLeft,
+                              child: Container(
+                                height: 10,
+                                width:
+                                    box.maxWidth *
+                                    byAssignee[p]!.length /
+                                    maxLoad,
+                                decoration: BoxDecoration(
+                                  color: Dt.brand(theme.brightness),
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                      SizedBox(
-                        width: 34,
-                        child: Text(
-                          '${byAssignee[p]!.length}',
-                          textAlign: TextAlign.right,
-                          style: Dt.tab(theme.textTheme.labelLarge!),
+                        SizedBox(
+                          width: 34,
+                          child: Text(
+                            '${byAssignee[p]!.length}',
+                            textAlign: TextAlign.right,
+                            style: Dt.tab(theme.textTheme.labelLarge!),
+                          ),
                         ),
-                      ),
-                    ],
+                        Icon(Icons.chevron_right, size: 16, color: muted),
+                      ],
+                    ),
                   ),
+                ),
+              ),
+            if (people.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Tap a name to see who they’re handling, and what has no '
+                  'one yet.',
+                  style: theme.textTheme.labelSmall?.copyWith(color: muted),
                 ),
               ),
           ],
@@ -937,3 +961,121 @@ class FirstFewState extends State<FirstFew> {
     );
   }
 }
+
+/// One person's in-progress applications ("Handling") and those nobody is
+/// on yet ("Unassigned"); [person] null shows only the unassigned. A tap on
+/// a student opens their details.
+Future<void> showHandling(
+  BuildContext context,
+  WidgetRef ref, {
+  required String? person,
+  required List<Application> mine,
+  required List<Application> unassigned,
+  required DateTime? Function(Application) lastActivity,
+  required DateTime today,
+}) => showDialog<void>(
+  context: context,
+  builder: (context) {
+    final theme = Theme.of(context);
+    final muted = Dt.textMuted(theme);
+    // Longest waiting first: that's who needs a nudge.
+    List<Application> sorted(List<Application> list) => [...list]
+      ..sort((a, b) {
+        final x = lastActivity(a), y = lastActivity(b);
+        if (x == null || y == null) return x == null ? -1 : 1;
+        return x.compareTo(y);
+      });
+    String waited(Application a) {
+      final t = lastActivity(a);
+      if (t == null) return 'No dates yet';
+      final days = today.difference(DateTime(t.year, t.month, t.day)).inDays;
+      return days <= 0
+          ? 'Active today'
+          : days == 1
+          ? '1 day since last step'
+          : '$days days since last step';
+    }
+
+    Widget row(Application a) {
+      final where = [a.rto, a.country].where((t) => t.isNotEmpty).join(' · ');
+      return ListTile(
+        key: ValueKey('handling-app-${a.key}'),
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+        title: Text(
+          a.student,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(
+          [if (where.isNotEmpty) where, waited(a)].join('\n'),
+          style: theme.textTheme.bodySmall?.copyWith(color: muted),
+        ),
+        trailing: a.status.isEmpty
+            ? null
+            : TagChip(a.status, AirtableTags.status(a.status), dense: true),
+        onTap: () => showApplicationDetails(context, ref, a),
+      );
+    }
+
+    Widget section(String title, List<Application> list, String empty) =>
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 8, bottom: 4),
+              child: Text(
+                '${title.toUpperCase()} · ${list.length}',
+                style: microLabel(theme),
+              ),
+            ),
+            if (list.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(4),
+                child: Text(empty, style: TextStyle(color: muted)),
+              ),
+            for (final a in sorted(list)) row(a),
+          ],
+        );
+
+    return AlertDialog(
+      title: person == null
+          ? const Text('Unassigned applications')
+          : Row(
+              children: [
+                TagChip(person, AirtableTags.assignee(person)),
+                const SizedBox(width: 8),
+                const Flexible(child: Text('is handling')),
+              ],
+            ),
+      scrollable: true,
+      content: SizedBox(
+        width: 520,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (person != null)
+              section('Handling', mine, 'Nothing in progress for $person.'),
+            section(
+              'Unassigned',
+              unassigned,
+              'Every application in progress has someone on it.',
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'In progress applications from the latest upload. Assign them '
+              'in Airtable, then upload the CSV again.',
+              style: theme.textTheme.labelSmall?.copyWith(color: muted),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+      ],
+    );
+  },
+);

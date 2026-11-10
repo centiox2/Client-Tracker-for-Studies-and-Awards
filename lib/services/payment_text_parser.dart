@@ -65,12 +65,14 @@ class ParsedPayment {
     );
   }
 
-  /// The note saved with the revenue entry.
+  /// The note saved with the revenue entry. The transaction code comes
+  /// first: notes are cut to a set length, and the code is how a payment
+  /// already added is recognised, so it must never be the part cut off.
   String get note => [
+    ?code,
     method,
     ?_title(payer),
     if (account != null) 'Acc: $account',
-    ?code,
   ].join(' · ');
 
   static String? _title(String? name) {
@@ -134,39 +136,78 @@ final _outgoing = RegExp(
 );
 
 /// Finds every payment in [text]. A photo or paste may hold several
-/// messages (and the cut-off end of the one before); each complete one is
-/// returned, oldest first as they appear.
+/// messages, from M-Pesa, Airtel, banks…, in any order (and the cut-off end
+/// of the one before); every one with an amount is returned, in the order
+/// they appear.
 List<ParsedPayment> parsePayments(String text) {
   final flat = text.replaceAll(RegExp(r'\s+'), ' ').trim();
   if (flat.isEmpty) return const [];
 
-  // Split on transaction codes ("UK3JPO8PVA Confirmed").
+  // M-Pesa messages start with their transaction code ("UK3JPO8PVA
+  // Confirmed"); whatever comes before the first one (an Airtel or bank
+  // message, say) is a message too.
   final starts = [
     for (final m in _codeConfirmed.allMatches(flat))
       if (_looksLikeCode(m.group(1)!)) m,
   ];
   final segments = <(String? code, String body)>[];
-  if (starts.isEmpty) {
-    segments.add((null, flat));
-  } else {
-    for (var i = 0; i < starts.length; i++) {
-      final end = i + 1 < starts.length ? starts[i + 1].start : flat.length;
-      segments.add((
-        starts[i].group(1)!.toUpperCase(),
-        flat.substring(starts[i].end, end),
-      ));
-    }
+  final head = starts.isEmpty ? flat : flat.substring(0, starts.first.start);
+  if (head.trim().isNotEmpty) segments.add((null, head));
+  for (var i = 0; i < starts.length; i++) {
+    final end = i + 1 < starts.length ? starts[i + 1].start : flat.length;
+    segments.add((
+      starts[i].group(1)!.toUpperCase(),
+      flat.substring(starts[i].end, end),
+    ));
   }
 
   final out = <ParsedPayment>[];
   for (final (code, body) in segments) {
-    final p = _parseOne(code, body, flat);
-    if (p != null) out.add(p);
+    // A segment can still hold more than one message (an uncoded one
+    // pasted after an M-Pesa one): each further amount starts a new one.
+    final parts = _splitMessages(body);
+    for (var i = 0; i < parts.length; i++) {
+      final p = _parseOne(i == 0 ? code : null, parts[i]);
+      if (p != null) out.add(p);
+    }
   }
   return out;
 }
 
-ParsedPayment? _parseOne(String? code, String body, String whole) {
+/// Splits [body] where another message begins: at the start of the
+/// sentence holding each further amount (balances and fees don't count —
+/// they belong to the message before).
+List<String> _splitMessages(String body) {
+  String blank(Match m) => ' ' * m[0]!.length;
+  // Same length as [body], so positions line up.
+  final masked = body
+      .replaceAllMapped(_balance, blank)
+      .replaceAllMapped(_cost, blank);
+  final amounts = _money.allMatches(masked).toList();
+  if (amounts.length < 2) return [body];
+  final cuts = <int>[];
+  for (var i = 1; i < amounts.length; i++) {
+    final from = amounts[i - 1].end;
+    final at = amounts[i].start;
+    // The sentence start before this amount, after the previous amount.
+    final stop = body.lastIndexOf(RegExp(r'[.!]\s'), at);
+    final cut = stop >= from ? stop + 1 : at;
+    if (cuts.isEmpty || cut > cuts.last) cuts.add(cut);
+  }
+  final parts = <String>[];
+  var from = 0;
+  for (final c in cuts) {
+    parts.add(body.substring(from, c));
+    from = c;
+  }
+  parts.add(body.substring(from));
+  return [
+    for (final p in parts)
+      if (p.trim().isNotEmpty) p,
+  ];
+}
+
+ParsedPayment? _parseOne(String? code, String body) {
   // Take balances and fees out before looking for the amount.
   final cleaned = body.replaceAll(_balance, ' ').replaceAll(_cost, ' ');
   final m = _money.firstMatch(cleaned);
@@ -174,11 +215,11 @@ ParsedPayment? _parseOne(String? code, String body, String whole) {
   final cents = _cents(m.group(1)!);
   if (cents == null || cents <= 0) return null;
 
-  final lower = whole.toLowerCase();
+  // Decided from this message alone: a paste with one M-Pesa message and
+  // one Airtel message holds one of each.
+  final lower = body.toLowerCase();
   final method =
-      lower.contains('m-pesa') ||
-          lower.contains('mpesa') ||
-          code != null && lower.contains('confirmed')
+      lower.contains('m-pesa') || lower.contains('mpesa') || code != null
       ? 'M-Pesa'
       : lower.contains('airtel')
       ? 'Airtel Money'
@@ -221,7 +262,7 @@ String? _payer(String body) {
   // Case matters here: a full stop then a capitalised word ("… KANGOGO.
   // Account …") ends the name; an initial ("ALICE K. MWANGI") doesn't.
   final m = RegExp(
-    r'\b[Ff][Rr][Oo][Mm]\s+(.+?)(?=[\s-]*(?:\+?\d[\d\s*xX]{5,}|\*{2,}|\b(?:[Oo][Nn]|[Aa][Tt])\s+\d|\.\s+(?=[A-Z][a-z])|\.$|\b(?:Account|ACCOUNT|account|Acc|ACC|New|NEW)\b|$))',
+    r'\b[Ff][Rr][Oo][Mm]\s+(.+?)(?=[\s-]*(?:\+?\d[\d\s*xX]{5,}|\*{2,}|\b(?:[Oo][Nn]|[Aa][Tt])\s+\d|\.\s+(?=[A-Z][a-z])|\.$|\b(?:Account|ACCOUNT|account|Acc|ACC|New|NEW|via|VIA|Via|Ref|REF)\b|$))',
   ).firstMatch(body);
   // "PIUS-" (a masked phone number cut off after the dash) → "PIUS".
   final name = m?.group(1)?.trim().replaceAll(RegExp(r'[\s,:;-]+$'), '');

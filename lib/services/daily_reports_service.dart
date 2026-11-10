@@ -144,12 +144,15 @@ final reportDueTodayProvider = FutureProvider<bool>((ref) async {
   if (!ref.watch(cloudSyncProvider.select((s) => s.phase == SyncPhase.live))) {
     return false;
   }
-  final now = DateTime.now();
-  final today = DateTime(now.year, now.month, now.day);
   try {
-    final mine = await ref
-        .read(dailyReportsProvider)
-        .list(ReportFilter(from: today, to: today, userId: user.id));
+    // "Today" as the online database sees it (Kenya time), like every
+    // other daily-report decision — not this device's clock, which may be
+    // in another time zone or simply wrong.
+    final service = ref.read(dailyReportsProvider);
+    final today = (await service.meta()).today;
+    final mine = await service.list(
+      ReportFilter(from: today, to: today, userId: user.id),
+    );
     return mine.isEmpty;
   } catch (_) {
     return false;

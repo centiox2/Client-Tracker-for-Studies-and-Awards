@@ -84,7 +84,9 @@ void addRevenueSheets(
   final totals = <DateTime, (int, int)>{};
   for (final e in entries) {
     final (c, n) = totals[e.date] ?? (0, 0);
-    totals[e.date] = (c + e.amountCents, n + 1);
+    // "Payments" counts money in; a refund lowers the revenue, not the
+    // number of payments.
+    totals[e.date] = (c + e.amountCents, n + (e.amountCents > 0 ? 1 : 0));
   }
   for (
     var d = DateTime(from.year, from.month, from.day);
@@ -99,7 +101,12 @@ void addRevenueSheets(
       n,
     ]);
   }
-  _row(byDay, r, ['Total', '', _amount(total), entries.length], style: _total);
+  _row(byDay, r, [
+    'Total',
+    '',
+    _amount(total),
+    entries.where((e) => e.amountCents > 0).length,
+  ], style: _total);
   byDay.setColumnWidth(0, 14);
   byDay.setColumnWidth(1, 12);
   byDay.setColumnWidth(2, 18);

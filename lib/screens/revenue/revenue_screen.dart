@@ -131,7 +131,7 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
       revenueDaysProvider((DateTime(day.year, day.month, 1), day)),
     );
     final monthTotal = month.fold<int>(0, (s, d) => s + d.totalCents);
-    final monthDays = month.where((d) => d.count > 0).length;
+    final monthDays = month.where((d) => d.entries > 0).length;
 
     final page = LayoutBuilder(
       builder: (context, viewport) {
@@ -1032,7 +1032,7 @@ class _WeekBars extends StatelessWidget {
     final scheme = theme.colorScheme;
     final shown = [
       for (final d in days)
-        if (d.date.weekday <= 5 || d.count > 0) d,
+        if (d.date.weekday <= 5 || d.entries > 0) d,
     ];
     final max = shown.fold<int>(
       0,
@@ -1087,7 +1087,7 @@ class _WeekBars extends StatelessWidget {
                     SizedBox(
                       width: 118,
                       child: Text(
-                        d.count == 0
+                        d.entries == 0
                             ? '–'
                             : formatMoney(d.totalCents, currency),
                         textAlign: TextAlign.right,

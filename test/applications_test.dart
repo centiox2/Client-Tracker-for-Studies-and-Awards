@@ -27,9 +27,10 @@ void main() {
     expect(amina.fields[8], contains('\n')); // multi-line note kept
     expect(amina.fields[8], contains('"Perth"'));
     // The same name twice: told apart.
+    // Told apart by institution and country (not their order in the file).
     expect(rows.where((r) => r.student == 'Brian Sample').map((r) => r.key), [
-      'brian sample',
-      'brian sample #2',
+      'brian sample · npa · australia',
+      'brian sample · avta · australia',
     ]);
     // "Drop out " keeps no stray space.
     expect(rows.last.status, 'Drop out');
@@ -84,9 +85,9 @@ void main() {
     expect(find('Brian Sample', 'offer_date'), '|2026-11-04');
     expect(find('Faith Trial', 'removed'), 'Withdrawn|');
     expect(find('Hana New', 'added'), '|Statement building');
-    expect(repo.historyOf('brian sample'), hasLength(2));
+    expect(repo.historyOf('brian sample · npa · australia'), hasLength(2));
     // The second Brian is untouched.
-    expect(repo.historyOf('brian sample #2'), isEmpty);
+    expect(repo.historyOf('brian sample · avta · australia'), isEmpty);
   });
 
   test('a renamed column still reads; a missing one never clears data', () {
@@ -234,6 +235,69 @@ void main() {
     await tester.tap(find.text('Awaiting offer letter · 1'));
     await tester.pumpAndSettle();
     expect(find.text('1 of 5'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('who’s handling what: tap a name for theirs and the unassigned', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    String long(DateTime d) => DateFormat('MMMM d, y').format(d);
+    final csv =
+        'Student name,RTO name,Country,Doc submit date,App submitted date,'
+        'Offer letter received date,COE issue date,Status,Assignee\n'
+        'Amy One,Reach,Australia,"${long(now)}",,,,Awaiting offer letter,Joy\n'
+        'Ben Two,NPA,Canada,"${long(now)}",,,,To pay school fees,Joy\n'
+        'Cal Three,AVTA,Australia,"${long(now)}",,,,Awaiting offer letter,Ian\n'
+        'Dee Four,WAIFS,Australia,"${long(now)}",,,,'
+        'Application to be submitted,\n'
+        'Eve Done,Reach,Australia,,,,"${long(now)}",COE ISSUED/DONE,Joy\n';
+    ApplicationRepository(db).importCsv(csv);
+    await pumpApp(tester, UserRole.director);
+    await tester.tap(find.text('Applications').first);
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.byKey(const ValueKey('handling-Joy')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('handling-Joy')));
+    await tester.pumpAndSettle();
+    expect(find.text('HANDLING · 2'), findsOneWidget);
+    expect(find.text('UNASSIGNED · 1'), findsOneWidget);
+    final dialog = find.byType(AlertDialog);
+    for (final name in ['Amy One', 'Ben Two', 'Dee Four']) {
+      expect(
+        find.descendant(of: dialog, matching: find.text(name)),
+        findsOneWidget,
+      );
+    }
+    // Only in-progress ones: Eve's is done; Cal is Ian's.
+    expect(
+      find.descendant(of: dialog, matching: find.text('Eve Done')),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: dialog, matching: find.text('Cal Three')),
+      findsNothing,
+    );
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+
+    // "No assignee": the unassigned on their own.
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('handling-No assignee')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('handling-No assignee')));
+    await tester.pumpAndSettle();
+    expect(find.text('Unassigned applications'), findsOneWidget);
+    expect(find.text('HANDLING · 2'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text('Dee Four'),
+      ),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 

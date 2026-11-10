@@ -310,9 +310,49 @@ class ApplicationRepository {
   /// Loads the Airtable CSV export [text]: new applications are added,
   /// changed ones updated (each change noted), and ones no longer in the
   /// file removed. The first upload notes no changes (all of it is new).
+  /// Same-name students used to be told apart by their order in the file
+  /// ("jane doe", "jane doe #2"); now by institution and country. A stored
+  /// application under an old key that matches an incoming one on name,
+  /// institution and country takes the new key — with its history — so the
+  /// first upload after the change shows no false "removed" and "added".
+  void _carryOverKeys(List<ApplicationCsvRow> rows) {
+    final stored = all();
+    final storedKeys = {for (final a in stored) a.key};
+    final incomingKeys = {for (final r in rows) r.key};
+    final taken = <String>{};
+    for (final row in rows) {
+      if (storedKeys.contains(row.key)) continue;
+      final rto = (row.fields[0] ?? '').toLowerCase();
+      final country = (row.fields[1] ?? '').toLowerCase();
+      final match = stored
+          .where(
+            (a) =>
+                !incomingKeys.contains(a.key) &&
+                !taken.contains(a.key) &&
+                a.student.toLowerCase() == row.student.toLowerCase() &&
+                a.rto.toLowerCase() == rto &&
+                a.country.toLowerCase() == country,
+          )
+          .firstOrNull;
+      if (match == null) continue;
+      taken.add(match.key);
+      _db.transaction(() {
+        _db.raw.execute(
+          'UPDATE applications SET app_key = ? WHERE app_key = ?;',
+          [row.key, match.key],
+        );
+        _db.raw.execute(
+          'UPDATE application_changes SET app_key = ? WHERE app_key = ?;',
+          [row.key, match.key],
+        );
+      });
+    }
+  }
+
   ApplicationImportResult importCsv(String text, {String fileName = ''}) {
     final rows = parseApplicationsCsv(text);
     final now = DateTime.now().toIso8601String();
+    _carryOverKeys(rows);
     final existing = {for (final a in all()) a.key: a};
     final first = existing.isEmpty && latestImport == null;
     var added = 0, changed = 0, removed = 0;
@@ -496,16 +536,41 @@ class ApplicationRepository {
 
     String at(List<String> r, int i) => i < 0 || i >= r.length ? '' : r[i];
     final out = <ApplicationCsvRow>[];
-    final counts = <String, int>{};
-    for (final r in table.skip(1)) {
+    // How each application is recognised from one upload to the next. A
+    // name on its own (as always) when it's the only one; two students with
+    // the same name are told apart by institution and country, so sorting
+    // the Airtable view differently can't swap their histories. Only when
+    // those match too does the order in the file decide.
+    final rows = [
+      for (final r in table.skip(1))
+        if (_clean(at(r, student)).isNotEmpty) r,
+    ];
+    String whereOf(List<String> r) => [
+      _clean(at(r, rto)),
+      _clean(at(r, country)),
+    ].where((t) => t.isNotEmpty).join(' · ').toLowerCase();
+    // For each name: the different institution/country pairs it has.
+    final wheres = <String, Set<String>>{};
+    for (final r in rows) {
+      final base = _clean(at(r, student)).toLowerCase();
+      wheres.putIfAbsent(base, () => {}).add(whereOf(r));
+    }
+    final used = <String, int>{};
+    for (final r in rows) {
       final name = _clean(at(r, student));
-      if (name.isEmpty) continue;
       final base = name.toLowerCase();
-      final n = (counts[base] ?? 0) + 1;
-      counts[base] = n;
+      // Same-name students who can be told apart get their institution and
+      // country in the key; those who can't keep the keys they always had
+      // ("jane doe", "jane doe #2"), so their history carries on.
+      final where = whereOf(r);
+      final key = wheres[base]!.length > 1 && where.isNotEmpty
+          ? '$base · $where'
+          : base;
+      final n = (used[key] ?? 0) + 1;
+      used[key] = n;
       out.add(
         ApplicationCsvRow(
-          key: n == 1 ? base : '$base #$n',
+          key: n == 1 ? key : '$key #$n',
           student: name,
           present: present,
           fields: [

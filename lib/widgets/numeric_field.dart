@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
-    show KeyDownEvent, LogicalKeyboardKey, FilteringTextInputFormatter;
+    show
+        KeyDownEvent,
+        LogicalKeyboardKey,
+        FilteringTextInputFormatter,
+        LengthLimitingTextInputFormatter;
 
 import '../design/app_theme.dart';
 
@@ -97,6 +101,9 @@ class _NumericFieldState extends State<NumericField> {
 
   bool get _guarded => widget.confirmEdit != null;
 
+  /// The most a cell can hold (as the repository and the Excel import).
+  static const _max = 100000;
+
   /// Asks to unlock a guarded cell; [typed] is a digit to enter afterwards.
   Future<void> _requestEdit({String? typed}) async {
     if (_confirming) return;
@@ -120,7 +127,13 @@ class _NumericFieldState extends State<NumericField> {
   /// "+1": shows the new value straight away (a focused field doesn't take
   /// outside updates) and saves it through the normal change path.
   void _increment() {
-    final next = widget.value + 1;
+    // A guarded day (in the future) asks first, as typing would.
+    if (_guarded) {
+      _requestEdit(typed: '${widget.value + 1}');
+      return;
+    }
+    final next = (widget.value + 1).clamp(0, _max);
+    if (next == widget.value) return;
     _suppress = true;
     _controller.text = _display(next);
     _suppress = false;
@@ -168,7 +181,10 @@ class _NumericFieldState extends State<NumericField> {
   void _handleChange(String text) {
     if (_suppress) return;
     final cleaned = text.replaceAll(RegExp(r'[^0-9]'), '');
-    final parsed = cleaned.isEmpty ? 0 : int.parse(cleaned);
+    // Never more than six digits reach int.parse, and never above the most
+    // a cell may hold (a pasted phone number isn't a client count).
+    final digits = cleaned.length > 6 ? cleaned.substring(0, 6) : cleaned;
+    final parsed = digits.isEmpty ? 0 : int.parse(digits).clamp(0, _max);
     if (parsed != widget.value) {
       widget.onChanged(parsed);
     }
@@ -254,7 +270,10 @@ class _NumericFieldState extends State<NumericField> {
                   textAlignVertical: TextAlignVertical.center,
                   cursorWidth: 1,
                   style: digits(valueColor, FontWeight.w600),
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(6),
+                  ],
                   decoration: InputDecoration(
                     isDense: true,
                     filled: true,

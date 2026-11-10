@@ -199,14 +199,32 @@ ExcelImport parseExcelImport(List<int> bytes) {
         );
         continue;
       }
+      final day = DateFormat('EEE d MMM').format(current.date);
+      bool isFormula(int col) =>
+          col < row.length && row[col]?.value is FormulaCellValue;
+      if (isFormula(nCol) || isFormula(eCol)) {
+        // No number to read: say so rather than import a 0.
+        warnings.add(
+          '$head on $day (sheet “$sheetName”) has a formula instead of a '
+          'number, so it was left out. In Excel, copy the sheet and use '
+          'Paste Values, then import again.',
+        );
+        continue;
+      }
       final n = nCol < row.length ? _number(row[nCol]) : null;
       final e = eCol < row.length ? _number(row[eCol]) : null;
       if (n == null && e == null) {
-        // Blank cells still list the person (0 clients); text is a note.
+        // Blank cells still list the person (0 clients).
         if (nText.isEmpty && eText.isEmpty) {
           current.entries[head] = const ImportEntry(
             newClients: 0,
             existingClients: 0,
+          );
+        } else {
+          warnings.add(
+            '$head on $day (sheet “$sheetName”): '
+            '“${[nText, eText].where((t) => t.isNotEmpty).join(' / ')}” '
+            'isn’t a number, so it was left out.',
           );
         }
         continue;
@@ -241,10 +259,19 @@ int? _number(Data? cell) {
   return switch (v) {
     IntCellValue() => v.value,
     DoubleCellValue() => v.value.round(),
-    TextCellValue() => int.tryParse((v.value.text ?? '').trim()),
+    // "1,234" or "1 234" as text is still a number.
+    TextCellValue() => _numberText(v.value.text ?? ''),
+    // The file keeps no worked-out value for a formula: the row is reported
+    // (see below), never quietly read as 0.
     FormulaCellValue() => null,
     _ => null,
   };
+}
+
+int? _numberText(String text) {
+  final t = text.replaceAll(RegExp(r'[,\s]'), '');
+  if (t.isEmpty) return null;
+  return int.tryParse(t) ?? double.tryParse(t)?.round();
 }
 
 int? _weekdayIn(String text) {

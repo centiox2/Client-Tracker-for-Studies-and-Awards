@@ -73,10 +73,19 @@ class RevenueChange {
 
 /// Money in on one day: the total and how many transactions made it.
 class RevenueDay {
-  const RevenueDay(this.date, this.totalCents, this.count);
+  const RevenueDay(this.date, this.totalCents, this.count, [int? entries])
+    : entries = entries ?? count;
   final DateTime date;
+
+  /// Net: payments less refunds.
   final int totalCents;
+
+  /// Payments only — a refund isn't a payment ("3 payments" means three
+  /// came in).
   final int count;
+
+  /// Everything entered that day, refunds included (whether it has any).
+  final int entries;
 }
 
 /// Revenue transactions. Totals are always added up from the entries,
@@ -115,7 +124,8 @@ class RevenueRepository {
   List<RevenueDay> monthsBetween(DateTime from, DateTime to) {
     final rows = _db.raw.select(
       'SELECT substr(date, 1, 7) AS m, SUM(amount_cents) AS total, '
-      'COUNT(*) AS n FROM revenue_entries WHERE date BETWEEN ? AND ? '
+      'SUM(CASE WHEN amount_cents > 0 THEN 1 ELSE 0 END) AS n, '
+      'COUNT(*) AS e FROM revenue_entries WHERE date BETWEEN ? AND ? '
       'GROUP BY m;',
       [
         _key(DateTime(from.year, from.month, 1)),
@@ -124,15 +134,15 @@ class RevenueRepository {
     );
     final byMonth = {
       for (final r in rows)
-        r['m']! as String: (r['total']! as int, r['n']! as int),
+        r['m']! as String: (r['total']! as int, r['n']! as int, r['e']! as int),
     };
     final out = <RevenueDay>[];
     var m = DateTime(from.year, from.month, 1);
     final end = DateTime(to.year, to.month, 1);
     while (!m.isAfter(end)) {
       final k = _key(m).substring(0, 7);
-      final (total, n) = byMonth[k] ?? (0, 0);
-      out.add(RevenueDay(m, total, n));
+      final (total, n, e) = byMonth[k] ?? (0, 0, 0);
+      out.add(RevenueDay(m, total, n, e));
       m = DateTime(m.year, m.month + 1, 1);
     }
     return out;
@@ -142,20 +152,26 @@ class RevenueRepository {
   /// with nothing (total 0), oldest first.
   List<RevenueDay> daysBetween(DateTime from, DateTime to) {
     final rows = _db.raw.select(
-      'SELECT date, SUM(amount_cents) AS total, COUNT(*) AS n '
+      'SELECT date, SUM(amount_cents) AS total, '
+      'SUM(CASE WHEN amount_cents > 0 THEN 1 ELSE 0 END) AS n, '
+      'COUNT(*) AS e '
       'FROM revenue_entries WHERE date BETWEEN ? AND ? GROUP BY date;',
       [_key(from), _key(to)],
     );
     final byDate = {
       for (final r in rows)
-        r['date']! as String: (r['total']! as int, r['n']! as int),
+        r['date']! as String: (
+          r['total']! as int,
+          r['n']! as int,
+          r['e']! as int,
+        ),
     };
     final out = <RevenueDay>[];
     var d = DateTime(from.year, from.month, from.day);
     final end = DateTime(to.year, to.month, to.day);
     while (!d.isAfter(end)) {
-      final (total, n) = byDate[_key(d)] ?? (0, 0);
-      out.add(RevenueDay(d, total, n));
+      final (total, n, e) = byDate[_key(d)] ?? (0, 0, 0);
+      out.add(RevenueDay(d, total, n, e));
       d = DateTime(d.year, d.month, d.day + 1);
     }
     return out;

@@ -597,7 +597,7 @@ void main() {
     await tester.pumpAndSettle();
     final saved = RevenueRepository(db).entriesFor(DateTime(2026, 10, 3));
     expect(saved.single.amountCents, 350000);
-    expect(saved.single.note, 'M-Pesa · Pius Otieno · UJ3H98O13S');
+    expect(saved.single.note, 'UJ3H98O13S · M-Pesa · Pius Otieno');
     expect(saved.single.createdAt, DateTime(2026, 10, 3, 10, 53));
     expect(tester.takeException(), isNull);
   });

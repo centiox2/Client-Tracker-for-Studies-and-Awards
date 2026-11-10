@@ -347,10 +347,27 @@ class _Candidate {
   /// time, else the photo's.
   DateTime? get when => setTime ?? messageTime ?? _plausible(source.fileTime);
 
-  /// Transaction code with letter O and zero treated alike (text readers
-  /// mix them up), for spotting the same payment twice.
-  String? get key => payment.code?.toUpperCase().replaceAll('O', '0');
+  /// What spots the same payment twice (see [paymentDuplicateKey]).
+  String? get key => paymentDuplicateKey(payment, when);
 }
+
+/// What spots the same payment twice: the transaction code, with letter O
+/// and zero treated alike (text readers mix them up). Without a code (bank
+/// slips, a code cut off in the photo), the amount, day and payer — for
+/// amounts of KSh 100 and up, so small round sums don't collide.
+String? paymentDuplicateKey(ParsedPayment p, DateTime? when) {
+  final code = p.code;
+  if (code != null) return code.toUpperCase().replaceAll('O', '0');
+  if (p.amountCents < 10000) return null;
+  final day = when == null ? '' : '${when.year}-${when.month}-${when.day}';
+  final payer = (p.payer ?? '').toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+  return 'amount:${p.amountCents}|$day|$payer';
+}
+
+/// The amount a reviewed payment is saved with: positive for money
+/// received, negative (a refund) for money going out.
+int revenueAmountFor(ParsedPayment p) =>
+    p.incoming ? p.amountCents.abs() : -p.amountCents.abs();
 
 /// The earliest date a payment message can have (M-Pesa began in 2007).
 final revenueEarliestDate = DateTime(2007);
@@ -393,16 +410,19 @@ Future<void> _review(
   for (final c in chosen) {
     final t = c.when;
     final d = t == null ? day : DateTime(t.year, t.month, t.day);
+    // Money going out that the admin ticked is a refund: it comes off the
+    // day's revenue (refunds are negative amounts).
+    final cents = revenueAmountFor(c.payment);
     added.add(
       actions.addRevenue(
         d,
-        c.payment.amountCents,
+        cents,
         note: c.payment.note,
         at: t,
         purpose: c.purpose,
       ),
     );
-    total += c.payment.amountCents;
+    total += cents;
     days.add(d);
   }
   // Show the day the money went on (the messages' date).
@@ -694,7 +714,8 @@ class _ReviewDialogState extends State<_ReviewDialog> {
             ),
             if (!c.payment.incoming)
               Text(
-                'Money going out — not revenue',
+                'Money going out — ticked, it’s recorded as a refund '
+                '(−${formatMoney(c.payment.amountCents, widget.currency)})',
                 style: TextStyle(color: error),
               )
             else if (_saved.contains(c))
@@ -1206,7 +1227,7 @@ class _DetailsDialogState extends State<_DetailsDialog> {
           subtitle: Text(
             _incoming
                 ? 'Counts as revenue'
-                : 'Money going out — not counted unless ticked',
+                : 'Money going out — if ticked, recorded as a refund',
           ),
         ),
         ExpansionTile(

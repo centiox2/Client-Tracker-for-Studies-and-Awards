@@ -206,6 +206,9 @@ class ClientCountRepository {
   /// Cumulative-value write: setting New to 5 stores 5 (not 5 + previous 3).
   /// Returns the persisted row. Changes are recorded in the change history
   /// unless [log] is false (e.g. a bulk import).
+  /// The most clients one person can have in a day's cell.
+  static const maxClients = 100000;
+
   ClientCount saveCount({
     required int dayId,
     required int staffId,
@@ -213,7 +216,10 @@ class ClientCountRepository {
     required int existingClients,
     bool log = true,
   }) {
-    assert(newClients >= 0 && existingClients >= 0);
+    // A pasted phone number must never become 712,345,678 clients: the same
+    // limit as the Excel import, checked here so every path obeys it.
+    newClients = newClients.clamp(0, maxClients);
+    existingClients = existingClients.clamp(0, maxClients);
     final now = DateTime.now().toIso8601String();
     if (log) {
       _logChange(

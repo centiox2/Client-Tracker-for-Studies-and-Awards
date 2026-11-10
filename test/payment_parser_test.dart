@@ -35,7 +35,7 @@ them directly. Learn more
     expect(p.incoming, isTrue);
     expect(
       p.note,
-      'M-Pesa · David Kimurkong Kangogo · Acc: Leonorah Cherop · UK3JPO8PVA',
+      'UK3JPO8PVA · M-Pesa · David Kimurkong Kangogo · Acc: Leonorah Cherop',
     );
     // The phone number is not kept.
     expect(p.note, isNot(contains('2547')));
