@@ -7,6 +7,7 @@ import '../../repositories/client_count_repository.dart';
 import '../../state/app_state.dart';
 import '../../widgets/clarity.dart';
 import '../../widgets/panels.dart';
+import '../../widgets/undo_snack.dart';
 import '../reports/reports_screen.dart' show showStaffProfile;
 
 /// The team: order, rename, deactivate or delete staff, and add new ones.
@@ -317,7 +318,7 @@ class _StaffTable extends ConsumerWidget {
       builder: (context) => AlertDialog(
         title: Text('Delete ${member.name}?'),
         content: Text(
-          'This permanently removes ${member.name} and all their recorded '
+          'This removes ${member.name} and all their recorded '
           'numbers from every week. If ${member.name} has left, prefer '
           '"Mark inactive" — past weeks keep their name and history intact.',
         ),
@@ -332,14 +333,19 @@ class _StaffTable extends ConsumerWidget {
               foregroundColor: Theme.of(context).colorScheme.onError,
             ),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete permanently'),
+            child: const Text('Delete'),
           ),
         ],
       ),
     );
     if (confirmed == true) {
-      ref.read(staffRepositoryProvider).delete(member.id);
+      final removed = ref.read(staffRepositoryProvider).delete(member.id);
       ref.read(dataVersionProvider.notifier).bump();
+      if (!context.mounted) return;
+      showUndoSnack(context, 'Deleted ${member.name}', () {
+        removed.restore(ref.read(databaseProvider));
+        ref.read(dataVersionProvider.notifier).bump();
+      });
     }
   }
 }

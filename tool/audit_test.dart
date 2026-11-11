@@ -182,6 +182,14 @@ final _shots = <_Shot>[
     steps: [ValueKey('more'), 'History'],
   ),
   const _Shot('phone-dark', size: _phone, ratio: 2, dark: true),
+  const _Shot('revenue-all', steps: ['Revenue', 'All transactions']),
+  const _Shot(
+    'phone-revenue-all',
+    size: _phone,
+    ratio: 2,
+    steps: ['Revenue', 'All'],
+  ),
+  const _Shot('settings-about', steps: ['Settings', ValueKey('about-section')]),
 ];
 
 void main() {

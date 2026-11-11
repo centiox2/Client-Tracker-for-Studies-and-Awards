@@ -1,5 +1,6 @@
 import '../database/database.dart';
 import '../models/staff.dart';
+import 'row_snapshot.dart';
 import 'time_off_repository.dart';
 import 'week_repository.dart';
 
@@ -69,13 +70,22 @@ class StaffRepository {
   /// Permanently deletes a staff member together with all their client
   /// counts and time-off marks. The UI must confirm before calling this
   /// (and suggests marking them inactive instead, which keeps history).
-  void delete(int id) {
+  ///
+  /// Returns what was removed, so the delete can be undone.
+  RowSnapshot delete(int id) {
+    final snapshot = RowSnapshot.take(_db, [
+      ('staff', 'id = ?', [id]),
+      ('client_counts', 'staff_id = ?', [id]),
+      ('staff_day_off', 'staff_id = ?', [id]),
+      ('count_changes', 'staff_id = ?', [id]),
+    ]);
     _db.transaction(() {
       TimeOffRepository(_db).deleteForStaff(id);
       _db.raw.execute('DELETE FROM client_counts WHERE staff_id = ?;', [id]);
       _db.raw.execute('DELETE FROM count_changes WHERE staff_id = ?;', [id]);
       _db.raw.execute('DELETE FROM staff WHERE id = ?;', [id]);
     });
+    return snapshot;
   }
 
   /// Persists a full new ordering of staff by id.

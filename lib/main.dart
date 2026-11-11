@@ -10,6 +10,8 @@ import 'config/cloud_config.dart';
 import 'database/database_bootstrap.dart';
 import 'design/app_theme.dart';
 import 'repositories/revenue_repository.dart';
+import 'services/app_info.dart';
+import 'services/error_reporter.dart';
 import 'state/providers.dart';
 
 Future<void> main() async {
@@ -17,6 +19,10 @@ Future<void> main() async {
   // Sync with the online database (Supabase) when this build was given its
   // details. Tests leave this off.
   CloudConfig.active = CloudConfig.configured;
+  // Unexpected errors go online (Settings › Problems); "What's new" after
+  // an update.
+  ErrorReporter.install();
+  AppInfo.showWhatsNew = true;
   // Recorded with each revenue change, so the history says where it came
   // from.
   RevenueRepository.deviceLabel = kIsWeb

@@ -6,6 +6,7 @@ import '../../design/app_theme.dart';
 import '../../state/app_state.dart';
 import '../../widgets/clarity.dart';
 import '../../widgets/empty_state.dart';
+import '../../widgets/undo_snack.dart';
 import '../../widgets/week_label.dart';
 import '../weekly_tracker/new_week_dialog.dart';
 
@@ -177,8 +178,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Delete week?'),
         content: const Text(
-          'This permanently removes the week, its five days and all recorded '
-          'client numbers. This cannot be undone.',
+          'This removes the week, its five days and all recorded client '
+          'numbers. You can undo it straight after.',
         ),
         actions: [
           TextButton(
@@ -196,9 +197,25 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         ],
       ),
     );
-    if (confirmed == true) {
-      ref.read(weekRepositoryProvider).deleteWeek(weekId);
+    if (confirmed == true && mounted) {
+      final week = ref
+          .read(historyProvider)
+          .where((w) => w.week.id == weekId)
+          .firstOrNull
+          ?.week;
+      final removed = ref.read(weekRepositoryProvider).deleteWeek(weekId);
       ref.read(dataVersionProvider.notifier).bump();
+      if (!mounted) return;
+      showUndoSnack(
+        context,
+        week == null
+            ? 'Week deleted'
+            : 'Deleted ${weekRangeLabel(week.startDate, week.endDate)}',
+        () {
+          removed.restore(ref.read(databaseProvider));
+          ref.read(dataVersionProvider.notifier).bump();
+        },
+      );
     }
   }
 }

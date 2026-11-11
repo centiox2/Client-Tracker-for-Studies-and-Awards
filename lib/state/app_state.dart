@@ -9,6 +9,7 @@ import '../models/user_role.dart';
 import '../repositories/client_count_repository.dart';
 import '../repositories/report_repository.dart';
 import '../repositories/revenue_repository.dart';
+import '../database/database.dart';
 import '../repositories/week_repository.dart';
 import 'providers.dart';
 
@@ -28,6 +29,12 @@ class DataVersionNotifier extends Notifier<int> {
 
   void bump() => state++;
 }
+
+/// Bumped by the "N" shortcut on Revenue: the page puts the cursor in the
+/// amount box for a new payment.
+final newPaymentRequestProvider = NotifierProvider<DataVersionNotifier, int>(
+  DataVersionNotifier.new,
+);
 
 /// All staff (active and inactive) in display order.
 final staffListProvider = Provider<List<Staff>>((ref) {
@@ -881,5 +888,76 @@ class SidebarCollapsedNotifier extends Notifier<bool> {
       'ON CONFLICT(k) DO UPDATE SET v = excluded.v;',
       [_key, collapsed ? '1' : '0'],
     );
+  }
+}
+
+/// Text size on this device: 1.0 normal, 1.15 large, 1.3 larger. Applied on
+/// top of the computer's own setting; never synced.
+final textScaleProvider = NotifierProvider<TextScaleNotifier, double>(
+  TextScaleNotifier.new,
+);
+
+class TextScaleNotifier extends Notifier<double> {
+  static const _key = 'text_scale';
+  static const sizes = <(double, String)>[
+    (1.0, 'Normal'),
+    (1.15, 'Large'),
+    (1.3, 'Larger'),
+  ];
+
+  @override
+  double build() {
+    final rows = ref.read(databaseProvider).raw.select(
+      'SELECT v FROM sync_state WHERE k = ?;',
+      [_key],
+    );
+    return rows.isEmpty ? 1.0 : double.tryParse('${rows.first['v']}') ?? 1.0;
+  }
+
+  void set(double scale) {
+    state = scale;
+    ref.read(databaseProvider).raw.execute(
+      'INSERT INTO sync_state (k, v) VALUES (?, ?) '
+      'ON CONFLICT(k) DO UPDATE SET v = excluded.v;',
+      [_key, '$scale'],
+    );
+  }
+}
+
+/// Small per-device remembered choices (a page's last tab, sort…), kept in
+/// the local sync_state table under "ui." plus the name. Never synced.
+final uiPrefProvider = Provider<UiPrefs>(
+  (ref) => UiPrefs(ref.read(databaseProvider)),
+);
+
+class UiPrefs {
+  UiPrefs(this._db);
+  final AppDatabase _db;
+
+  String? get(String name) {
+    try {
+      final rows = _db.raw.select('SELECT v FROM sync_state WHERE k = ?;', [
+        'ui.$name',
+      ]);
+      return rows.isEmpty ? null : rows.first['v'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void set(String name, String value) {
+    try {
+      _db.raw.execute(
+        'INSERT INTO sync_state (k, v) VALUES (?, ?) '
+        'ON CONFLICT(k) DO UPDATE SET v = excluded.v;',
+        ['ui.$name', value],
+      );
+    } catch (_) {}
+  }
+
+  /// The enum value saved under [name], or [fallback].
+  T pick<T extends Enum>(String name, List<T> values, T fallback) {
+    final saved = get(name);
+    return values.where((v) => v.name == saved).firstOrNull ?? fallback;
   }
 }

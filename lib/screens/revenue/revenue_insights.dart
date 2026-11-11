@@ -123,7 +123,20 @@ class RevenueInsights extends ConsumerStatefulWidget {
 }
 
 class _RevenueInsightsState extends ConsumerState<RevenueInsights> {
-  InsightsPeriod _period = InsightsPeriod.month;
+  // Remembered on this device (a custom range isn't: its dates don't keep).
+  late InsightsPeriod _periodSaved = () {
+    final p = ref
+        .read(uiPrefProvider)
+        .pick('insights.period', InsightsPeriod.values, InsightsPeriod.month);
+    return p == InsightsPeriod.custom ? InsightsPeriod.month : p;
+  }();
+  InsightsPeriod get _period => _periodSaved;
+  set _period(InsightsPeriod v) {
+    _periodSaved = v;
+    if (v != InsightsPeriod.custom) {
+      ref.read(uiPrefProvider).set('insights.period', v.name);
+    }
+  }
 
   /// 0 = the current week/month/year; -1 the one before, and so on.
   int _offset = 0;

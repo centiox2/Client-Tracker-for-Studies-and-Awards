@@ -380,17 +380,16 @@ class _MyReportsState extends ConsumerState<_MyReports> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       if (entries.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.all(6),
-                          child: Text(
-                            isToday
-                                ? 'Nothing recorded yet today. Add each '
-                                      'piece of work you did, with numbers '
-                                      'where you can (applications '
-                                      'reviewed, calls made…).'
-                                : 'Nothing recorded for this day.',
-                            style: muted,
-                          ),
+                        PanelEmpty(
+                          icon: Icons.edit_note_outlined,
+                          title: isToday
+                              ? 'Nothing recorded yet today'
+                              : 'Nothing recorded for this day',
+                          message: isToday
+                              ? 'Add each piece of work you did, with '
+                                    'numbers where you can (applications '
+                                    'reviewed, calls made…).'
+                              : null,
                         ),
                       for (final e in entries)
                         ReportTile(

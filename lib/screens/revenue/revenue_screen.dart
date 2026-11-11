@@ -9,6 +9,7 @@ import '../../repositories/revenue_repository.dart';
 import '../../services/photo_text.dart';
 import '../../state/app_state.dart';
 import '../../widgets/clarity.dart';
+import '../../widgets/empty_state.dart';
 import '../../widgets/panels.dart';
 import 'revenue_all.dart';
 import 'revenue_insights.dart';
@@ -49,7 +50,15 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
 
   /// Day (enter and see one day), All (every transaction, to find and fix
   /// older ones) or Insights (charts and figures).
-  RevenueView _view = RevenueView.day;
+  // Remembered on this device (Settings-free): the page reopens as left.
+  late RevenueView _viewSaved = ref
+      .read(uiPrefProvider)
+      .pick('revenue.view', RevenueView.values, RevenueView.day);
+  RevenueView get _view => _viewSaved;
+  set _view(RevenueView v) {
+    _viewSaved = v;
+    ref.read(uiPrefProvider).set('revenue.view', v.name);
+  }
 
   @override
   void dispose() {
@@ -115,8 +124,19 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
     if (picked != null) ref.read(revenueDateProvider.notifier).set(picked);
   }
 
+  /// The "N" shortcut: back to today's entry form, cursor in the amount.
+  void _newPayment() {
+    if (widget.readOnly) return;
+    ref.read(revenueDateProvider.notifier).set(_today());
+    setState(() => _view = RevenueView.day);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _amountFocus.requestFocus();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    ref.listen(newPaymentRequestProvider, (_, _) => _newPayment());
     final theme = Theme.of(context);
     final day = ref.watch(revenueDateProvider);
     final today = _today();
@@ -248,17 +268,34 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
               ? null
               : '${entries.length} · ${formatMoney(total, currency)}',
           child: entries.isEmpty
-              ? Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(
-                    widget.readOnly
-                        ? 'No revenue recorded for this day.'
-                        : 'Nothing yet. Type each amount above '
-                              'and press Enter.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: Dt.textMuted(theme),
+              ? PanelEmpty(
+                  key: const ValueKey('revenue-day-empty'),
+                  icon: Icons.receipt_long_outlined,
+                  title: isToday
+                      ? 'No payments yet today'
+                      : 'No payments on ${DateFormat('EEEE d MMM').format(day)}',
+                  message: widget.readOnly
+                      ? null
+                      : phone
+                      ? 'Type each amount above and press Enter.'
+                      : 'Type each amount above and press Enter, or drop '
+                            'payment photos on this page.',
+                  actions: [
+                    (
+                      isToday
+                          ? 'See yesterday’s payments'
+                          : 'See the day before',
+                      () => ref
+                          .read(revenueDateProvider.notifier)
+                          .set(day.subtract(const Duration(days: 1))),
                     ),
-                  ),
+                    if (!isToday)
+                      (
+                        'Back to today',
+                        () => ref.read(revenueDateProvider.notifier).set(today),
+                      ),
+                    ('Find a payment', () => _openSearch('')),
+                  ],
                 )
               : Column(
                   children: [

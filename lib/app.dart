@@ -25,6 +25,8 @@ import 'screens/weekly_tracker/new_week_dialog.dart';
 import 'screens/weekly_tracker/weekly_tracker_screen.dart';
 import 'state/app_state.dart';
 import 'services/auto_backup.dart';
+import 'services/error_reporter.dart';
+import 'screens/settings/about_section.dart';
 import 'state/cloud_sync.dart';
 import 'widgets/motion.dart';
 import 'widgets/sync_status.dart';
@@ -39,12 +41,24 @@ class ClientTrackerApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
+    final scale = ref.watch(textScaleProvider);
     return MaterialApp(
       title: '${Dt.appName} · ${Dt.companyName}',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(Brightness.light),
       darkTheme: buildAppTheme(Brightness.dark),
       themeMode: themeMode,
+      // Text size (Settings or the account menu), on top of the computer's.
+      builder: (context, child) {
+        if (scale == 1.0) return child!;
+        final mq = MediaQuery.of(context);
+        return MediaQuery(
+          data: mq.copyWith(
+            textScaler: TextScaler.linear(mq.textScaler.scale(1) * scale),
+          ),
+          child: child!,
+        );
+      },
       // First sign in (personal accounts) or pick a profile (no online
       // database); then the app as that role allows. Keyed so switching
       // starts afresh.
@@ -188,6 +202,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       ref.read(autoBackupProvider.notifier).ensureToday();
       // Online sync: download the latest, then live updates.
       ref.read(cloudSyncProvider.notifier).start();
+      // Unexpected errors go online from now on (Settings › Problems).
+      ErrorReporter.send = ref.read(cloudSyncProvider.notifier).reportError;
+      maybeShowWhatsNew(context, ref);
       // Share → S&A Hub (phones): payment photos or an M-Pesa SMS.
       listenForShares(_onShared);
       _checkKeptSignIn();
@@ -307,14 +324,57 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     return inText && !inCountCell;
   }
 
+  /// True while the cursor is in any text box, number cells included.
+  bool get _inAnyTextField =>
+      FocusManager.instance.primaryFocus?.context
+          ?.findAncestorWidgetOfExactType<EditableText>() !=
+      null;
+
+  /// Single keys (no Ctrl): "/" search, "N" new payment or week, "?" help.
+  /// Never while typing, and never with a dialog open.
+  KeyEventResult _plainKey(KeyEvent event) {
+    if (_inAnyTextField || _isViewer) return KeyEventResult.ignored;
+    if (ModalRoute.of(context)?.isCurrent == false) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    final char = event.character;
+    if (key == LogicalKeyboardKey.slash && char != '?') {
+      showQuickSearch(context);
+      return KeyEventResult.handled;
+    }
+    if (char == '?') {
+      showShortcutsDialog(context);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyN &&
+        !HardwareKeyboard.instance.isAltPressed) {
+      final tab = ref.read(navTabProvider);
+      if (tab == AppTab.revenue && ref.read(isAdminProvider)) {
+        ref.read(newPaymentRequestProvider.notifier).bump();
+        return KeyEventResult.handled;
+      }
+      if (tab == AppTab.week || tab == AppTab.history) {
+        showNewWeekDialog(context, ref);
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
+  }
+
   KeyEventResult _handleKey(KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final modifier =
         HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed;
-    if (!modifier) return KeyEventResult.ignored;
+    if (!modifier) return _plainKey(event);
     // Search, undo and tab shortcuts are workspace tools — admin only.
     if (_isViewer) return KeyEventResult.ignored;
+    if (event.logicalKey == LogicalKeyboardKey.keyN) {
+      // Instead of the browser's "new window".
+      showNewWeekDialog(context, ref);
+      return KeyEventResult.handled;
+    }
     if (event.logicalKey == LogicalKeyboardKey.keyK) {
       // Handled, so the browser doesn't also open its own Ctrl+K search.
       showQuickSearch(context);
@@ -983,12 +1043,25 @@ class _UserRow extends ConsumerWidget {
     final account = MenuAnchor(
       alignmentOffset: const Offset(0, -4),
       menuChildren: [
-        if (user != null)
+        if (user != null) ...[
           MenuItemButton(
             leadingIcon: const Icon(Icons.key_outlined, size: 16),
             onPressed: () => showChangeOwnPassword(context),
             child: const Text('Change password'),
           ),
+          MenuItemButton(
+            key: const ValueKey('menu-sessions'),
+            leadingIcon: const Icon(Icons.devices_outlined, size: 16),
+            onPressed: () => showSessions(context),
+            child: const Text('Your sessions'),
+          ),
+        ],
+        MenuItemButton(
+          key: const ValueKey('menu-text-size'),
+          leadingIcon: const Icon(Icons.format_size, size: 16),
+          onPressed: () => showTextSize(context),
+          child: const Text('Text size'),
+        ),
         if (canEdit)
           MenuItemButton(
             leadingIcon: const Icon(Icons.keyboard_outlined, size: 16),
@@ -1118,6 +1191,10 @@ class _MobileTopBar extends ConsumerWidget {
                 ref.read(dataVersionProvider.notifier).bump();
               } else if (action == 'password') {
                 showChangeOwnPassword(context);
+              } else if (action == 'sessions') {
+                showSessions(context);
+              } else if (action == 'text-size') {
+                showTextSize(context);
               } else if (action == 'signout') {
                 ref.read(sessionProvider.notifier).signOut();
               }
@@ -1142,11 +1219,20 @@ class _MobileTopBar extends ConsumerWidget {
                   value: 'refresh',
                   child: Text('Refresh data'),
                 ),
-                if (user != null)
+                if (user != null) ...[
                   const PopupMenuItem(
                     value: 'password',
                     child: Text('Change password'),
                   ),
+                  const PopupMenuItem(
+                    value: 'sessions',
+                    child: Text('Your sessions'),
+                  ),
+                ],
+                const PopupMenuItem(
+                  value: 'text-size',
+                  child: Text('Text size'),
+                ),
                 PopupMenuItem(
                   value: 'signout',
                   child: Text(

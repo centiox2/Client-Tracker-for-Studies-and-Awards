@@ -73,3 +73,77 @@ class EmptyState extends StatelessWidget {
     );
   }
 }
+
+/// The empty state inside a card: an icon, what's missing, what to do, and
+/// up to two links that help (e.g. "See yesterday's payments").
+class PanelEmpty extends StatelessWidget {
+  const PanelEmpty({
+    super.key,
+    required this.icon,
+    required this.title,
+    this.message,
+    this.actions = const [],
+  });
+
+  final IconData icon;
+  final String title;
+  final String? message;
+
+  /// (label, onPressed)
+  final List<(String, VoidCallback)> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 22),
+      child: Column(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerLow,
+              shape: BoxShape.circle,
+              border: Border.all(color: scheme.outline),
+            ),
+            child: Icon(icon, size: 18, color: Dt.textFaint(theme)),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (message != null) ...[
+            const SizedBox(height: 4),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 380),
+              child: Text(
+                message!,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: Dt.textMuted(theme),
+                ),
+              ),
+            ),
+          ],
+          if (actions.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 4,
+              children: [
+                for (final (label, onPressed) in actions)
+                  TextButton(onPressed: onPressed, child: Text(label)),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}

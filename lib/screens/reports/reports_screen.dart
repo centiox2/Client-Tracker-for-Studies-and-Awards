@@ -11,9 +11,11 @@ import '../../repositories/report_repository.dart';
 import '../../repositories/revenue_repository.dart';
 import '../../services/export_actions.dart';
 import '../../services/fullscreen.dart';
+import '../../services/print_views.dart';
 import '../../services/report_export.dart';
 import '../../state/app_state.dart';
 import '../../widgets/clarity.dart';
+import '../../widgets/empty_state.dart';
 import '../../widgets/motion.dart';
 import '../../widgets/panels.dart';
 import '../applications/applications_screen.dart' show ApplicationUpdateRow;
@@ -42,8 +44,25 @@ class ReportsScreen extends ConsumerStatefulWidget {
 class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   /// Quick view (what's going on now), the detailed period report, or
   /// longer-term trends.
-  _View _view = _View.quick;
-  ReportPeriod _period = ReportPeriod.week;
+  // Remembered on this device (Settings-free): the page reopens as left.
+  late _View _viewSaved = ref
+      .read(uiPrefProvider)
+      .pick('reports.view', _View.values, _View.quick);
+  _View get _view => _viewSaved;
+  set _view(_View v) {
+    _viewSaved = v;
+    ref.read(uiPrefProvider).set('reports.view', v.name);
+  }
+
+  // Remembered on this device (Settings-free): the page reopens as left.
+  late ReportPeriod _periodSaved = ref
+      .read(uiPrefProvider)
+      .pick('reports.period', ReportPeriod.values, ReportPeriod.week);
+  ReportPeriod get _period => _periodSaved;
+  set _period(ReportPeriod v) {
+    _periodSaved = v;
+    ref.read(uiPrefProvider).set('reports.period', v.name);
+  }
 
   /// Compare with the same period a year earlier instead of the one before.
   bool _vsLastYear = false;
@@ -848,28 +867,33 @@ class _Panel extends StatelessWidget {
   }
 }
 
-class _Empty extends StatelessWidget {
+class _Empty extends ConsumerWidget {
   const _Empty({required this.period});
   final ReportPeriod period;
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+  Widget build(BuildContext context, WidgetRef ref) {
     final what = switch (period) {
       ReportPeriod.day => 'this day',
       ReportPeriod.week => 'this week',
       ReportPeriod.month => 'this month',
       ReportPeriod.year => 'this year',
     };
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 16),
-      child: Text(
-        'Nothing tracked for $what yet.',
-        textAlign: TextAlign.center,
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-      ),
+    final canEdit = ref.watch(canEditProvider);
+    return PanelEmpty(
+      key: const ValueKey('reports-empty'),
+      icon: Icons.insert_chart_outlined,
+      title: 'Nothing tracked for $what yet',
+      message:
+          'Step back with the arrows above to see an earlier period'
+          '${canEdit ? ', or enter client numbers on the Weekly tracker' : ''}.',
+      actions: [
+        if (canEdit)
+          (
+            'Open the Weekly tracker',
+            () => ref.read(navTabProvider.notifier).set(AppTab.week),
+          ),
+      ],
     );
   }
 }
@@ -1296,7 +1320,14 @@ class _DownloadMenu extends ConsumerWidget {
                   .entriesBetween(report.from, report.to)
             : null;
         final currency = ref.read(currencyProvider);
-        if (kind == 'xlsx') {
+        if (kind == 'pdf') {
+          savePrintable(
+            context,
+            fileName: 'client_report_$slug',
+            build: (r, b) =>
+                reportToPdf(report, title: title, regular: r, bold: b),
+          );
+        } else if (kind == 'xlsx') {
           deliverFile(
             context,
             dialogTitle: 'Save report as Excel',
@@ -1337,6 +1368,16 @@ class _DownloadMenu extends ConsumerWidget {
             leading: Icon(Icons.table_view_outlined, size: 18),
             title: Text('Excel workbook (.xlsx)'),
             subtitle: Text('Summary, staff, days and the full grid'),
+          ),
+        ),
+        PopupMenuItem(
+          value: 'pdf',
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.picture_as_pdf_outlined, size: 18),
+            title: Text('PDF, ready to print'),
+            subtitle: Text('Totals, week by week, staff and days on A4'),
           ),
         ),
         PopupMenuItem(

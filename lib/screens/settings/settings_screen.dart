@@ -17,6 +17,7 @@ import '../../widgets/clarity.dart';
 import '../../widgets/panels.dart';
 import '../../widgets/sync_status.dart';
 import '../history/change_history_dialog.dart';
+import 'about_section.dart';
 import 'airtable_section.dart';
 import 'import_dialog.dart';
 import 'departments_section.dart';
@@ -115,17 +116,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _Section(
         title: 'Appearance',
         icon: Icons.palette_outlined,
-        description: 'Choose a theme, or follow your computer’s setting.',
-        child: SegmentedButton<ThemeMode>(
-          segments: const [
-            ButtonSegment(value: ThemeMode.light, label: Text('Light')),
-            ButtonSegment(value: ThemeMode.system, label: Text('System')),
-            ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
+        description:
+            'Choose a theme, or follow your computer’s setting, and the text '
+            'size on this device.',
+        child: Wrap(
+          spacing: 16,
+          runSpacing: 12,
+          children: [
+            SegmentedButton<ThemeMode>(
+              segments: const [
+                ButtonSegment(value: ThemeMode.light, label: Text('Light')),
+                ButtonSegment(value: ThemeMode.system, label: Text('System')),
+                ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
+              ],
+              selected: {themeMode},
+              showSelectedIcon: false,
+              onSelectionChanged: (s) =>
+                  ref.read(themeModeProvider.notifier).set(s.first),
+            ),
+            const TextSizePicker(),
           ],
-          selected: {themeMode},
-          showSelectedIcon: false,
-          onSelectionChanged: (s) =>
-              ref.read(themeModeProvider.notifier).set(s.first),
         ),
       ),
       _Section(
@@ -347,14 +357,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ),
       ],
-      _Section(
-        title: 'About',
-        icon: Icons.info_outline,
-        description:
-            '${Dt.appName} replaces the weekly Excel tracking spreadsheet. '
-            'All data is stored on this device; totals are always calculated '
-            'live from the entered numbers.',
-      ),
+      AboutSection(online: accounts),
     ];
 
     return LayoutBuilder(

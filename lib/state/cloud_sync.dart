@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/cloud_config.dart';
+import '../services/app_info.dart';
 import '../services/cloud/cloud_api.dart';
 import '../services/cloud/supabase_cloud_api.dart';
 import '../services/cloud/sync_engine.dart';
@@ -448,6 +449,36 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     ref.read(currentUserProvider.notifier).signedIn(signIn.user);
     state = state.copyWith(adminLinked: _pushToken != null);
     unawaited(_connect());
+    _touchSession(signIn.token);
+  }
+
+  /// Tells the online database which device this sign-in is on and that it
+  /// was just used (Settings › Your sessions). Quietly skipped offline or
+  /// before the database has this.
+  void _touchSession(String token) {
+    final api = _api;
+    if (api == null) return;
+    unawaited(
+      api
+          .callFunction('user_session_touch', {
+            'p_token': token,
+            'p_device': AppInfo.device,
+          })
+          .then((_) {}, onError: (_) {}),
+    );
+  }
+
+  /// Sends an unexpected error to the online database (Settings › Problems),
+  /// with whoever is signed in. Never throws.
+  Future<void> reportError(Map<String, Object?> report) async {
+    final api = _api;
+    if (api == null) return;
+    try {
+      await api.callFunction('report_error', {
+        'p_token': _userToken ?? _readToken,
+        'p_report': report,
+      });
+    } catch (_) {}
   }
 
   /// No internet: opens the app as [user], who signed in on this device
@@ -529,6 +560,7 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     try {
       final user = await api.userSession(token);
       if (!ref.mounted || _userToken != token) return;
+      _touchSession(token);
       ref.read(authRepositoryProvider).updateUser(user);
       ref.read(currentUserProvider.notifier).update(user);
     } on CloudException catch (e) {

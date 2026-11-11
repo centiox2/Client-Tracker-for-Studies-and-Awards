@@ -6,6 +6,7 @@ import '../../design/app_theme.dart';
 import '../../models/staff.dart';
 import '../../repositories/client_count_repository.dart';
 import '../../services/export_actions.dart';
+import '../../services/print_views.dart';
 import '../../state/app_state.dart';
 import '../../widgets/app_page_header.dart';
 import '../../widgets/clarity.dart';
@@ -553,6 +554,16 @@ class _WeekMenu extends ConsumerWidget {
             );
           case 'export':
             await exportWeekToFile(context, ref, week);
+          case 'print':
+            final report = ref
+                .read(reportRepositoryProvider)
+                .report(week.startDate, week.endDate);
+            await savePrintable(
+              context,
+              fileName:
+                  'week_${DateFormat('yyyy_MM_dd').format(week.startDate)}',
+              build: (r, b) => weekToPdf(report, regular: r, bold: b),
+            );
           case 'changes':
             await showChangeHistory(
               context,
@@ -578,6 +589,15 @@ class _WeekMenu extends ConsumerWidget {
             contentPadding: EdgeInsets.zero,
             leading: Icon(Icons.download_outlined, size: 18),
             title: Text('Export this week to Excel'),
+          ),
+        ),
+        PopupMenuItem(
+          value: 'print',
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.print_outlined, size: 18),
+            title: Text('Printable week (PDF)'),
           ),
         ),
         PopupMenuItem(

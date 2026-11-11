@@ -1,5 +1,6 @@
 import '../database/database.dart';
 import '../models/staff.dart';
+import 'row_snapshot.dart';
 import 'staff_repository.dart';
 
 /// Data access for weeks and their five working days.
@@ -186,9 +187,20 @@ class WeekRepository {
   }
 
   /// Deletes an entire week (UI must confirm first). Days and counts cascade.
-  void deleteWeek(int weekId) {
+  /// Returns what was removed, so the delete can be undone.
+  RowSnapshot deleteWeek(int weekId) {
+    const days = 'day_id IN (SELECT id FROM work_days WHERE week_id = ?)';
+    final snapshot = RowSnapshot.take(_db, [
+      ('weeks', 'id = ?', [weekId]),
+      ('work_days', 'week_id = ?', [weekId]),
+      ('client_counts', days, [weekId]),
+      ('staff_day_off', days, [weekId]),
+      ('day_notes', days, [weekId]),
+      ('count_changes', days, [weekId]),
+    ]);
     _db.raw.execute('PRAGMA foreign_keys = ON;');
     _db.raw.execute('DELETE FROM weeks WHERE id = ?;', [weekId]);
+    return snapshot;
   }
 
   // ---- Days ----------------------------------------------------------------

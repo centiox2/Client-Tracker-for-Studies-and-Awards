@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../design/app_theme.dart';
 import '../../repositories/revenue_repository.dart';
 import '../../state/app_state.dart';
+import '../../widgets/empty_state.dart';
 import '../../widgets/panels.dart';
 import 'revenue_screen.dart'
     show RevenueEntryRow, deleteRevenueWithUndo, payerOf, showEditRevenueDialog;
@@ -86,10 +87,14 @@ class _AllRevenueState extends ConsumerState<AllRevenue> {
     final now = DateTime.now();
     final atThisMonth = _month == _thisMonth();
 
+    // The arrows sit either side of the month's name, so stepping through
+    // months doesn't mean reaching across the page.
     final monthBar = Row(
       children: [
         IconButton(
+          key: const ValueKey('all-revenue-prev'),
           tooltip: 'Earlier month',
+          visualDensity: VisualDensity.compact,
           onPressed: _month.isAfter(revenueEarliestDate)
               ? () => setState(
                   () => _month = DateTime(_month.year, _month.month - 1),
@@ -97,23 +102,36 @@ class _AllRevenueState extends ConsumerState<AllRevenue> {
               : null,
           icon: const Icon(Icons.chevron_left),
         ),
-        Expanded(
+        Flexible(
+          flex: 100,
           child: InkWell(
             key: const ValueKey('all-revenue-month'),
             onTap: _pickMonth,
             borderRadius: BorderRadius.circular(Dt.rMd),
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(
-                DateFormat('MMMM y').format(_month),
-                textAlign: TextAlign.center,
-                style: theme.textTheme.titleMedium,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      DateFormat('MMMM y').format(_month),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium,
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  Icon(Icons.arrow_drop_down, size: 20, color: muted),
+                ],
               ),
             ),
           ),
         ),
         IconButton(
+          key: const ValueKey('all-revenue-next'),
           tooltip: 'Later month',
+          visualDensity: VisualDensity.compact,
           onPressed: atThisMonth
               ? null
               : () => setState(
@@ -121,6 +139,7 @@ class _AllRevenueState extends ConsumerState<AllRevenue> {
                 ),
           icon: const Icon(Icons.chevron_right),
         ),
+        const Spacer(),
         if (!atThisMonth)
           TextButton(
             onPressed: () => setState(() => _month = _thisMonth()),
@@ -224,17 +243,32 @@ class _AllRevenueState extends ConsumerState<AllRevenue> {
                       : '${entries.length} · ${formatMoney(total, currency)}'
                             '${searching && entries.length == 500 ? ' (first 500)' : ''}',
                   child: entries.isEmpty
-                      ? Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Text(
-                            searching
-                                ? 'Nothing matches that search.'
-                                : 'No transactions in '
-                                      '${DateFormat('MMMM y').format(_month)}.',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: muted,
-                            ),
-                          ),
+                      ? PanelEmpty(
+                          key: const ValueKey('all-revenue-empty'),
+                          icon: searching
+                              ? Icons.search_off
+                              : Icons.receipt_long_outlined,
+                          title: searching
+                              ? 'Nothing matches that search'
+                              : 'No payments in '
+                                    '${DateFormat('MMMM y').format(_month)}',
+                          message: searching
+                              ? 'Try part of a name, an amount or a code.'
+                              : null,
+                          actions: [
+                            if (searching)
+                              ('Clear the search', () => setState(_query.clear))
+                            else if (_month.isAfter(revenueEarliestDate))
+                              (
+                                'See the month before',
+                                () => setState(
+                                  () => _month = DateTime(
+                                    _month.year,
+                                    _month.month - 1,
+                                  ),
+                                ),
+                              ),
+                          ],
                         )
                       : Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,

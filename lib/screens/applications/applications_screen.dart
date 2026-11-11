@@ -11,6 +11,7 @@ import '../../repositories/application_repository.dart';
 import '../../services/airtable_sync_service.dart';
 import '../../services/file_delivery.dart';
 import '../../services/photo_text.dart' show photoDropSupported;
+import '../../services/print_views.dart';
 import '../../state/app_state.dart';
 import '../../widgets/clarity.dart';
 import '../../widgets/panels.dart';
@@ -40,7 +41,16 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
   String? _rto;
   bool _inProgressOnly = false;
   bool _offerOverdueOnly = false;
-  _AppSort _sort = _AppSort.stage;
+  // Remembered on this device (Settings-free): the page reopens as left.
+  late _AppSort _sortSaved = ref
+      .read(uiPrefProvider)
+      .pick('applications.sort', _AppSort.values, _AppSort.stage);
+  _AppSort get _sort => _sortSaved;
+  set _sort(_AppSort v) {
+    _sortSaved = v;
+    ref.read(uiPrefProvider).set('applications.sort', v.name);
+  }
+
   bool _dragging = false;
   bool _busy = false;
   bool _syncing = false;
@@ -50,7 +60,15 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
 
   /// Quick view (what happened and what's happening), the full list
   /// grouped by status, or the table with every column.
-  _View _view = _View.quick;
+  // Remembered on this device (Settings-free): the page reopens as left.
+  late _View _viewSaved = ref
+      .read(uiPrefProvider)
+      .pick('applications.view', _View.values, _View.quick);
+  _View get _view => _viewSaved;
+  set _view(_View v) {
+    _viewSaved = v;
+    ref.read(uiPrefProvider).set('applications.view', v.name);
+  }
 
   @override
   void dispose() {
@@ -1331,6 +1349,18 @@ Future<void> showApplicationDetails(
           ),
         ),
         actions: [
+          TextButton.icon(
+            key: const ValueKey('application-print'),
+            onPressed: () => savePrintable(
+              context,
+              fileName:
+                  'application_${a.student.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_')}',
+              build: (r, b) =>
+                  applicationToPdf(a, history, regular: r, bold: b),
+            ),
+            icon: const Icon(Icons.print_outlined, size: 16),
+            label: const Text('Print'),
+          ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Close'),
