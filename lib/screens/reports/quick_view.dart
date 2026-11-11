@@ -291,7 +291,7 @@ class _QuickView extends ConsumerWidget {
                         child: Text(
                           byStudent.length > 6
                               ? 'See all ${byStudent.length} updates'
-                              : 'Open Applications',
+                              : 'Open applications',
                         ),
                       ),
                     ),

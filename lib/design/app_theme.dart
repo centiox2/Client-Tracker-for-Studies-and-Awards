@@ -597,10 +597,17 @@ ThemeData buildAppTheme(Brightness brightness) {
         fontSize: 14,
         color: c.textMuted,
       ),
-      floatingLabelStyle: TextStyle(
-        fontFamily: Dt.font,
-        fontSize: 14,
-        color: c.accent,
+      // Grey, in the accent only while the field is being typed in.
+      floatingLabelStyle: WidgetStateTextStyle.resolveWith(
+        (states) => TextStyle(
+          fontFamily: Dt.font,
+          fontSize: 14,
+          color: states.contains(WidgetState.error)
+              ? c.negativeFg
+              : states.contains(WidgetState.focused)
+              ? c.accent
+              : c.textMuted,
+        ),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
       border: fieldBorder(),

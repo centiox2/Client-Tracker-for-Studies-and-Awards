@@ -51,7 +51,7 @@ class _WeeklyTrackerScreenState extends ConsumerState<WeeklyTrackerScreen> {
         icon: Icons.calendar_today,
         title: 'No week selected',
         message: 'Create a new week or open one from History.',
-        actionLabel: 'New Week',
+        actionLabel: 'New week',
         onAction: () => showNewWeekDialog(context, ref),
       );
     }
@@ -1805,14 +1805,14 @@ class _MobileWeekViewState extends State<_MobileWeekView> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _sum(context, 'New Total', '$n', Dt.newGreen(theme.brightness)),
+          _sum(context, 'New total', '$n', Dt.newGreen(theme.brightness)),
           _sum(
             context,
-            'Existing Total',
+            'Existing total',
             '$e',
             Dt.existingBlue(theme.brightness),
           ),
-          _sum(context, 'Day Total', '${n + e}', null),
+          _sum(context, 'Day total', '${n + e}', null),
         ],
       ),
     );

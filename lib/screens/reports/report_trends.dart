@@ -568,24 +568,14 @@ class _ChangeCell extends StatelessWidget {
       return Text('–', style: _num(theme, color: Dt.textFaint(theme)));
     }
     final diff = current - prev;
-    if (diff == 0) {
-      return Text('same', style: _num(theme, color: Dt.textMuted(theme)));
-    }
+    // Clarity: a pill — "↑ 3" green, "↓ 2" red, "Same" grey.
+    if (diff == 0) return const StatusPill('Same');
     final text = percent && prev > 0
         ? '${(diff.abs() * 100 / prev).round()}%'
         : '${diff.abs()}';
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          diff > 0 ? Icons.arrow_drop_up : Icons.arrow_drop_down,
-          size: 18,
-          color: diff > 0
-              ? Dt.statusGreen(theme.brightness)
-              : theme.colorScheme.error,
-        ),
-        Text(text, style: _num(theme, color: Dt.textMuted(theme))),
-      ],
+    return StatusPill(
+      '${diff > 0 ? '↑' : '↓'} $text',
+      tone: diff > 0 ? PillTone.positive : PillTone.negative,
     );
   }
 }

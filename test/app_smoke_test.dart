@@ -119,7 +119,7 @@ void main() {
       );
     }
 
-    await tester.tap(find.text('Create Week'));
+    await tester.tap(find.text('Create week'));
     await tester.pumpAndSettle();
 
     expect(find.text('This week'), findsOneWidget);

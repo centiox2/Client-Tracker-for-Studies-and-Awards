@@ -1095,12 +1095,10 @@ class _ShareBar extends StatelessWidget {
             borderRadius: BorderRadius.circular(3),
             child: Stack(
               children: [
-                Container(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.08),
-                ),
+                Container(color: context.clarity.track),
                 AnimatedFraction(
                   fraction: relative,
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.55),
+                  color: context.clarity.accent,
                 ),
               ],
             ),

@@ -182,7 +182,7 @@ class _NewWeekDialogState extends ConsumerState<_NewWeekDialog> {
           autofocus: true,
           onPressed: _creating ? null : _create,
           icon: const Icon(Icons.check, size: 16),
-          label: Text(existing ? 'Open Existing Week' : 'Create Week'),
+          label: Text(existing ? 'Open existing week' : 'Create week'),
         ),
       ],
     );

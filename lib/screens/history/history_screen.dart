@@ -57,7 +57,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               icon: Icons.history,
               title: 'No weeks yet',
               message: 'Create your first week to see it here.',
-              actionLabel: 'New Week',
+              actionLabel: 'New week',
               onAction: () => showNewWeekDialog(context, ref),
             );
     }

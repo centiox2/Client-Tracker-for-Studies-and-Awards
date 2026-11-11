@@ -831,13 +831,17 @@ class _Stat extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    final c = context.clarity;
+    // Clarity KPI: "KSh" small, the amount big (as in the design).
+    final money = RegExp(r'^([^\d\s-]+)\s+(-?[\d,.]+.*)$').firstMatch(value);
+    final unit = money?.group(1);
+    final number = money?.group(2) ?? value;
     return Container(
       constraints: const BoxConstraints(minHeight: 104),
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        border: Border.all(color: scheme.outline),
+        color: c.surface,
+        border: Border.all(color: c.border),
         borderRadius: BorderRadius.circular(Dt.rMd),
       ),
       child: Column(
@@ -847,30 +851,41 @@ class _Stat extends StatelessWidget {
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: scheme.onSurfaceVariant,
-            ),
+            style: theme.textTheme.labelMedium?.copyWith(color: c.textMuted),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
-            child: Text(
-              value,
-              maxLines: 1,
-              style: Dt.tab(theme.textTheme.titleLarge!)
-                  .copyWith(fontWeight: FontWeight.w700),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                if (unit != null) ...[
+                  Text(
+                    unit,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: c.textMuted,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                Text(
+                  number,
+                  maxLines: 1,
+                  style: Dt.tab(theme.textTheme.displaySmall!),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 10),
           Text(
             caption,
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelSmall?.copyWith(
-              fontSize: 10.5,
-              color: scheme.onSurfaceVariant,
-            ),
+            style: theme.textTheme.labelSmall?.copyWith(color: c.textMuted),
           ),
         ],
       ),

@@ -388,9 +388,10 @@ void main() {
     await tester.tap(find.text('Insights'));
     await tester.pumpAndSettle();
 
-    expect(find.text('KSh 13,000'), findsWidgets); // month so far, best day
+    // The tiles show "KSh" small beside the amount (Clarity).
+    expect(find.text('13,000'), findsWidgets); // month so far, best day
     expect(find.text('Average payment'), findsOneWidget);
-    expect(find.text('KSh 6,500'), findsOneWidget);
+    expect(find.text('6,500'), findsOneWidget);
     expect(find.text('By day'), findsOneWidget);
     expect(find.textContaining('12 months to'), findsOneWidget);
     // The same numbers as a table.

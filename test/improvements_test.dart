@@ -123,7 +123,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Start next week…'));
     await tester.pumpAndSettle();
-    expect(find.text('Create Week'), findsOneWidget);
+    expect(find.text('Create week'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(weeks.getAllWeeks(), hasLength(2));

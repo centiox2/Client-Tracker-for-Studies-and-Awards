@@ -739,7 +739,7 @@ class ApplicationsQuickView extends ConsumerWidget {
                           height: 100 * coeCounts[i] / maxCoe + 2,
                           margin: const EdgeInsets.symmetric(horizontal: 8),
                           decoration: BoxDecoration(
-                            color: AirtableTags.statusColor('COE ISSUED/DONE'),
+                            color: context.clarity.accent,
                             borderRadius: const BorderRadius.vertical(
                               top: Radius.circular(3),
                             ),

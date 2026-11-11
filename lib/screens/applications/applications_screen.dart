@@ -627,22 +627,24 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: LayoutBuilder(
-                            builder: (context, box) => Align(
-                              alignment: Alignment.centerLeft,
+                            // A Clarity meter in the status tag's tone.
+                            builder: (context, box) => ClipRRect(
+                              borderRadius: BorderRadius.circular(3),
                               child: Container(
-                                height: 12,
-                                width: (box.maxWidth * counts[s]! / max).clamp(
-                                  3,
-                                  box.maxWidth,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: AirtableTags.statusColor(s),
-                                  borderRadius: BorderRadius.circular(3),
-                                  border: _status == s
-                                      ? Border.all(
-                                          color: theme.colorScheme.onSurface,
-                                        )
-                                      : null,
+                                height: 6,
+                                color: context.clarity.track,
+                                alignment: Alignment.centerLeft,
+                                child: Container(
+                                  width: (box.maxWidth * counts[s]! / max)
+                                      .clamp(3, box.maxWidth)
+                                      .toDouble(),
+                                  decoration: BoxDecoration(
+                                    color: clarityTagColors(
+                                      AirtableTags.statusColor(s),
+                                      theme.brightness,
+                                    ).$2,
+                                    borderRadius: BorderRadius.circular(3),
+                                  ),
                                 ),
                               ),
                             ),
@@ -1015,10 +1017,15 @@ class ApplicationRow extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Container(
+          // Card edges, so a group's rows read as one card (Clarity).
           decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
+            border: Border(
+              left: BorderSide(color: scheme.outline),
+              right: BorderSide(color: scheme.outline),
+              bottom: BorderSide(color: scheme.outlineVariant),
+            ),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 9),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
           child: phone
               ? Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
