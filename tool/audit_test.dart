@@ -131,6 +131,12 @@ final _shots = <_Shot>[
   ),
   const _Shot('week-menu', steps: [ValueKey('week-picker')]),
   const _Shot('account-menu', steps: [ValueKey('account-menu')]),
+  const _Shot('sidebar-closed', steps: [ValueKey('sidebar-collapse')]),
+  const _Shot(
+    'sidebar-closed-dark',
+    dark: true,
+    steps: [ValueKey('sidebar-collapse'), ValueKey('strip-week')],
+  ),
   const _Shot('tablet-overview', size: _tablet),
   const _Shot('tablet-tracker', size: _tablet, steps: ['Tracker']),
   const _Shot(

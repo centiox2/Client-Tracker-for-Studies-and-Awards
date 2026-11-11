@@ -852,3 +852,34 @@ class ShowZerosNotifier extends Notifier<bool> {
     );
   }
 }
+
+/// The desktop sidebar folded to a strip of icons. Kept on this device only
+/// (local sync_state table, never uploaded).
+final sidebarCollapsedProvider =
+    NotifierProvider<SidebarCollapsedNotifier, bool>(
+      SidebarCollapsedNotifier.new,
+    );
+
+class SidebarCollapsedNotifier extends Notifier<bool> {
+  static const _key = 'sidebar_collapsed';
+
+  @override
+  bool build() {
+    final rows = ref.read(databaseProvider).raw.select(
+      'SELECT v FROM sync_state WHERE k = ?;',
+      [_key],
+    );
+    return rows.isNotEmpty && rows.first['v'] == '1';
+  }
+
+  void toggle() => set(!state);
+
+  void set(bool collapsed) {
+    state = collapsed;
+    ref.read(databaseProvider).raw.execute(
+      'INSERT INTO sync_state (k, v) VALUES (?, ?) '
+      'ON CONFLICT(k) DO UPDATE SET v = excluded.v;',
+      [_key, collapsed ? '1' : '0'],
+    );
+  }
+}

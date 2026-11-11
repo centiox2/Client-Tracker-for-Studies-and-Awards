@@ -586,87 +586,160 @@ class _AppSidebar extends ConsumerWidget {
   /// Null hides the search box (signed out there's nothing to search).
   final VoidCallback? onSearch;
 
+  static const fullWidth = 248.0;
+  static const stripWidth = 72.0;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
+    final collapsed = ref.watch(sidebarCollapsedProvider);
     final c = context.clarity;
-
-    Widget navItem(_AppTabInfo item) {
-      final active = selected == item.tab;
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 2),
-        child: Material(
-          color: active ? c.accentSoft : Colors.transparent,
-          borderRadius: BorderRadius.circular(Dt.rSm),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(Dt.rSm),
-            hoverColor: c.neutralBg,
-            onTap: () => onSelect(item.tab),
-            child: Semantics(
-              selected: active,
-              button: true,
-              child: SizedBox(
-                height: 40,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Row(
-                    children: [
-                      Icon(
-                        item.icon,
-                        size: 18,
-                        color: active ? c.accent : c.textSecondary,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          item.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: active
-                                ? FontWeight.w600
-                                : FontWeight.w400,
-                            color: active ? c.accent : c.textSecondary,
-                          ),
-                        ),
-                      ),
-                      if (item.tab == AppTab.dailyReports && reportDue)
-                        Tooltip(
-                          message: 'Nothing recorded today yet',
-                          child: Container(
-                            key: const ValueKey('report-due-dot'),
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: c.seriesNew,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    final backupDue = ref.watch(backupDueProvider);
-    final lastBackup = ref.watch(lastBackupProvider);
-    return Container(
-      width: 248,
+    return AnimatedContainer(
+      key: const ValueKey('sidebar'),
+      duration: Motion.of(context, Motion.fast),
+      curve: Motion.curve,
+      width: collapsed ? stripWidth : fullWidth,
       decoration: BoxDecoration(
         color: c.surface,
         border: Border(right: BorderSide(color: c.border)),
       ),
+      clipBehavior: Clip.hardEdge,
+      // The layout follows the real width, so nothing is squeezed while the
+      // sidebar opens or closes.
+      child: LayoutBuilder(
+        builder: (context, box) =>
+            box.maxWidth < 200 ? _strip(context, ref) : _full(context, ref),
+      ),
+    );
+  }
+
+  Widget _navItem(
+    BuildContext context,
+    _AppTabInfo item, {
+    bool strip = false,
+  }) {
+    final theme = Theme.of(context);
+    final c = context.clarity;
+    final active = selected == item.tab;
+    final dot = item.tab == AppTab.dailyReports && reportDue
+        ? Tooltip(
+            message: 'Nothing recorded today yet',
+            child: Container(
+              key: const ValueKey('report-due-dot'),
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: c.seriesNew,
+                shape: BoxShape.circle,
+              ),
+            ),
+          )
+        : null;
+    final icon = Icon(
+      item.icon,
+      size: 18,
+      color: active ? c.accent : c.textSecondary,
+    );
+    final content = strip
+        ? Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              icon,
+              if (dot != null) Positioned(right: -8, top: -6, child: dot),
+            ],
+          )
+        : Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                icon,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    item.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+                      color: active ? c.accent : c.textSecondary,
+                    ),
+                  ),
+                ),
+                ?dot,
+              ],
+            ),
+          );
+    final tile = Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Material(
+        color: active ? c.accentSoft : Colors.transparent,
+        borderRadius: BorderRadius.circular(Dt.rSm),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          key: strip ? ValueKey('strip-${item.tab.name}') : null,
+          borderRadius: BorderRadius.circular(Dt.rSm),
+          hoverColor: c.neutralBg,
+          onTap: () => onSelect(item.tab),
+          child: Semantics(
+            selected: active,
+            button: true,
+            label: strip ? item.label : null,
+            child: SizedBox(height: 40, child: content),
+          ),
+        ),
+      ),
+    );
+    // In the strip the name shows on hover.
+    return strip
+        ? Tooltip(
+            message: item.label,
+            preferBelow: false,
+            verticalOffset: 0,
+            margin: const EdgeInsets.only(left: 64),
+            child: tile,
+          )
+        : tile;
+  }
+
+  /// The menu in the middle, scrolling only if the window is very short.
+  Widget _menu(BuildContext context, {required bool strip}) => Expanded(
+    child: ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final item in tabs)
+              if (item.tab != AppTab.settings)
+                _navItem(context, item, strip: strip),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  Widget _full(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final c = context.clarity;
+    final backupDue = ref.watch(backupDueProvider);
+    final lastBackup = ref.watch(lastBackupProvider);
+    return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const _Brand(),
+          Row(
+            children: [
+              const Expanded(child: _Brand()),
+              IconButton(
+                key: const ValueKey('sidebar-collapse'),
+                tooltip: 'Close sidebar',
+                onPressed: () =>
+                    ref.read(sidebarCollapsedProvider.notifier).set(true),
+                icon: const Icon(Icons.keyboard_double_arrow_left, size: 18),
+              ),
+            ],
+          ),
           const SizedBox(height: 20),
           if (onSearch != null) ...[
             _SearchBox(onTap: onSearch!),
@@ -679,23 +752,7 @@ class _AppSidebar extends ConsumerWidget {
               style: microLabel(theme),
             ),
           ),
-          Expanded(
-            child: ScrollConfiguration(
-              // No scrollbar over the menu; it scrolls only if the window
-              // is very short.
-              behavior: ScrollConfiguration.of(context)
-                  .copyWith(scrollbars: false),
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (final item in tabs)
-                      if (item.tab != AppTab.settings) navItem(item),
-                  ],
-                ),
-              ),
-            ),
-          ),
+          _menu(context, strip: false),
           const SizedBox(height: 12),
           if (backupDue) ...[
             NoticeBox(
@@ -714,12 +771,74 @@ class _AppSidebar extends ConsumerWidget {
           ],
           // Settings at the foot of the menu, above who's signed in.
           for (final item in tabs)
-            if (item.tab == AppTab.settings) navItem(item),
+            if (item.tab == AppTab.settings) _navItem(context, item),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10),
             child: Divider(height: 1, color: c.border),
           ),
           const _UserRow(),
+        ],
+      ),
+    );
+  }
+
+  /// The closed sidebar: a strip of icons (names on hover).
+  Widget _strip(BuildContext context, WidgetRef ref) {
+    final c = context.clarity;
+    final backupDue = ref.watch(backupDueProvider);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 20, 12, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Center(child: _BrandMark(size: 36)),
+          const SizedBox(height: 12),
+          Center(
+            child: IconButton(
+              key: const ValueKey('sidebar-expand'),
+              tooltip: 'Open sidebar',
+              onPressed: () =>
+                  ref.read(sidebarCollapsedProvider.notifier).set(false),
+              icon: const Icon(Icons.keyboard_double_arrow_right, size: 18),
+            ),
+          ),
+          if (onSearch != null)
+            Center(
+              child: IconButton(
+                key: const ValueKey('strip-search'),
+                tooltip: 'Search (Ctrl K)',
+                onPressed: onSearch,
+                icon: const Icon(Icons.search, size: 18),
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Divider(height: 1, color: c.border),
+          ),
+          _menu(context, strip: true),
+          if (backupDue)
+            Center(
+              child: IconButton(
+                key: const ValueKey('strip-backup'),
+                tooltip: 'No recent backup — back up now',
+                onPressed: () => backupToFile(context, ref),
+                style: IconButton.styleFrom(
+                  backgroundColor: c.noticeBg,
+                  foregroundColor: c.noticeFg,
+                  side: BorderSide(color: c.noticeBorder),
+                ),
+                icon: const Icon(Icons.backup_outlined, size: 18),
+              ),
+            ),
+          const SizedBox(height: 8),
+          for (final item in tabs)
+            if (item.tab == AppTab.settings)
+              _navItem(context, item, strip: true),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Divider(height: 1, color: c.border),
+          ),
+          const _UserRow(strip: true),
         ],
       ),
     );
@@ -835,7 +954,10 @@ class _SearchBox extends StatelessWidget {
 /// Who's signed in (tap for the account menu), the light/dark switch and
 /// sign out.
 class _UserRow extends ConsumerWidget {
-  const _UserRow();
+  const _UserRow({this.strip = false});
+
+  /// The closed sidebar: avatar, light/dark and sign out, one under another.
+  final bool strip;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -847,53 +969,52 @@ class _UserRow extends ConsumerWidget {
     final name = user?.fullName ?? role?.label ?? '';
     final initials = initialsOf(name);
     final dark = theme.brightness == Brightness.dark;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: MenuAnchor(
-              alignmentOffset: const Offset(0, -4),
-              menuChildren: [
-                if (user != null)
-                  MenuItemButton(
-                    leadingIcon: const Icon(Icons.key_outlined, size: 16),
-                    onPressed: () => showChangeOwnPassword(context),
-                    child: const Text('Change password'),
-                  ),
-                if (canEdit)
-                  MenuItemButton(
-                    leadingIcon: const Icon(Icons.keyboard_outlined, size: 16),
-                    onPressed: () => showShortcutsDialog(context),
-                    child: const Text('Keyboard shortcuts'),
-                  ),
-                MenuItemButton(
-                  leadingIcon: const Icon(Icons.refresh, size: 16),
-                  onPressed: () =>
-                      ref.read(dataVersionProvider.notifier).bump(),
-                  child: const Text('Refresh data'),
-                ),
-              ],
-              builder: (context, controller, _) => InkWell(
-                key: const ValueKey('account-menu'),
-                borderRadius: BorderRadius.circular(Dt.rSm),
-                onTap: () =>
-                    controller.isOpen ? controller.close() : controller.open(),
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Row(
+    final avatar = CircleAvatar(
+      radius: 16,
+      backgroundColor: c.border,
+      child: Text(
+        initials,
+        style: theme.textTheme.labelSmall?.copyWith(
+          fontWeight: FontWeight.w600,
+          color: c.text,
+        ),
+      ),
+    );
+    final account = MenuAnchor(
+      alignmentOffset: const Offset(0, -4),
+      menuChildren: [
+        if (user != null)
+          MenuItemButton(
+            leadingIcon: const Icon(Icons.key_outlined, size: 16),
+            onPressed: () => showChangeOwnPassword(context),
+            child: const Text('Change password'),
+          ),
+        if (canEdit)
+          MenuItemButton(
+            leadingIcon: const Icon(Icons.keyboard_outlined, size: 16),
+            onPressed: () => showShortcutsDialog(context),
+            child: const Text('Keyboard shortcuts'),
+          ),
+        MenuItemButton(
+          leadingIcon: const Icon(Icons.refresh, size: 16),
+          onPressed: () => ref.read(dataVersionProvider.notifier).bump(),
+          child: const Text('Refresh data'),
+        ),
+      ],
+      builder: (context, controller, _) => Tooltip(
+        message: strip ? name : '',
+        child: InkWell(
+          key: const ValueKey('account-menu'),
+          borderRadius: BorderRadius.circular(Dt.rSm),
+          onTap: () =>
+              controller.isOpen ? controller.close() : controller.open(),
+          child: Padding(
+            padding: const EdgeInsets.all(4),
+            child: strip
+                ? avatar
+                : Row(
                     children: [
-                      CircleAvatar(
-                        radius: 16,
-                        backgroundColor: c.border,
-                        child: Text(
-                          initials,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: c.text,
-                          ),
-                        ),
-                      ),
+                      avatar,
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(
@@ -924,35 +1045,47 @@ class _UserRow extends ConsumerWidget {
                       ),
                     ],
                   ),
-                ),
-              ),
-            ),
           ),
-          IconButton(
-            key: const ValueKey('theme-toggle'),
-            tooltip: dark ? 'Switch to light' : 'Switch to dark',
-            onPressed: () => ref
-                .read(themeModeProvider.notifier)
-                .toggle(MediaQuery.platformBrightnessOf(context)),
-            icon: Icon(
-              dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
-              size: 18,
-            ),
-          ),
-          if (user != null)
-            IconButton(
-              key: const ValueKey('sign-out'),
-              tooltip: 'Sign out',
-              onPressed: () => ref.read(sessionProvider.notifier).signOut(),
-              icon: const Icon(Icons.logout, size: 18),
-            )
-          else
-            IconButton(
-              key: const ValueKey('switch-profile'),
-              tooltip: 'Switch profile',
-              onPressed: () => ref.read(sessionProvider.notifier).signOut(),
-              icon: const Icon(Icons.switch_account_outlined, size: 18),
-            ),
+        ),
+      ),
+    );
+    final themeButton = IconButton(
+      key: const ValueKey('theme-toggle'),
+      tooltip: dark ? 'Switch to light' : 'Switch to dark',
+      onPressed: () => ref
+          .read(themeModeProvider.notifier)
+          .toggle(MediaQuery.platformBrightnessOf(context)),
+      icon: Icon(
+        dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+        size: 18,
+      ),
+    );
+    final signOut = user != null
+        ? IconButton(
+            key: const ValueKey('sign-out'),
+            tooltip: 'Sign out',
+            onPressed: () => ref.read(sessionProvider.notifier).signOut(),
+            icon: const Icon(Icons.logout, size: 18),
+          )
+        : IconButton(
+            key: const ValueKey('switch-profile'),
+            tooltip: 'Switch profile',
+            onPressed: () => ref.read(sessionProvider.notifier).signOut(),
+            icon: const Icon(Icons.switch_account_outlined, size: 18),
+          );
+    if (strip) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [account, const SizedBox(height: 4), themeButton, signOut],
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        children: [
+          Expanded(child: account),
+          themeButton,
+          signOut,
         ],
       ),
     );

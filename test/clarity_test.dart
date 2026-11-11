@@ -144,4 +144,31 @@ void main() {
     expect(find.textContaining(' total'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('the sidebar closes to a strip of icons and opens again', (
+    tester,
+  ) async {
+    await pumpApp(tester);
+    double width() =>
+        tester.getSize(find.byKey(const ValueKey('sidebar'))).width;
+    expect(width(), 248);
+    await tester.tap(find.byKey(const ValueKey('sidebar-collapse')));
+    await tester.pumpAndSettle();
+    expect(width(), 72);
+    // Names are gone; icons still open their pages.
+    expect(find.text('WORKSPACE'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('strip-staff')));
+    await tester.pumpAndSettle();
+    expect(find.text('Add staff member'), findsOneWidget);
+    // Remembered on this device.
+    final saved = db.raw.select(
+      "SELECT v FROM sync_state WHERE k = 'sidebar_collapsed';",
+    );
+    expect(saved.first['v'], '1');
+    await tester.tap(find.byKey(const ValueKey('sidebar-expand')));
+    await tester.pumpAndSettle();
+    expect(width(), 248);
+    expect(find.text('WORKSPACE'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }
