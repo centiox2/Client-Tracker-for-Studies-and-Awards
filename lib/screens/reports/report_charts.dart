@@ -292,7 +292,7 @@ class _StaffDayMatrixState extends State<_StaffDayMatrix> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 6),
           child: Wrap(
             spacing: 12,
             runSpacing: 6,
@@ -353,7 +353,7 @@ class _StaffDayMatrixState extends State<_StaffDayMatrix> {
   }) {
     return Container(
       height: height,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 20),
       decoration: BoxDecoration(
         border: Border(
           bottom: border ?? BorderSide.none,

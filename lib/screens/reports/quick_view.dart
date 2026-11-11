@@ -261,7 +261,7 @@ class _QuickView extends ConsumerWidget {
             icon: Icons.school_outlined,
             trailing: DateFormat('d MMM, h:mm a').format(latestImport.at),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -527,7 +527,7 @@ class _NameGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
       decoration: BoxDecoration(
         border: Border(
           top: BorderSide(
@@ -601,7 +601,7 @@ class _WeekFacts extends StatelessWidget {
     );
     if (busiest == null) return const SizedBox(height: 4);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
       child: Wrap(
         spacing: 16,
         runSpacing: 4,
@@ -653,7 +653,7 @@ class _Activity extends StatelessWidget {
       children: [
         for (var i = 0; i < entries.length; i++)
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
             decoration: BoxDecoration(
               border: i == entries.length - 1
                   ? null

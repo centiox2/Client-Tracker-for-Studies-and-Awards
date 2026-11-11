@@ -160,7 +160,7 @@ class _Notice extends StatelessWidget {
     final scheme = theme.colorScheme;
     return Container(
       key: const ValueKey('signin-notice'),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHigh,
         border: Border.all(color: scheme.outline),

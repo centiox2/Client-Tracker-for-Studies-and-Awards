@@ -79,7 +79,7 @@ void main() {
     await pumpApp(tester);
 
     // New and Total both went 2 → 5; Existing stayed at 0.
-    expect(find.text('3 (150%) vs last week'), findsNWidgets(2));
+    expect(find.text('↑ 3 (150%) vs last week'), findsNWidgets(2));
     expect(find.text('Same as last week'), findsOneWidget);
   });
 
@@ -189,7 +189,7 @@ void main() {
     saveMonday(week.id, newClients: 12);
     await pumpApp(tester);
 
-    expect(find.textContaining('/ day avg'), findsNWidgets(2));
+    expect(find.textContaining(' / day'), findsNWidgets(2));
   });
 
   testWidgets('week picker switches the dashboard week', (tester) async {
@@ -199,18 +199,19 @@ void main() {
     weeks.createWeekFor(now.add(const Duration(days: 7)));
     await pumpApp(tester);
 
-    await tester.tap(find.byTooltip('Switch week'));
+    await tester.tap(find.byKey(const ValueKey('week-picker')));
     await tester.pumpAndSettle();
-    await tester.tap(
-      find.text(weekRangeLabel(older.startDate, older.endDate)).last,
-    );
+    final label = shortRangeLabel(older.startDate, older.endDate);
+    await tester.tap(find.text(label).last);
     await tester.pumpAndSettle();
 
-    final s = older.startDate;
     expect(
-      find.textContaining('${s.day}/${s.month}/${s.year}'),
+      find.descendant(
+        of: find.byKey(const ValueKey('week-picker')),
+        matching: find.text(label),
+      ),
       findsOneWidget,
-      reason: 'the context bar shows the picked week',
+      reason: 'the week button shows the picked week',
     );
   });
 
@@ -218,7 +219,7 @@ void main() {
     tester,
   ) async {
     await pumpApp(tester);
-    await tester.tap(find.text('Quick search…'));
+    await tester.tap(find.byKey(const ValueKey('sidebar-search')));
     await tester.pumpAndSettle();
     expect(find.textContaining('Search pages, weeks'), findsOneWidget);
   });

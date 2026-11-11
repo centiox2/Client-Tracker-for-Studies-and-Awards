@@ -1,34 +1,30 @@
 import 'package:flutter/material.dart';
 
-/// Design system for S&A Hub.
+/// Design system for S&A Hub: "Clarity".
 ///
-/// Dark operational dashboard theme with compact navigation, slate panels,
-/// restrained borders, and clear new/existing client colors.
+/// Calm, light-first and data-focused: white cards on a soft grey page, one
+/// navy accent (periwinkle in dark mode), an orange/blue pair for data and
+/// plain status colours. The rules every screen follows:
 ///
-/// The rules this file encodes — every screen must obey them:
-///
-///  1. **Quiet surfaces.** Structure comes from 1px outline rules and spacing,
-///     not shadows. Cards and panels stay close to the page surface.
-///  2. **One typeface.** Instrument Sans carries everything; numbers use
-///     tabular figures ([Dt.tab]) so columns line up. Uppercase micro-labels
-///     use [microLabel].
-///  3. **A restrained color system.** Peach marks new-client data, periwinkle
-///     marks existing-client data, and green is reserved for positive status.
-///     Other content stays neutral; the company's navy (light theme) or
-///     gold (dark theme) is reserved for primary actions and selection.
-///  4. **Compact controls.** Fields and standard action buttons use a 6px
-///     radius, panels use the shared 8px radius, and pill shapes are reserved
-///     for chips and toggles.
-///  5. **Numbers are data.** Large figures use tabular serif numerals; dense
-///     date and count strings use tabular monospace helpers.
+///  1. **Numbers first.** The key figure on a card is the biggest thing on
+///     it; labels are small and grey. Numbers use tabular figures ([Dt.tab]).
+///  2. **One accent.** [Clarity.accent] is the only brand colour: the
+///     primary button, the active menu item, links and simple meters.
+///  3. **Data colours mean data.** Orange is always new clients, blue is
+///     always existing clients — never decoration.
+///  4. **Status is spelled out.** A coloured status always has a word too
+///     ([StatusPill]).
+///  5. **Empty is not zero.** A day not yet entered shows "—".
+///  6. **Quiet chrome.** 1px borders, no shadows, no gradients.
 abstract final class Dt {
-  // ---- Radius system ----------------------------------------------------
-  static const double rSm = 6; // fields, inputs
-  static const double rMd = 8; // tiles, panels, menus
-  static const double rLg = 12; // cards, dialogs
-  static const double rPill = 999; // chips and segmented controls
+  // ---- Radius -------------------------------------------------------------
+  static const double rSm = 8; // buttons, inputs, menu items
+  static const double rMd = 12; // cards
+  static const double rLg = 12; // dialogs
+  static const double rTag = 4; // small tags, keyboard hints
+  static const double rPill = 999; // pills and chips
 
-  // ---- 4px spacing grid -------------------------------------------------
+  // ---- Spacing (4px grid) -------------------------------------------------
   static const double s4 = 4;
   static const double s8 = 8;
   static const double s12 = 12;
@@ -36,78 +32,74 @@ abstract final class Dt {
   static const double s20 = 20;
   static const double s24 = 24;
   static const double s32 = 32;
-  static const double s44 = 44; // editorial gutter between columns
+  static const double s40 = 40;
+  static const double s44 = 44;
 
-  /// Max width for centered reading content (dashboard, settings).
+  /// Gap between cards.
+  static const double gap = 16;
+
+  /// Max width for centered reading content.
   static const double contentMaxWidth = 1240;
 
   /// The company behind the app, shown beside the logo.
   static const String companyName = 'Studies and Awards Limited';
 
+  /// The short form in the sidebar.
+  static const String companyShort = 'Studies and Awards Ltd';
+
   /// The app's name, everywhere people see it.
   static const String appName = 'S&A Hub';
 
-  /// The "sa" logo on its own light square — readable on light and dark
-  /// backgrounds alike (the navy letters alone vanish on the dark theme).
+  /// The "sa" logo on its own light square.
   static const String logoAsset = 'assets/branding/logo-square.png';
 
-  // ---- Brand ---------------------------------------------------------------
+  /// The typeface (bundled).
+  static const String font = 'Inter';
 
-  /// Studies and Awards Limited navy and gold, from the logo.
+  // ---- Brand ----------------------------------------------------------------
+
+  /// Studies and Awards Limited navy and gold, from the logo (for the logo
+  /// and exported documents; screens use [Clarity.accent]).
   static const Color brandNavy = Color(0xFF001A45);
   static const Color brandGold = Color(0xFFFBBA00);
 
-  /// The brand colour for primary actions and selection: navy on the light
-  /// theme, gold on the dark one (navy would vanish against near-black).
-  static Color brand(Brightness b) =>
-      b == Brightness.light ? brandNavy : brandGold;
+  /// The accent: navy on light, periwinkle on dark.
+  static Color brand(Brightness b) => Clarity.forBrightness(b).accent;
 
-  /// Text and icons drawn on [brand].
-  static Color onBrand(Brightness b) =>
-      b == Brightness.light ? Colors.white : brandNavy;
+  /// Text and icons on [brand].
+  static Color onBrand(Brightness b) => Clarity.forBrightness(b).onAccent;
 
-  // ---- Semantic data colors ---------------------------------------------
+  // ---- Data colours ---------------------------------------------------------
 
-  /// "New clients" — the warm peach of the duotone pair.
-  static Color newGreen(Brightness b) => b == Brightness.light
-      ? const Color(0xFFB65C33) // deepened for contrast on paper
-      : const Color(0xFFF29A70);
+  /// New clients (orange).
+  static Color newGreen(Brightness b) => Clarity.forBrightness(b).seriesNew;
+  static Color newGreenBright(Brightness b) => newGreen(b);
 
-  /// A lighter tint of the peach used on filled chips/values in dark mode.
-  static Color newGreenBright(Brightness b) =>
-      b == Brightness.light ? const Color(0xFFB65C33) : const Color(0xFFFFB28E);
+  /// Existing clients (blue).
+  static Color existingBlue(Brightness b) =>
+      Clarity.forBrightness(b).seriesExisting;
+  static Color existingBlueBright(Brightness b) => existingBlue(b);
 
-  /// "Existing clients" — the periwinkle of the duotone pair.
-  static Color existingBlue(Brightness b) => b == Brightness.light
-      ? const Color(0xFF4C6EA8) // deepened for contrast on paper
-      : const Color(0xFFAEC4EC);
+  /// Positive status text ("Entered", "Active").
+  static Color statusGreen(Brightness b) => Clarity.forBrightness(b).positiveFg;
 
-  /// A lighter tint of the periwinkle for filled values in dark mode.
-  static Color existingBlueBright(Brightness b) =>
-      b == Brightness.light ? const Color(0xFF4C6EA8) : const Color(0xFFC3D5F3);
-
-  /// Positive/active status green (staff "Active" dot).
-  static Color statusGreen(Brightness b) =>
-      b == Brightness.light ? const Color(0xFF2F7D4F) : const Color(0xFF8FD19E);
-
-  // ---- Typography helpers -----------------------------------------------
+  // ---- Typography helpers ---------------------------------------------------
 
   static const List<String> _monoFallback = [
-    'Consolas', // Windows
-    'Cascadia Mono', // Windows 11
-    'Menlo', // macOS
-    'DejaVu Sans Mono', // Linux
+    'Consolas',
+    'Cascadia Mono',
+    'Menlo',
+    'DejaVu Sans Mono',
     'monospace',
   ];
 
-  /// Segmented buttons on a phone: tighter, so several segments fit side by
-  /// side without wrapping.
+  /// Segmented buttons on a phone: tighter, so several segments fit.
   static const ButtonStyle phoneSegments = ButtonStyle(
     visualDensity: VisualDensity.compact,
     padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 4)),
   );
 
-  /// Data text: monospace family + tabular figures so columns align.
+  /// Monospace with tabular figures (codes, references).
   static TextStyle mono(
     BuildContext context, {
     double? size,
@@ -129,24 +121,214 @@ abstract final class Dt {
     );
   }
 
-  /// Tabular figures on any base style — columnar alignment without mono.
+  /// Tabular figures on any style, so columns of numbers line up.
   static TextStyle tab(TextStyle base) =>
       base.copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
 
-  /// Muted text (third contrast level).
-  static Color textMuted(ThemeData theme) =>
-      theme.brightness == Brightness.light
-      ? const Color(0xFF626A73)
-      : const Color(0xFF9AA0A8);
+  /// Labels, captions, dates, empty cells.
+  static Color textMuted(ThemeData theme) => Clarity.of(theme).textMuted;
 
-  /// Faint text (fourth contrast level).
+  /// The faintest text (placeholders, disabled).
   static Color textFaint(ThemeData theme) =>
-      theme.brightness == Brightness.light
-      ? const Color(0xFF858D96)
-      : const Color(0xFF6E747C);
+      Clarity.of(theme).textMuted.withValues(alpha: 0.75);
 }
 
-/// The standard 6px meaning-dot used before uppercase micro-labels.
+/// The Clarity colour tokens, light and dark (see the design kit's
+/// tokens.css). Read with `Clarity.of(Theme.of(context))` or
+/// `context.clarity`.
+@immutable
+class Clarity extends ThemeExtension<Clarity> {
+  const Clarity({
+    required this.bg,
+    required this.surface,
+    required this.surfaceRaised,
+    required this.border,
+    required this.borderSubtle,
+    required this.borderStrong,
+    required this.text,
+    required this.textSecondary,
+    required this.textMuted,
+    required this.accent,
+    required this.accentHover,
+    required this.accentSoft,
+    required this.onAccent,
+    required this.seriesNew,
+    required this.seriesExisting,
+    required this.seriesThird,
+    required this.seriesFourth,
+    required this.track,
+    required this.gridline,
+    required this.positiveBg,
+    required this.positiveFg,
+    required this.warningBg,
+    required this.warningFg,
+    required this.noticeBg,
+    required this.noticeBorder,
+    required this.noticeFg,
+    required this.noticeBtnBorder,
+    required this.neutralBg,
+    required this.neutralFg,
+    required this.negativeFg,
+    required this.focus,
+  });
+
+  final Color bg;
+  final Color surface;
+  final Color surfaceRaised;
+  final Color border;
+  final Color borderSubtle;
+  final Color borderStrong;
+  final Color text;
+  final Color textSecondary;
+  final Color textMuted;
+  final Color accent;
+  final Color accentHover;
+  final Color accentSoft;
+  final Color onAccent;
+  final Color seriesNew;
+  final Color seriesExisting;
+  final Color seriesThird;
+  final Color seriesFourth;
+  final Color track;
+  final Color gridline;
+  final Color positiveBg;
+  final Color positiveFg;
+  final Color warningBg;
+  final Color warningFg;
+  final Color noticeBg;
+  final Color noticeBorder;
+  final Color noticeFg;
+  final Color noticeBtnBorder;
+  final Color neutralBg;
+  final Color neutralFg;
+  final Color negativeFg;
+
+  /// The focus ring.
+  final Color focus;
+
+  static const light = Clarity(
+    bg: Color(0xFFF5F6F8),
+    surface: Color(0xFFFFFFFF),
+    surfaceRaised: Color(0xFFFFFFFF),
+    border: Color(0xFFE4E7EC),
+    borderSubtle: Color(0xFFEEF0F3),
+    borderStrong: Color(0xFFD0D5DD),
+    text: Color(0xFF0F172A),
+    textSecondary: Color(0xFF344054),
+    textMuted: Color(0xFF5B6474),
+    accent: Color(0xFF1D3A8A),
+    accentHover: Color(0xFF142A66),
+    accentSoft: Color(0xFFEEF2FB),
+    onAccent: Color(0xFFFFFFFF),
+    seriesNew: Color(0xFFE8833A),
+    seriesExisting: Color(0xFF3B5BDB),
+    seriesThird: Color(0xFF0F9F8F),
+    seriesFourth: Color(0xFF8B5CF6),
+    track: Color(0xFFEEF0F3),
+    gridline: Color(0xFFF0F2F5),
+    positiveBg: Color(0xFFECFDF3),
+    positiveFg: Color(0xFF166534),
+    warningBg: Color(0xFFFFF4E5),
+    warningFg: Color(0xFF8A4B08),
+    noticeBg: Color(0xFFFFF8EC),
+    noticeBorder: Color(0xFFF3D9B1),
+    noticeFg: Color(0xFF7A4A06),
+    noticeBtnBorder: Color(0xFFE4C48E),
+    neutralBg: Color(0xFFF2F4F7),
+    neutralFg: Color(0xFF475467),
+    negativeFg: Color(0xFFB42318),
+    focus: Color(0x401D3A8A),
+  );
+
+  static const dark = Clarity(
+    bg: Color(0xFF0E1116),
+    surface: Color(0xFF161B22),
+    surfaceRaised: Color(0xFF1C2230),
+    border: Color(0xFF2A3140),
+    borderSubtle: Color(0xFF222936),
+    borderStrong: Color(0xFF3A4354),
+    text: Color(0xFFE6EAF0),
+    textSecondary: Color(0xFFC3CAD5),
+    textMuted: Color(0xFF9AA4B2),
+    accent: Color(0xFF8EA8FF),
+    accentHover: Color(0xFFB3C4FF),
+    accentSoft: Color(0x248EA8FF),
+    onAccent: Color(0xFF0E1116),
+    seriesNew: Color(0xFFF0A060),
+    seriesExisting: Color(0xFF6F8BFF),
+    seriesThird: Color(0xFF3CC8B4),
+    seriesFourth: Color(0xFFA78BFA),
+    track: Color(0xFF232A37),
+    gridline: Color(0xFF1E2430),
+    positiveBg: Color(0xFF12301F),
+    positiveFg: Color(0xFF7EE2A8),
+    warningBg: Color(0xFF3A2A10),
+    warningFg: Color(0xFFF5C77A),
+    noticeBg: Color(0xFF2A2112),
+    noticeBorder: Color(0xFF4A3A1C),
+    noticeFg: Color(0xFFF5C77A),
+    noticeBtnBorder: Color(0xFF5C4824),
+    neutralBg: Color(0xFF222A36),
+    neutralFg: Color(0xFFB8C1CE),
+    negativeFg: Color(0xFFFF8A80),
+    focus: Color(0x598EA8FF),
+  );
+
+  static Clarity forBrightness(Brightness b) =>
+      b == Brightness.light ? light : dark;
+
+  static Clarity of(ThemeData theme) =>
+      theme.extension<Clarity>() ?? forBrightness(theme.brightness);
+
+  @override
+  Clarity copyWith() => this;
+
+  @override
+  Clarity lerp(ThemeExtension<Clarity>? other, double t) {
+    if (other is! Clarity) return this;
+    Color c(Color a, Color b) => Color.lerp(a, b, t)!;
+    return Clarity(
+      bg: c(bg, other.bg),
+      surface: c(surface, other.surface),
+      surfaceRaised: c(surfaceRaised, other.surfaceRaised),
+      border: c(border, other.border),
+      borderSubtle: c(borderSubtle, other.borderSubtle),
+      borderStrong: c(borderStrong, other.borderStrong),
+      text: c(text, other.text),
+      textSecondary: c(textSecondary, other.textSecondary),
+      textMuted: c(textMuted, other.textMuted),
+      accent: c(accent, other.accent),
+      accentHover: c(accentHover, other.accentHover),
+      accentSoft: c(accentSoft, other.accentSoft),
+      onAccent: c(onAccent, other.onAccent),
+      seriesNew: c(seriesNew, other.seriesNew),
+      seriesExisting: c(seriesExisting, other.seriesExisting),
+      seriesThird: c(seriesThird, other.seriesThird),
+      seriesFourth: c(seriesFourth, other.seriesFourth),
+      track: c(track, other.track),
+      gridline: c(gridline, other.gridline),
+      positiveBg: c(positiveBg, other.positiveBg),
+      positiveFg: c(positiveFg, other.positiveFg),
+      warningBg: c(warningBg, other.warningBg),
+      warningFg: c(warningFg, other.warningFg),
+      noticeBg: c(noticeBg, other.noticeBg),
+      noticeBorder: c(noticeBorder, other.noticeBorder),
+      noticeFg: c(noticeFg, other.noticeFg),
+      noticeBtnBorder: c(noticeBtnBorder, other.noticeBtnBorder),
+      neutralBg: c(neutralBg, other.neutralBg),
+      neutralFg: c(neutralFg, other.neutralFg),
+      negativeFg: c(negativeFg, other.negativeFg),
+      focus: c(focus, other.focus),
+    );
+  }
+}
+
+extension ClarityContext on BuildContext {
+  /// The Clarity tokens for the current theme.
+  Clarity get clarity => Clarity.of(Theme.of(this));
+}
+
+/// A small coloured dot before a label.
 class MeaningDot extends StatelessWidget {
   const MeaningDot(this.color, {super.key, this.size = 6});
 
@@ -163,431 +345,549 @@ class MeaningDot extends StatelessWidget {
   }
 }
 
-/// Uppercase micro-label style ("cap" in the mockups): compact, medium weight,
-/// lightly tracked, and muted.
+/// Section label: 11px, 600, UPPERCASE in use, lightly tracked, muted.
 TextStyle microLabel(ThemeData theme, {Color? color}) => TextStyle(
-  fontFamily: 'Instrument Sans',
+  fontFamily: Dt.font,
   fontSize: 11,
   fontWeight: FontWeight.w600,
-  letterSpacing: 0.2,
+  letterSpacing: 0.66,
   color: color ?? Dt.textMuted(theme),
 );
 
-/// Neutral application surfaces shared by both themes.
-class _Palette {
-  const _Palette({
-    required this.bg,
-    required this.panel,
-    required this.panelStrong,
-    required this.field,
-    required this.fg,
-    required this.secondary,
-    required this.border,
-    required this.borderStrong,
-    required this.error,
-  });
-
-  final Color bg;
-  final Color panel;
-  final Color panelStrong;
-  final Color field;
-  final Color fg;
-  final Color secondary;
-  final Color border;
-  final Color borderStrong;
-  final Color error;
-
-  static _Palette dark() => const _Palette(
-    bg: Color(0xFF090A0C),
-    panel: Color(0xFF111315),
-    panelStrong: Color(0xFF1A1D20),
-    field: Color(0xFF0C0E10),
-    fg: Color(0xFFE7E9EC),
-    secondary: Color(0xFF9AA0A8),
-    border: Color(0xFF25282C),
-    borderStrong: Color(0xFF34383D),
-    error: Color(0xFFFF7777),
-  );
-
-  static _Palette light() => const _Palette(
-    bg: Color(0xFFF4F5F7),
-    panel: Color(0xFFFFFFFF),
-    panelStrong: Color(0xFFEAEDF0),
-    field: Color(0xFFFFFFFF),
-    fg: Color(0xFF202328),
-    secondary: Color(0xFF626A73),
-    border: Color(0xFFE0E3E7),
-    borderStrong: Color(0xFFC8CDD3),
-    error: Color(0xFFB3361F),
-  );
-}
-
-/// Builds the app theme for [brightness].
-///
-/// Same structure in both modes — "same structure, different values" — the
-/// dark theme is the primary design (matches the mockups), light is its
-/// warm-paper inversion.
+/// Builds the Clarity theme for [brightness].
 ThemeData buildAppTheme(Brightness brightness) {
   final light = brightness == Brightness.light;
-  final p = light ? _Palette.light() : _Palette.dark();
+  final c = Clarity.forBrightness(brightness);
 
-  final brand = Dt.brand(brightness);
-  final onBrand = Dt.onBrand(brightness);
   final scheme = ColorScheme(
     brightness: brightness,
-    primary: brand,
-    onPrimary: onBrand,
-    primaryContainer: p.panelStrong,
-    onPrimaryContainer: p.fg,
-    secondary: p.secondary,
-    onSecondary: p.bg,
-    secondaryContainer: p.panel,
-    onSecondaryContainer: p.fg,
-    tertiary: Dt.newGreen(brightness),
-    onTertiary: p.bg,
-    tertiaryContainer: p.panelStrong,
-    onTertiaryContainer: p.fg,
-    error: p.error,
+    primary: c.accent,
+    onPrimary: c.onAccent,
+    primaryContainer: c.accentSoft,
+    onPrimaryContainer: c.accent,
+    secondary: c.textSecondary,
+    onSecondary: c.surface,
+    secondaryContainer: c.neutralBg,
+    onSecondaryContainer: c.text,
+    tertiary: c.seriesNew,
+    onTertiary: c.surface,
+    tertiaryContainer: c.neutralBg,
+    onTertiaryContainer: c.text,
+    error: c.negativeFg,
     onError: light ? const Color(0xFFFFFFFF) : const Color(0xFF2A0A05),
-    errorContainer: light ? const Color(0xFFF6DED8) : const Color(0xFF2A1714),
-    onErrorContainer: light ? const Color(0xFF7F2A18) : const Color(0xFFFFB4A8),
-    surface: p.bg,
-    onSurface: p.fg,
-    onSurfaceVariant: p.secondary,
-    outline: p.borderStrong,
-    outlineVariant: p.border,
+    errorContainer: light ? const Color(0xFFFEF3F2) : const Color(0xFF3A1714),
+    onErrorContainer: c.negativeFg,
+    // The page; cards sit on surfaceContainerLow.
+    surface: c.bg,
+    onSurface: c.text,
+    onSurfaceVariant: c.textMuted,
+    outline: c.border,
+    outlineVariant: c.borderSubtle,
     shadow: const Color(0xFF000000),
     scrim: const Color(0xFF000000),
-    inverseSurface: p.fg,
-    onInverseSurface: p.bg,
-    inversePrimary: brand,
+    inverseSurface: c.text,
+    onInverseSurface: c.surface,
+    inversePrimary: c.accent,
     surfaceTint: Colors.transparent,
-    surfaceContainerLowest: p.bg,
-    surfaceContainerLow: p.panel,
-    surfaceContainer: p.panel,
-    surfaceContainerHigh: p.panelStrong,
-    surfaceContainerHighest: p.panelStrong,
+    surfaceContainerLowest: c.bg,
+    surfaceContainerLow: c.surface,
+    surfaceContainer: c.surface,
+    surfaceContainerHigh: c.neutralBg,
+    surfaceContainerHighest: c.neutralBg,
   );
 
-  final baseText = (light ? ThemeData.light() : ThemeData.dark()).textTheme;
-  final textTheme = baseText
+  // The sizes below build on the styles that already carry Inter and the
+  // text colours (built on the plain Material ones they'd lose both).
+  final baseText = (light ? ThemeData.light() : ThemeData.dark()).textTheme
       .apply(
-        bodyColor: p.fg,
-        displayColor: p.fg,
-        fontFamily: 'Instrument Sans',
+        bodyColor: c.text,
+        displayColor: c.text,
+        fontFamily: Dt.font,
         fontFamilyFallback: const [
           'Segoe UI',
+          'Roboto',
           'Helvetica Neue',
           'Arial',
           'sans-serif',
         ],
-      )
-      .copyWith(
-        displayLarge: baseText.displayLarge?.copyWith(
-          fontSize: 60,
-          height: 1.05,
-          letterSpacing: -0.5,
-        ),
-        displayMedium: baseText.displayMedium?.copyWith(
-          fontSize: 48,
-          height: 1.05,
-          letterSpacing: -0.5,
-        ),
-        headlineLarge: baseText.headlineLarge?.copyWith(
-          fontSize: 38,
-          height: 1.1,
-          letterSpacing: -0.3,
-        ),
-        headlineMedium: baseText.headlineMedium?.copyWith(
-          fontSize: 30,
-          height: 1.15,
-          letterSpacing: -0.3,
-        ),
-        headlineSmall: baseText.headlineSmall?.copyWith(
-          fontSize: 24,
-          height: 1.15,
-          letterSpacing: -0.2,
-        ),
-        titleLarge: baseText.titleLarge?.copyWith(
-          fontSize: 17,
-          fontWeight: FontWeight.w600,
-          letterSpacing: -0.2,
-        ),
-        titleMedium: baseText.titleMedium?.copyWith(
-          fontSize: 15,
-          fontWeight: FontWeight.w600,
-          letterSpacing: -0.1,
-        ),
-        titleSmall: baseText.titleSmall?.copyWith(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-        ),
-        bodyLarge: baseText.bodyLarge?.copyWith(fontSize: 15, height: 1.5),
-        bodyMedium: baseText.bodyMedium?.copyWith(fontSize: 13.5, height: 1.5),
-        bodySmall: baseText.bodySmall?.copyWith(fontSize: 12, height: 1.45),
-        labelLarge: baseText.labelLarge?.copyWith(
-          fontSize: 13.5,
-          fontWeight: FontWeight.w500,
-        ),
-        labelMedium: baseText.labelMedium?.copyWith(fontSize: 12.5),
-        labelSmall: baseText.labelSmall?.copyWith(
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-        ),
       );
+  final textTheme = baseText.copyWith(
+    displayLarge: baseText.displayLarge?.copyWith(
+      fontSize: 56,
+      fontWeight: FontWeight.w700,
+      height: 1.05,
+      letterSpacing: -1.1,
+    ),
+    displayMedium: baseText.displayMedium?.copyWith(
+      fontSize: 44,
+      fontWeight: FontWeight.w700,
+      height: 1.05,
+      letterSpacing: -0.9,
+    ),
+    // KPI number.
+    displaySmall: baseText.displaySmall?.copyWith(
+      fontSize: 32,
+      fontWeight: FontWeight.w700,
+      height: 1.1,
+      letterSpacing: -0.64,
+    ),
+    headlineLarge: baseText.headlineLarge?.copyWith(
+      fontSize: 32,
+      fontWeight: FontWeight.w700,
+      height: 1.15,
+      letterSpacing: -0.64,
+    ),
+    // Page title.
+    headlineMedium: baseText.headlineMedium?.copyWith(
+      fontSize: 28,
+      fontWeight: FontWeight.w700,
+      height: 1.2,
+      letterSpacing: -0.56,
+    ),
+    headlineSmall: baseText.headlineSmall?.copyWith(
+      fontSize: 22,
+      fontWeight: FontWeight.w700,
+      height: 1.2,
+      letterSpacing: -0.3,
+    ),
+    titleLarge: baseText.titleLarge?.copyWith(
+      fontSize: 18,
+      fontWeight: FontWeight.w600,
+      letterSpacing: -0.2,
+    ),
+    // Card title.
+    titleMedium: baseText.titleMedium?.copyWith(
+      fontSize: 16,
+      fontWeight: FontWeight.w600,
+      letterSpacing: -0.1,
+    ),
+    titleSmall: baseText.titleSmall?.copyWith(
+      letterSpacing: 0,
+      fontSize: 14,
+      fontWeight: FontWeight.w600,
+    ),
+    bodyLarge: baseText.bodyLarge?.copyWith(
+      letterSpacing: 0,
+      fontSize: 15,
+      height: 1.45,
+    ),
+    bodyMedium: baseText.bodyMedium?.copyWith(
+      letterSpacing: 0,
+      fontSize: 14,
+      height: 1.45,
+    ),
+    bodySmall: baseText.bodySmall?.copyWith(
+      letterSpacing: 0,
+      fontSize: 12,
+      height: 1.4,
+      color: c.textMuted,
+    ),
+    labelLarge: baseText.labelLarge?.copyWith(
+      letterSpacing: 0,
+      fontSize: 14,
+      fontWeight: FontWeight.w600,
+    ),
+    labelMedium: baseText.labelMedium?.copyWith(
+      letterSpacing: 0,
+      fontSize: 13,
+      fontWeight: FontWeight.w500,
+    ),
+    labelSmall: baseText.labelSmall?.copyWith(
+      fontSize: 12,
+      fontWeight: FontWeight.w500,
+      letterSpacing: 0,
+    ),
+  );
 
-  BorderSide thin() => BorderSide(color: p.border);
   OutlineInputBorder fieldBorder({Color? color, double width = 1}) =>
       OutlineInputBorder(
         borderRadius: BorderRadius.circular(Dt.rSm),
-        borderSide: BorderSide(color: color ?? p.borderStrong, width: width),
+        borderSide: BorderSide(color: color ?? c.borderStrong, width: width),
       );
+
+  const buttonText = TextStyle(
+    fontFamily: Dt.font,
+    fontSize: 14,
+    fontWeight: FontWeight.w600,
+  );
+  final buttonShape = RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(Dt.rSm),
+  );
 
   return ThemeData(
     useMaterial3: true,
     brightness: brightness,
-    fontFamily: 'Instrument Sans',
+    fontFamily: Dt.font,
     colorScheme: scheme,
     textTheme: textTheme,
-    scaffoldBackgroundColor: p.bg,
+    extensions: [c],
+    scaffoldBackgroundColor: c.bg,
+    canvasColor: c.surface,
     splashFactory: NoSplash.splashFactory,
-    highlightColor: p.fg.withValues(alpha: 0.05),
+    hoverColor: c.text.withValues(alpha: 0.04),
+    highlightColor: c.text.withValues(alpha: 0.06),
+    focusColor: c.focus,
     splashColor: Colors.transparent,
 
-    // Compact neutral panels with visible edges in both themes.
     cardTheme: CardThemeData(
       elevation: 0,
-      color: p.bg,
+      color: c.surface,
       surfaceTintColor: Colors.transparent,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(Dt.rMd),
-        side: thin(),
+        side: BorderSide(color: c.border),
       ),
     ),
 
     dialogTheme: DialogThemeData(
-      backgroundColor: p.bg,
+      backgroundColor: c.surfaceRaised,
       elevation: 0,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(Dt.rLg),
-        side: BorderSide(color: p.borderStrong),
+        side: BorderSide(color: c.border),
       ),
       titleTextStyle: TextStyle(
-        fontFamily: 'Instrument Sans',
-        fontSize: 20,
-        color: p.fg,
+        fontFamily: Dt.font,
+        fontSize: 18,
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.2,
+        color: c.text,
       ),
       contentTextStyle: TextStyle(
-        fontFamily: 'Instrument Sans',
-        fontSize: 13.5,
-        height: 1.5,
-        color: p.secondary,
+        fontFamily: Dt.font,
+        fontSize: 14,
+        height: 1.45,
+        color: c.textSecondary,
+      ),
+    ),
+
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: c.surfaceRaised,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      dragHandleColor: c.borderStrong,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(Dt.rLg)),
       ),
     ),
 
     inputDecorationTheme: InputDecorationTheme(
       isDense: true,
       filled: true,
-      fillColor: p.field,
+      fillColor: c.surface,
       hintStyle: TextStyle(
-        fontFamily: 'Instrument Sans',
-        fontSize: 13.5,
-        color: p.secondary.withValues(alpha: 0.8),
+        fontFamily: Dt.font,
+        fontSize: 14,
+        color: c.textMuted,
       ),
       labelStyle: TextStyle(
-        fontFamily: 'Instrument Sans',
-        fontSize: 13.5,
-        color: p.secondary,
+        fontFamily: Dt.font,
+        fontSize: 14,
+        color: c.textMuted,
       ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      floatingLabelStyle: TextStyle(
+        fontFamily: Dt.font,
+        fontSize: 14,
+        color: c.accent,
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
       border: fieldBorder(),
-      enabledBorder: fieldBorder(),
-      focusedBorder: fieldBorder(color: brand, width: 1.4),
-      errorBorder: fieldBorder(color: p.error),
-      focusedErrorBorder: fieldBorder(color: p.error, width: 1.2),
+      enabledBorder: fieldBorder(color: c.border),
+      focusedBorder: fieldBorder(color: c.accent, width: 1.5),
+      errorBorder: fieldBorder(color: c.negativeFg),
+      focusedErrorBorder: fieldBorder(color: c.negativeFg, width: 1.5),
+      disabledBorder: fieldBorder(color: c.borderSubtle),
     ),
 
+    // The main action: one per screen.
     filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(
-        backgroundColor: brand,
-        foregroundColor: onBrand,
-        elevation: 0,
-        minimumSize: const Size(0, 34),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(Dt.rSm),
+      style: ButtonStyle(
+        backgroundColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.disabled)
+              ? c.neutralBg
+              : s.contains(WidgetState.hovered) ||
+                    s.contains(WidgetState.pressed)
+              ? c.accentHover
+              : c.accent,
         ),
-        textStyle: const TextStyle(
-          fontFamily: 'Instrument Sans',
-          fontSize: 12,
-          fontWeight: FontWeight.w500,
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.disabled) ? c.textMuted : c.onAccent,
         ),
-        iconSize: 17,
+        overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+        elevation: const WidgetStatePropertyAll(0),
+        minimumSize: const WidgetStatePropertyAll(Size(0, 40)),
+        padding: const WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: 16),
+        ),
+        shape: WidgetStatePropertyAll(buttonShape),
+        textStyle: const WidgetStatePropertyAll(buttonText),
+        iconSize: const WidgetStatePropertyAll(16),
       ),
     ),
+    // Secondary: Export, date pickers, filters.
     outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(
-        foregroundColor: p.fg,
-        elevation: 0,
-        minimumSize: const Size(0, 34),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        side: BorderSide(color: p.borderStrong),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(Dt.rSm),
+      style: ButtonStyle(
+        backgroundColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.hovered) ? c.neutralBg : c.surface,
         ),
-        textStyle: const TextStyle(
-          fontFamily: 'Instrument Sans',
-          fontSize: 12,
-          fontWeight: FontWeight.w500,
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.disabled) ? c.textMuted : c.text,
         ),
-        iconSize: 17,
+        overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+        elevation: const WidgetStatePropertyAll(0),
+        minimumSize: const WidgetStatePropertyAll(Size(0, 40)),
+        padding: const WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: 14),
+        ),
+        side: WidgetStateProperty.resolveWith(
+          (s) => BorderSide(
+            color: s.contains(WidgetState.disabled) ? c.border : c.borderStrong,
+          ),
+        ),
+        shape: WidgetStatePropertyAll(buttonShape),
+        textStyle: const WidgetStatePropertyAll(
+          TextStyle(
+            fontFamily: Dt.font,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        iconSize: const WidgetStatePropertyAll(16),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
-        foregroundColor: p.fg,
+        foregroundColor: c.accent,
         minimumSize: const Size(0, 36),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(Dt.rSm),
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        shape: buttonShape,
         textStyle: const TextStyle(
-          fontFamily: 'Instrument Sans',
-          fontSize: 13.5,
-          fontWeight: FontWeight.w500,
+          fontFamily: Dt.font,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
         ),
       ),
     ),
     iconButtonTheme: IconButtonThemeData(
       style: IconButton.styleFrom(
-        foregroundColor: p.secondary,
+        foregroundColor: c.textMuted,
         iconSize: 18,
-        shape: const CircleBorder(),
+        minimumSize: const Size(40, 40),
+        shape: buttonShape,
       ),
     ),
 
     segmentedButtonTheme: SegmentedButtonThemeData(
       style: ButtonStyle(
         elevation: const WidgetStatePropertyAll(0),
-        side: WidgetStatePropertyAll(BorderSide(color: p.borderStrong)),
-        shape: const WidgetStatePropertyAll(StadiumBorder()),
+        side: WidgetStatePropertyAll(BorderSide(color: c.borderStrong)),
+        shape: WidgetStatePropertyAll(buttonShape),
         backgroundColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected)
-              ? brand
-              : Colors.transparent,
+          (s) => s.contains(WidgetState.selected) ? c.accentSoft : c.surface,
         ),
         foregroundColor: WidgetStateProperty.resolveWith(
-          (states) =>
-              states.contains(WidgetState.selected) ? onBrand : p.secondary,
+          (s) => s.contains(WidgetState.selected) ? c.accent : c.textSecondary,
         ),
-        textStyle: const WidgetStatePropertyAll(
-          TextStyle(
-            fontFamily: 'Instrument Sans',
-            fontSize: 13.5,
-            fontWeight: FontWeight.w500,
+        overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+        textStyle: WidgetStateProperty.resolveWith(
+          (s) => TextStyle(
+            fontFamily: Dt.font,
+            fontSize: 14,
+            fontWeight: s.contains(WidgetState.selected)
+                ? FontWeight.w600
+                : FontWeight.w500,
           ),
         ),
         minimumSize: const WidgetStatePropertyAll(Size(0, 40)),
       ),
     ),
 
+    chipTheme: ChipThemeData(
+      backgroundColor: c.surface,
+      selectedColor: c.accentSoft,
+      side: BorderSide(color: c.border),
+      shape: const StadiumBorder(),
+      labelStyle: TextStyle(
+        fontFamily: Dt.font,
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+        color: c.textSecondary,
+      ),
+      secondaryLabelStyle: TextStyle(
+        fontFamily: Dt.font,
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: c.accent,
+      ),
+      checkmarkColor: c.accent,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+    ),
+
+    checkboxTheme: CheckboxThemeData(
+      fillColor: WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.selected) ? c.accent : Colors.transparent,
+      ),
+      checkColor: WidgetStatePropertyAll(c.onAccent),
+      side: BorderSide(color: c.borderStrong, width: 1.5),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+    ),
+    switchTheme: SwitchThemeData(
+      thumbColor: WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.selected) ? c.onAccent : c.borderStrong,
+      ),
+      trackColor: WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.selected) ? c.accent : c.track,
+      ),
+      trackOutlineColor: WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.selected) ? c.accent : c.borderStrong,
+      ),
+    ),
+    radioTheme: RadioThemeData(
+      fillColor: WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.selected) ? c.accent : c.borderStrong,
+      ),
+    ),
+
     navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: p.bg,
-      indicatorColor: Colors.transparent,
+      backgroundColor: c.surface,
+      indicatorColor: c.accentSoft,
+      indicatorShape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Dt.rSm),
+      ),
       surfaceTintColor: Colors.transparent,
-      height: 62,
+      elevation: 0,
+      height: 64,
       labelTextStyle: WidgetStateProperty.resolveWith(
-        (states) => TextStyle(
-          fontFamily: 'Instrument Sans',
-          fontSize: 11,
-          fontWeight: states.contains(WidgetState.selected)
+        (s) => TextStyle(
+          fontFamily: Dt.font,
+          fontSize: 11.5,
+          fontWeight: s.contains(WidgetState.selected)
               ? FontWeight.w600
               : FontWeight.w500,
-          color: states.contains(WidgetState.selected) ? p.fg : p.secondary,
+          color: s.contains(WidgetState.selected) ? c.accent : c.textMuted,
         ),
       ),
       iconTheme: WidgetStateProperty.resolveWith(
-        (states) => IconThemeData(
-          size: 22,
-          color: states.contains(WidgetState.selected) ? brand : p.secondary,
+        (s) => IconThemeData(
+          size: 20,
+          color: s.contains(WidgetState.selected) ? c.accent : c.textMuted,
         ),
       ),
     ),
 
-    progressIndicatorTheme: ProgressIndicatorThemeData(color: brand),
+    progressIndicatorTheme: ProgressIndicatorThemeData(
+      color: c.accent,
+      linearTrackColor: c.track,
+      circularTrackColor: Colors.transparent,
+    ),
 
     appBarTheme: AppBarTheme(
-      backgroundColor: p.bg,
+      backgroundColor: c.bg,
       elevation: 0,
       scrolledUnderElevation: 0,
       surfaceTintColor: Colors.transparent,
       centerTitle: false,
       titleTextStyle: TextStyle(
-        fontFamily: 'Instrument Sans',
-        fontSize: 15,
+        fontFamily: Dt.font,
+        fontSize: 16,
         fontWeight: FontWeight.w600,
-        letterSpacing: -0.1,
-        color: p.fg,
+        color: c.text,
       ),
-      iconTheme: IconThemeData(size: 20, color: p.secondary),
+      iconTheme: IconThemeData(size: 20, color: c.textMuted),
     ),
 
     listTileTheme: ListTileThemeData(
-      iconColor: p.secondary,
+      iconColor: c.textMuted,
+      selectedColor: c.accent,
       contentPadding: const EdgeInsets.symmetric(horizontal: Dt.s12),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(Dt.rMd),
+        borderRadius: BorderRadius.circular(Dt.rSm),
       ),
     ),
 
     popupMenuTheme: PopupMenuThemeData(
-      color: p.panelStrong,
+      color: c.surfaceRaised,
       elevation: 0,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(Dt.rMd),
-        side: BorderSide(color: p.borderStrong),
+        borderRadius: BorderRadius.circular(Dt.rSm),
+        side: BorderSide(color: c.border),
       ),
-      textStyle: TextStyle(
-        fontFamily: 'Instrument Sans',
-        fontSize: 13.5,
-        color: p.fg,
+      textStyle: TextStyle(fontFamily: Dt.font, fontSize: 14, color: c.text),
+    ),
+    menuTheme: MenuThemeData(
+      style: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(c.surfaceRaised),
+        surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+        elevation: const WidgetStatePropertyAll(0),
+        side: WidgetStatePropertyAll(BorderSide(color: c.border)),
+        shape: WidgetStatePropertyAll(buttonShape),
       ),
+    ),
+    dropdownMenuTheme: DropdownMenuThemeData(
+      menuStyle: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(c.surfaceRaised),
+        surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+        elevation: const WidgetStatePropertyAll(0),
+        side: WidgetStatePropertyAll(BorderSide(color: c.border)),
+      ),
+    ),
+
+    datePickerTheme: DatePickerThemeData(
+      backgroundColor: c.surfaceRaised,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Dt.rLg),
+        side: BorderSide(color: c.border),
+      ),
+      headerBackgroundColor: c.surfaceRaised,
+      headerForegroundColor: c.text,
+      todayBorder: BorderSide(color: c.accent),
     ),
 
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
       elevation: 0,
-      backgroundColor: p.fg,
+      backgroundColor: c.text,
       contentTextStyle: TextStyle(
-        fontFamily: 'Instrument Sans',
-        fontSize: 13,
-        color: p.bg,
+        fontFamily: Dt.font,
+        fontSize: 14,
+        color: c.surface,
       ),
-      closeIconColor: p.bg,
-      shape: const StadiumBorder(),
+      actionTextColor: light ? const Color(0xFFB3C4FF) : c.accentHover,
+      closeIconColor: c.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Dt.rSm),
+      ),
     ),
 
-    dividerTheme: DividerThemeData(color: p.border, thickness: 1, space: 1),
+    badgeTheme: BadgeThemeData(
+      backgroundColor: c.accent,
+      textColor: c.onAccent,
+    ),
+
+    dividerTheme: DividerThemeData(
+      color: c.borderSubtle,
+      thickness: 1,
+      space: 1,
+    ),
 
     scrollbarTheme: ScrollbarThemeData(
-      thickness: WidgetStatePropertyAll(6),
-      thumbVisibility: WidgetStatePropertyAll(true),
-      radius: Radius.circular(3),
-      thumbColor: WidgetStatePropertyAll(p.borderStrong),
+      thickness: const WidgetStatePropertyAll(6),
+      thumbVisibility: const WidgetStatePropertyAll(true),
+      radius: const Radius.circular(3),
+      thumbColor: WidgetStatePropertyAll(c.borderStrong),
     ),
 
     tooltipTheme: TooltipThemeData(
       decoration: BoxDecoration(
-        color: p.fg,
+        color: c.text,
         borderRadius: BorderRadius.circular(Dt.rSm),
       ),
-      textStyle: TextStyle(
-        fontFamily: 'Instrument Sans',
-        fontSize: 11.5,
-        color: p.bg,
-      ),
+      textStyle: TextStyle(fontFamily: Dt.font, fontSize: 12, color: c.surface),
       waitDuration: const Duration(milliseconds: 400),
     ),
   );

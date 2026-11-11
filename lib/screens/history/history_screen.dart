@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../design/app_theme.dart';
 import '../../state/app_state.dart';
+import '../../widgets/clarity.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/week_label.dart';
 import '../weekly_tracker/new_week_dialog.dart';
@@ -76,7 +77,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
     return LayoutBuilder(
       builder: (context, viewport) {
-        final pad = viewport.maxWidth < 900 ? 14.0 : 18.0;
+        final pad = clarityHPad(context);
         final compact = viewport.maxWidth < 760;
         return Scrollbar(
           controller: _scroll,
@@ -325,7 +326,7 @@ class _MonthPanel extends StatelessWidget {
     final scheme = theme.colorScheme;
     final clients = weeks.fold<int>(0, (a, w) => a + w.totals.total);
     final head = (theme.textTheme.labelSmall ?? const TextStyle()).copyWith(
-      fontSize: 10.5,
+      fontSize: 12,
       color: Dt.textMuted(theme),
     );
 
@@ -340,24 +341,16 @@ class _MonthPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
             decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: scheme.outline)),
+              border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
             ),
             child: Row(
               children: [
-                Icon(
-                  Icons.calendar_month_outlined,
-                  size: 15,
-                  color: scheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     DateFormat('MMMM y').format(month),
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: theme.textTheme.titleMedium,
                   ),
                 ),
                 Text(
@@ -373,9 +366,11 @@ class _MonthPanel extends StatelessWidget {
           if (!compact)
             Container(
               height: 32,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 20),
               decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: scheme.outline)),
+                border: Border(
+                  bottom: BorderSide(color: scheme.outlineVariant),
+                ),
               ),
               child: Row(
                 children: [
@@ -513,7 +508,7 @@ class _WeekRow extends ConsumerWidget {
       return InkWell(
         onTap: onOpen,
         child: Container(
-          padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+          padding: const EdgeInsets.fromLTRB(20, 10, 6, 10),
           decoration: BoxDecoration(border: border),
           child: Row(
             children: [

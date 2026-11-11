@@ -671,7 +671,7 @@ class _MoneyTable extends StatelessWidget {
     final muted = Dt.textMuted(theme);
     final head = theme.textTheme.labelSmall?.copyWith(color: muted);
     Widget row(List<Widget> cells, {bool top = true}) => Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
       decoration: BoxDecoration(
         border: Border(
           top: top
@@ -834,7 +834,7 @@ class _Stat extends StatelessWidget {
     final scheme = theme.colorScheme;
     return Container(
       constraints: const BoxConstraints(minHeight: 104),
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLow,
         border: Border.all(color: scheme.outline),
@@ -1044,7 +1044,7 @@ class MoneyBars extends StatelessWidget {
 
     final avgY = labelH + 2 + plotH * avg / max;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1160,7 +1160,7 @@ class _HBars extends StatelessWidget {
         children: [
           for (final r in rows)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
               child: Row(
                 children: [
                   SizedBox(

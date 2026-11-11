@@ -4,36 +4,43 @@ import 'package:intl/intl.dart';
 import '../design/app_theme.dart';
 import 'motion.dart';
 
-/// Bordered panel with a title bar — the app's standard container (dashboard,
-/// Reports, tracker analytics).
+/// A Clarity card with a header: title (16/600) and an optional subtitle on
+/// the left, a caption or legend on the right, a subtle line below. The
+/// app's standard container.
 class AppPanel extends StatelessWidget {
   const AppPanel({
     super.key,
     required this.title,
-    required this.icon,
+    this.icon,
     required this.child,
+    this.subtitle,
     this.trailing,
     this.trailingWidget,
   });
 
   final String title;
-  final IconData icon;
+
+  /// Kept for older call sites; Clarity card headers carry no icon.
+  final IconData? icon;
   final Widget child;
+  final String? subtitle;
+
+  /// A short caption on the right ("9 of 15 active").
   final String? trailing;
 
-  /// Header content on the right that isn't plain text (e.g. a legend).
+  /// Header content on the right that isn't plain text (a legend, a link).
   final Widget? trailingWidget;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    final c = context.clarity;
     return FadeSlideIn(
       child: Container(
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: scheme.surfaceContainerLow,
-          border: Border.all(color: scheme.outline),
+          color: c.surface,
+          border: Border.all(color: c.border),
           borderRadius: BorderRadius.circular(Dt.rMd),
         ),
         child: Column(
@@ -41,32 +48,52 @@ class AppPanel extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(
-              padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
               decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: scheme.outline)),
+                border: Border(bottom: BorderSide(color: c.borderSubtle)),
               ),
               child: Row(
                 children: [
-                  Icon(icon, size: 15, color: scheme.onSurfaceVariant),
-                  const SizedBox(width: 8),
                   Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium,
+                        ),
+                        if (subtitle != null) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            subtitle!,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: c.textMuted,
+                              fontWeight: FontWeight.w400,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  if (trailing != null)
+                  if (trailing != null) ...[
+                    const SizedBox(width: 12),
                     Text(
                       trailing!,
                       style: theme.textTheme.labelSmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
+                        color: c.textMuted,
+                        fontWeight: FontWeight.w400,
                       ),
                     ),
-                  ?trailingWidget,
+                  ],
+                  if (trailingWidget != null) ...[
+                    const SizedBox(width: 12),
+                    trailingWidget!,
+                  ],
                 ],
               ),
             ),
@@ -86,19 +113,24 @@ class NewExistingLegend extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    Widget item(String label, Color c) => Row(
+    final c = context.clarity;
+    Widget item(String label, Color color) => Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
+          ),
         ),
-        const SizedBox(width: 5),
+        const SizedBox(width: 6),
         Text(
           label,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: c.textSecondary,
+            fontWeight: FontWeight.w400,
           ),
         ),
       ],
@@ -106,9 +138,9 @@ class NewExistingLegend extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        item('New', Dt.newGreen(theme.brightness)),
-        const SizedBox(width: 12),
-        item('Existing', Dt.existingBlue(theme.brightness)),
+        item('New', c.seriesNew),
+        const SizedBox(width: 16),
+        item('Existing', c.seriesExisting),
       ],
     );
   }
@@ -133,34 +165,54 @@ class ChartDay {
   int get total => newClients + existingClients;
 }
 
-/// Clients per day as stacked bars (existing at the base, new on top), with
-/// the day's total above each bar and a tooltip carrying the exact split.
-/// One axis, thin bars, 2px gaps between segments, today marked in ink.
+/// Clients per day as stacked bars: new (orange) at the bottom, existing
+/// (blue) on top, 4px top corners, the day's total above each bar, a tidy
+/// y-axis with gridlines every quarter. A day with nothing entered shows no
+/// bar (not a zero bar). A tooltip carries the exact split.
 class StackedDayChart extends StatelessWidget {
   const StackedDayChart({super.key, required this.days, this.height = 180});
 
   final List<ChartDay> days;
+
+  /// Height of the plot area (bars), without the labels.
   final double height;
+
+  /// A round axis top for [max] with four equal steps (17 → 20, 43 → 60).
+  static int niceTop(int max) {
+    if (max <= 0) return 20;
+    final raw = max / 4;
+    var unit = 1;
+    while (unit * 10 <= raw) {
+      unit *= 10;
+    }
+    for (final m in [1, 2, 5, 10]) {
+      if (unit * m >= raw) return unit * m * 4;
+    }
+    return unit * 40;
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    final c = context.clarity;
     final now = DateTime.now();
     final max = days.fold<int>(0, (m, d) => d.total > m ? d.total : m);
+    final top = niceTop(max);
     final dense = days.length > 7;
-    const labelH = 18.0;
-    const valueH = 16.0;
-    // Value label + gaps + the 2px segment spacer all come out of height.
-    final plotH = height - labelH - valueH - 8;
+    const totalH = 20.0;
+    final plotH = height;
 
     bool sameDay(DateTime a, DateTime b) =>
         a.year == b.year && a.month == b.month && a.day == b.day;
 
-    Widget bar(ChartDay d) {
-      final isToday = sameDay(d.date, now);
-      final future = d.date.isAfter(now);
-      final h = max == 0 ? 0.0 : plotH * d.total / max;
+    final small = theme.textTheme.labelSmall!.copyWith(
+      color: c.textMuted,
+      fontWeight: FontWeight.w400,
+      fontSize: dense ? 10.5 : 11,
+    );
+
+    Widget column(int index, ChartDay d) {
+      final h = top == 0 ? 0.0 : plotH * d.total / top;
       final newH = d.total == 0 ? 0.0 : h * d.newClients / d.total;
       final exH = h - newH;
       final tip = d.isHoliday
@@ -172,102 +224,132 @@ class StackedDayChart extends StatelessWidget {
         child: Tooltip(
           message: tip,
           waitDuration: const Duration(milliseconds: 150),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              SizedBox(
-                height: valueH,
-                child: Text(
-                  d.total == 0 ? '' : '${d.total}',
-                  style: Dt.tab(theme.textTheme.labelSmall!).copyWith(
-                    fontWeight: FontWeight.w600,
-                    fontSize: dense ? 9.5 : 11,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 4),
-              GrowIn(
-                index: days.indexOf(d),
-                child: Container(
-                  width: dense ? 14 : 28,
-                  constraints: BoxConstraints(maxWidth: dense ? 14 : 28),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      if (newH > 0)
-                        Container(
-                          height: newH,
-                          decoration: BoxDecoration(
-                            color: Dt.newGreen(theme.brightness),
-                            borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(4),
-                            ),
-                          ),
+          child: LayoutBuilder(
+            builder: (context, box) {
+              final barW = (box.maxWidth * 0.44).clamp(4.0, 48.0);
+              return Column(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  if (d.total > 0)
+                    SizedBox(
+                      height: totalH,
+                      child: Text(
+                        '${d.total}',
+                        style: Dt.tab(theme.textTheme.labelSmall!).copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: c.textSecondary,
+                          fontSize: dense ? 10.5 : 12,
                         ),
-                      // 2px surface gap between the stacked segments.
-                      if (newH > 0 && exH > 0) const SizedBox(height: 2),
-                      if (exH > 0)
-                        Container(
-                          height: exH,
-                          decoration: BoxDecoration(
-                            color: Dt.existingBlue(theme.brightness),
-                            borderRadius: newH > 0
-                                ? null
-                                : const BorderRadius.vertical(
-                                    top: Radius.circular(4),
-                                  ),
-                          ),
-                        ),
-                      if (h == 0)
-                        Container(
-                          height: 2,
-                          color: scheme.onSurface.withValues(
-                            alpha: future ? 0.06 : 0.14,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 2),
-              SizedBox(
-                height: labelH,
-                child: Center(
-                  child: Text(
-                    dense ? '${d.date.day}' : DateFormat('EEE').format(d.date),
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      fontSize: dense ? 9.5 : 11,
-                      fontWeight: isToday ? FontWeight.w700 : FontWeight.w400,
-                      color: isToday
-                          ? scheme.onSurface
-                          : scheme.onSurfaceVariant,
-                      decoration: isToday ? TextDecoration.underline : null,
+                      ),
                     ),
-                  ),
-                ),
-              ),
-            ],
+                  if (d.total > 0)
+                    GrowIn(
+                      index: index,
+                      child: ClipRRect(
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(4),
+                        ),
+                        child: SizedBox(
+                          width: barW,
+                          child: Column(
+                            children: [
+                              if (exH > 0)
+                                Container(height: exH, color: c.seriesExisting),
+                              if (newH > 0)
+                                Container(height: newH, color: c.seriesNew),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
         ),
       );
     }
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
-      child: SizedBox(
-        height: height,
-        child: Stack(
+    final axisW = dense ? 24.0 : 28.0;
+    return Semantics(
+      label:
+          'Clients per day: '
+          '${[for (final d in days)
+            if (d.total > 0) '${DateFormat('EEE d').format(d.date)} ${d.newClients} new and ${d.existingClients} existing'].join(', ')}',
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+        child: Column(
           children: [
-            // Baseline.
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: labelH + 2,
-              child: Container(height: 1, color: scheme.outline),
+            SizedBox(
+              height: plotH + totalH,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Y-axis: 0, ¼, ½, ¾, top.
+                  SizedBox(
+                    width: axisW,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        for (var q = 0; q <= 4; q++)
+                          Positioned(
+                            right: 6,
+                            bottom: plotH * q / 4 - 7,
+                            child: Text('${top * q ~/ 4}', style: small),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        for (var q = 1; q <= 4; q++)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: plotH * q / 4,
+                            child: Container(height: 1, color: c.gridline),
+                          ),
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: Container(height: 1, color: c.borderStrong),
+                        ),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            for (final (i, d) in days.indexed) column(i, d),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
+            const SizedBox(height: 8),
             Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [for (final d in days) bar(d)],
+              children: [
+                SizedBox(width: axisW),
+                for (final d in days)
+                  Expanded(
+                    child: Center(
+                      child: Text(
+                        dense
+                            ? '${d.date.day}'
+                            : DateFormat('EEE d').format(d.date),
+                        maxLines: 1,
+                        style: small.copyWith(
+                          fontWeight: sameDay(d.date, now)
+                              ? FontWeight.w700
+                              : FontWeight.w400,
+                          color: sameDay(d.date, now) ? c.text : c.textMuted,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ],
         ),

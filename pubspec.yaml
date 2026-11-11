@@ -50,13 +50,13 @@ flutter:
     - assets/branding/
 
   fonts:
-    - family: Instrument Sans
+    - family: Inter
       fonts:
-        - asset: assets/fonts/InstrumentSans-400.ttf
+        - asset: assets/fonts/Inter-400.ttf
           weight: 400
-        - asset: assets/fonts/InstrumentSans-500.ttf
+        - asset: assets/fonts/Inter-500.ttf
           weight: 500
-        - asset: assets/fonts/InstrumentSans-600.ttf
+        - asset: assets/fonts/Inter-600.ttf
           weight: 600
-        - asset: assets/fonts/InstrumentSans-700.ttf
+        - asset: assets/fonts/Inter-700.ttf
           weight: 700

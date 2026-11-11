@@ -161,7 +161,7 @@ class ApplicationsQuickView extends ConsumerWidget {
           ? null
           : '${activity.length + changesByStudent.length}',
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
         child: activity.isEmpty && changesByStudent.isEmpty
             ? Text(
                 todaysUploads.isEmpty
@@ -218,7 +218,7 @@ class ApplicationsQuickView extends ConsumerWidget {
       title: 'This week',
       icon: Icons.date_range_outlined,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
         child: Table(
           columnWidths: const {0: FlexColumnWidth(1.6)},
           defaultVerticalAlignment: TableCellVerticalAlignment.middle,
@@ -308,7 +308,7 @@ class ApplicationsQuickView extends ConsumerWidget {
       icon: Icons.priority_high_rounded,
       trailing: stale.isEmpty ? null : '${stale.length} waiting 2+ weeks',
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -423,7 +423,7 @@ class ApplicationsQuickView extends ConsumerWidget {
       icon: Icons.groups_2_outlined,
       trailing: '${inProgress.length} in progress',
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
         child: Column(
           children: [
             for (final p in people)
@@ -542,7 +542,7 @@ class ApplicationsQuickView extends ConsumerWidget {
       icon: Icons.calendar_month_outlined,
       trailing: 'vs $lastName 1–${lastMonthSameDay.day}',
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
         child: Column(
           children: [
             for (final (label, f) in monthRows)
@@ -623,7 +623,7 @@ class ApplicationsQuickView extends ConsumerWidget {
       icon: Icons.bar_chart,
       trailing: '${coeCounts.fold<int>(0, (s, v) => s + v)} in 6 months',
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
         child: SizedBox(
           height: 150,
           child: Row(
@@ -692,7 +692,7 @@ class ApplicationsQuickView extends ConsumerWidget {
         child: Text('List all ${inProgress.length}'),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
         child: Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -859,7 +859,7 @@ class _Tile extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLow,
         border: Border.all(color: scheme.outline),

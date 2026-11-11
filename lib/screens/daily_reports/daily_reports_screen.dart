@@ -10,6 +10,7 @@ import '../../services/daily_report_export.dart';
 import '../../services/daily_reports_service.dart';
 import '../../services/export_actions.dart';
 import '../../state/app_state.dart';
+import '../../widgets/clarity.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/panels.dart';
 import 'report_editor.dart';
@@ -95,7 +96,7 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
     return LayoutBuilder(
       builder: (context, viewport) {
         final phone = viewport.maxWidth < 600;
-        final pad = phone ? 14.0 : 18.0;
+        final pad = clarityHPad(context);
         final tab = _tab ?? _Tab.mine;
         return SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(pad, 16, pad, 28),
@@ -311,7 +312,7 @@ class _MyReportsState extends ConsumerState<_MyReports> {
         title: 'Not in a department yet',
         icon: Icons.info_outline,
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
           child: Text(
             meta.seesOthers
                 ? 'You can see the Overview. To record your own daily '
@@ -530,7 +531,7 @@ class _MyWeek extends StatelessWidget {
       icon: Icons.insights_outlined,
       trailing: DateFormat('d MMM').format(from),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -796,8 +797,8 @@ class _OverviewState extends ConsumerState<_Overview> {
       final Uint8List bytes;
       if (pdf) {
         final fonts = await Future.wait([
-          rootBundle.load('assets/fonts/InstrumentSans-400.ttf'),
-          rootBundle.load('assets/fonts/InstrumentSans-700.ttf'),
+          rootBundle.load('assets/fonts/Inter-400.ttf'),
+          rootBundle.load('assets/fonts/Inter-700.ttf'),
         ]);
         bytes = await operationsReportToPdf(
           report,
@@ -1031,7 +1032,7 @@ class _OverviewState extends ConsumerState<_Overview> {
               ? '${submittedToday.length} of ${s.compliance.length} today'
               : null,
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
             child: s.compliance.isEmpty
                 ? Text(
                     'Nobody is in a department yet. Set each person’s '
@@ -1051,11 +1052,16 @@ class _OverviewState extends ConsumerState<_Overview> {
                           Text('Not yet', style: microLabel(theme)),
                           const Spacer(),
                           if (notYet.isNotEmpty)
-                            TextButton.icon(
-                              key: const ValueKey('copy-reminder'),
-                              onPressed: () => _copyReminder(notYet),
-                              icon: const Icon(Icons.copy, size: 14),
-                              label: const Text('Copy reminder'),
+                            Flexible(
+                              child: TextButton.icon(
+                                key: const ValueKey('copy-reminder'),
+                                onPressed: () => _copyReminder(notYet),
+                                icon: const Icon(Icons.copy, size: 14),
+                                label: const Text(
+                                  'Copy reminder',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
                             ),
                         ],
                       ),
@@ -1076,7 +1082,7 @@ class _OverviewState extends ConsumerState<_Overview> {
           title: 'Departments',
           icon: Icons.apartment_outlined,
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1317,7 +1323,7 @@ class _Stat extends StatelessWidget {
     final color = alert && value > 0 ? scheme.error : scheme.onSurface;
     return Container(
       width: 170,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLow,
         border: Border.all(color: scheme.outline),

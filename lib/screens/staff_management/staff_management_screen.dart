@@ -5,6 +5,7 @@ import '../../design/app_theme.dart';
 import '../../models/staff.dart';
 import '../../repositories/client_count_repository.dart';
 import '../../state/app_state.dart';
+import '../../widgets/clarity.dart';
 import '../reports/reports_screen.dart' show showStaffProfile;
 
 /// The team: order, rename, deactivate or delete staff, and add new ones.
@@ -59,7 +60,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
 
     return LayoutBuilder(
       builder: (context, viewport) {
-        final pad = viewport.maxWidth < 900 ? 14.0 : 18.0;
+        final pad = clarityHPad(context);
         final wide = viewport.maxWidth >= 1080;
 
         final team = _Panel(
@@ -573,21 +574,14 @@ class _Panel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
             decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: scheme.outline)),
+              border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
             ),
             child: Row(
               children: [
-                Icon(icon, size: 15, color: scheme.onSurfaceVariant),
-                const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    title,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  child: Text(title, style: theme.textTheme.titleMedium),
                 ),
                 if (trailing != null)
                   Text(
@@ -638,7 +632,7 @@ class _AddStaffPanelState extends State<_AddStaffPanel> {
       title: 'Add staff member',
       icon: Icons.person_add_alt,
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -689,7 +683,7 @@ class _InactivePanel extends StatelessWidget {
       trailing: '${inactive.length}',
       child: inactive.isEmpty
           ? Padding(
-              padding: const EdgeInsets.all(14),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
               child: Text(
                 'No one is inactive. Marking someone inactive keeps their past '
                 'numbers but leaves them out of new weeks.',
@@ -703,7 +697,7 @@ class _InactivePanel extends StatelessWidget {
               children: [
                 for (var i = 0; i < inactive.length; i++)
                   Container(
-                    padding: const EdgeInsets.fromLTRB(14, 4, 6, 4),
+                    padding: const EdgeInsets.fromLTRB(20, 4, 6, 4),
                     decoration: BoxDecoration(
                       border: i == inactive.length - 1
                           ? null

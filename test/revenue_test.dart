@@ -394,10 +394,14 @@ void main() {
     expect(find.text('By day'), findsOneWidget);
     expect(find.textContaining('12 months to'), findsOneWidget);
     // The same numbers as a table.
+    await tester.ensureVisible(find.byTooltip('Show as table').first);
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Show as table').first);
     await tester.pumpAndSettle();
     expect(find.text('Payments'), findsOneWidget);
     // A year: monthly bars instead of daily.
+    await tester.ensureVisible(find.text('Year'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Year'));
     await tester.pumpAndSettle();
     expect(find.text('By month'), findsOneWidget);

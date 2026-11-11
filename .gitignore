@@ -76,3 +76,4 @@ android/key.properties
 *.keystore
 *.pfx
 *.p12
+tool/shots/

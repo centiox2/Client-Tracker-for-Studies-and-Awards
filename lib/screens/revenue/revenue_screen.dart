@@ -8,6 +8,7 @@ import '../../design/app_theme.dart';
 import '../../repositories/revenue_repository.dart';
 import '../../services/photo_text.dart';
 import '../../state/app_state.dart';
+import '../../widgets/clarity.dart';
 import '../../widgets/panels.dart';
 import 'revenue_all.dart';
 import 'revenue_insights.dart';
@@ -136,7 +137,7 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
     final page = LayoutBuilder(
       builder: (context, viewport) {
         final phone = viewport.maxWidth < 600;
-        final pad = phone ? 14.0 : 18.0;
+        final pad = clarityHPad(context);
         final switchButton = SegmentedButton<RevenueView>(
           key: const ValueKey('revenue-view'),
           segments: [
@@ -723,7 +724,7 @@ class _AddPanel extends StatelessWidget {
       title: 'Add a transaction',
       icon: Icons.add_card_outlined,
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
         child: phone
             // On a phone, reading the message comes first: it's the quick way.
             ? Column(

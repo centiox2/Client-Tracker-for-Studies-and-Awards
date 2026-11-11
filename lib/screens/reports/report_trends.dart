@@ -124,7 +124,7 @@ class _TrendsViewState extends ConsumerState<_TrendsView> {
           _WeekdayChart(averages: weekdays, busiest: busiest?.weekday),
           if (busiest != null && quietest != null && busiest != quietest)
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
               child: Text(
                 '${dayName(busiest.weekday)} is usually the busiest day '
                 '(${_QuickView._avg(busiest.average)} clients) and '
@@ -211,7 +211,7 @@ class _WeekdayChart extends StatelessWidget {
       (m, a) => a.average > m ? a.average : m,
     );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
       child: Column(
         children: [
           for (final a in averages)
@@ -320,7 +320,7 @@ class _BucketBars extends StatelessWidget {
     const labelH = 28.0;
     final plotH = height - valueH - labelH - 8;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
       child: SizedBox(
         height: height,
         child: Row(

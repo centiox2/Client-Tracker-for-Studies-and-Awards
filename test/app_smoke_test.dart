@@ -75,9 +75,9 @@ void main() {
       reason: 'all five metric cards should use one row at wide widths',
     );
     expect(
-      tester.getBottomRight(find.text('Export this week')).dy,
+      tester.getBottomRight(find.text('Enter today’s numbers')).dy,
       lessThan(size.height - 10),
-      reason: 'the last dashboard action should remain above the viewport edge',
+      reason: 'the main action should remain above the viewport edge',
     );
     expect(tester.takeException(), isNull);
   });
@@ -86,16 +86,18 @@ void main() {
     tester,
   ) async {
     await pumpApp(tester);
-    expect(find.text('No week started'), findsOneWidget);
+    expect(find.textContaining('No week yet'), findsOneWidget);
 
     // Simulate an external update to the local database, then use the
-    // visible refresh control to notify providers and refresh the screen.
+    // refresh in the account menu to notify providers and refresh.
     WeekRepository(db).createWeekFor(DateTime.now());
-    await tester.tap(find.text('Refresh'));
+    await tester.tap(find.byKey(const ValueKey('account-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Refresh data'));
     await tester.pumpAndSettle();
 
-    expect(find.text('No week started'), findsNothing);
-    expect(find.text('Active week'), findsOneWidget);
+    expect(find.textContaining('No week yet'), findsNothing);
+    expect(find.text('This week'), findsOneWidget);
   });
 
   testWidgets('New week dialog lists Mon–Fri and creates the week', (
@@ -103,7 +105,9 @@ void main() {
   ) async {
     await pumpApp(tester);
 
-    await tester.tap(find.text('New week').first);
+    await tester.tap(find.byKey(const ValueKey('week-picker')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('new-week-menu')));
     await tester.pumpAndSettle();
 
     final fmt = DateFormat('EEEE – dd/MM/yyyy');
@@ -118,8 +122,8 @@ void main() {
     await tester.tap(find.text('Create Week'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Active week'), findsOneWidget);
-    expect(find.text('Enter client numbers'), findsOneWidget);
+    expect(find.text('This week'), findsOneWidget);
+    expect(find.text('Enter today’s numbers'), findsOneWidget);
   });
 
   testWidgets('tracker board: typing a number updates totals instantly', (
@@ -142,8 +146,9 @@ void main() {
     final allFields = find.byType(TextField);
     expect(tester.widgetList(allFields).length, greaterThan(10));
 
-    // The desktop shell's read-only quick-search field precedes the grid.
-    await tester.enterText(allFields.at(1 + joyIndex * 10), '7');
+    // The grid's fields are the first on the page (the sidebar search is
+    // a button, not a field).
+    await tester.enterText(allFields.at(joyIndex * 10), '7');
     await tester.pumpAndSettle();
 
     // The compact summary line under the stat strip must now show 7 new.

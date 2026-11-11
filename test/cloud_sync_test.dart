@@ -1876,8 +1876,8 @@ void main() {
         ByteData.sublistView(File('assets/fonts/$f').readAsBytesSync());
     final pdf = await operationsReportToPdf(
       report,
-      regular: font('InstrumentSans-400.ttf'),
-      bold: font('InstrumentSans-700.ttf'),
+      regular: font('Inter-400.ttf'),
+      bold: font('Inter-700.ttf'),
     );
     expect(String.fromCharCodes(pdf.take(5)), '%PDF-');
     expect(pdf.length, greaterThan(2000));

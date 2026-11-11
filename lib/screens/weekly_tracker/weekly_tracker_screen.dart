@@ -7,6 +7,8 @@ import '../../models/staff.dart';
 import '../../repositories/client_count_repository.dart';
 import '../../services/export_actions.dart';
 import '../../state/app_state.dart';
+import '../../widgets/app_page_header.dart';
+import '../../widgets/clarity.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/motion.dart';
 import '../../widgets/numeric_field.dart';
@@ -218,11 +220,12 @@ class _EditorialBoardState extends ConsumerState<_EditorialBoard> {
     );
     final nextWeek = weeks.adjacentWeek(data.week.startDate, forward: true);
 
+    final hPad = clarityHPad(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          padding: EdgeInsets.fromLTRB(hPad, 12, hPad, 12),
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: _boardMaxWidth),
@@ -272,6 +275,8 @@ class _EditorialBoardState extends ConsumerState<_EditorialBoard> {
                       child: const Text('Go to this week'),
                     ),
                   ],
+                  const SizedBox(width: 12),
+                  const WeekRangeButton(),
                   const Spacer(),
                   const _SavedIndicator(),
                   const SizedBox(width: 14),
@@ -297,7 +302,7 @@ class _EditorialBoardState extends ConsumerState<_EditorialBoard> {
         ),
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: EdgeInsets.symmetric(horizontal: hPad),
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: _boardMaxWidth),
@@ -396,7 +401,7 @@ class _EditorialBoardState extends ConsumerState<_EditorialBoard> {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+          padding: EdgeInsets.fromLTRB(hPad, 6, hPad, 8),
           child: Text(
             'Saves as you type  ·  Enter or Tab moves to the next box  ·  '
             'Click a name to set time off',
@@ -1347,7 +1352,7 @@ class _AnalyticsRail extends ConsumerWidget {
       icon: Icons.bar_chart,
       trailingWidget: const NewExistingLegend(),
       child: StackedDayChart(
-        height: 170,
+        height: 150,
         days: [
           for (final d in data.days)
             ChartDay(
@@ -1440,7 +1445,7 @@ class _FactRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 9),
       decoration: last
           ? null
           : BoxDecoration(
@@ -1498,7 +1503,7 @@ class _LeaderRow extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 9),
       decoration: last
           ? null
           : BoxDecoration(
@@ -1597,7 +1602,7 @@ class _MixBar extends StatelessWidget {
       ],
     );
     return Padding(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1660,7 +1665,7 @@ class _RailNote extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.all(14),
+    padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
     child: Text(
       text,
       style: Theme.of(context).textTheme.bodySmall?.copyWith(color: color),

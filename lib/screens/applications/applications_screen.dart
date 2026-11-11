@@ -12,6 +12,7 @@ import '../../services/airtable_sync_service.dart';
 import '../../services/file_delivery.dart';
 import '../../services/photo_text.dart' show photoDropSupported;
 import '../../state/app_state.dart';
+import '../../widgets/clarity.dart';
 import '../../widgets/panels.dart';
 import 'applications_quick_view.dart';
 import 'applications_table.dart';
@@ -121,7 +122,7 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
     final page = LayoutBuilder(
       builder: (context, viewport) {
         final phone = viewport.maxWidth < 600;
-        final pad = phone ? 14.0 : 18.0;
+        final pad = clarityHPad(context);
         if (apps.isNotEmpty && _view == _View.table) {
           // The table scrolls by itself, both ways.
           return Padding(
@@ -536,7 +537,7 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
               onChanged: (id) => setState(() => _importId = id),
             ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
         child: byStudent.isEmpty
             ? Text(
                 first || (shown.added == shown.total && shown.changed == 0)
@@ -604,7 +605,7 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
       icon: Icons.stacked_bar_chart,
       trailing: '${apps.length}',
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
         child: Column(
           children: [
             for (final s in stages)
@@ -814,7 +815,7 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
             ? '${shown.length} of ${apps.length}'
             : '${apps.length}',
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -930,9 +931,9 @@ class ApplicationRow extends StatelessWidget {
         onTap: onTap,
         child: Container(
           decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: scheme.outline)),
+            border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 9),
           child: phone
               ? Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1270,7 +1271,7 @@ class _Stat extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../design/app_theme.dart';
 import '../state/cloud_sync.dart';
+import 'clarity.dart';
 
 /// "Synced 10:42" / "Offline" / "3 waiting" — the online sync at a glance,
 /// in the top bar. Hidden when sync is off.
@@ -20,28 +21,24 @@ class SyncStatusBadge extends ConsumerWidget {
     final theme = Theme.of(context);
     final muted = Dt.textMuted(theme);
     final (icon, color, label, tip) = describeSync(s, theme);
+    final tone = switch (s.phase) {
+      SyncPhase.live when s.pending > 0 && !s.adminLinked => PillTone.warning,
+      SyncPhase.live when s.pending == 0 => PillTone.positive,
+      SyncPhase.error => PillTone.negative,
+      _ => PillTone.neutral,
+    };
     return Tooltip(
       message: tip,
       child: InkWell(
-        borderRadius: BorderRadius.circular(Dt.rSm),
+        key: const ValueKey('sync-status'),
+        borderRadius: BorderRadius.circular(Dt.rPill),
         onTap: () => ref.read(cloudSyncProvider.notifier).syncNow(),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 15, color: color ?? muted),
-              if (!compact) ...[
-                const SizedBox(width: 6),
-                Text(
-                  label,
-                  style: Dt.tab(theme.textTheme.labelSmall!)
-                      .copyWith(color: color ?? muted),
-                ),
-              ],
-            ],
-          ),
-        ),
+        child: compact
+            ? Padding(
+                padding: const EdgeInsets.all(8),
+                child: Icon(icon, size: 18, color: color ?? muted),
+              )
+            : StatusChip(label: label, icon: icon, tone: tone),
       ),
     );
   }

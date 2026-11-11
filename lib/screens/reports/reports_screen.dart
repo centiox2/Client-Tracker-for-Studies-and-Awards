@@ -13,6 +13,7 @@ import '../../services/export_actions.dart';
 import '../../services/fullscreen.dart';
 import '../../services/report_export.dart';
 import '../../state/app_state.dart';
+import '../../widgets/clarity.dart';
 import '../../widgets/motion.dart';
 import '../../widgets/panels.dart';
 import '../applications/applications_screen.dart' show ApplicationUpdateRow;
@@ -183,7 +184,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
       builder: (context, viewport) {
         final compact = viewport.maxWidth < 760;
         final phone = viewport.maxWidth < 600;
-        final pad = compact ? 14.0 : 18.0;
+        final pad = clarityHPad(context);
         return ListView(
           padding: EdgeInsets.fromLTRB(pad, 18, pad, 28),
           children: [
@@ -751,7 +752,7 @@ class _Tile extends StatelessWidget {
     final scheme = theme.colorScheme;
     return FadeSlideIn(
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
         decoration: BoxDecoration(
           color: scheme.surfaceContainerLow,
           border: Border.all(color: scheme.outline),
@@ -854,21 +855,16 @@ class _Panel extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(
-              padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
               decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: scheme.outline)),
+                border: Border(
+                  bottom: BorderSide(color: scheme.outlineVariant),
+                ),
               ),
               child: Row(
                 children: [
-                  Icon(icon, size: 15, color: scheme.onSurfaceVariant),
-                  const SizedBox(width: 8),
                   Expanded(
-                    child: Text(
-                      title,
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    child: Text(title, style: theme.textTheme.titleMedium),
                   ),
                   if (trailing != null)
                     Text(
@@ -938,7 +934,7 @@ class _Row extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final row = Container(
-      padding: EdgeInsets.symmetric(horizontal: 14, vertical: header ? 8 : 9),
+      padding: EdgeInsets.symmetric(horizontal: 20, vertical: header ? 8 : 9),
       decoration: BoxDecoration(
         border: last
             ? null

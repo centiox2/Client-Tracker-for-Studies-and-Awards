@@ -34,7 +34,7 @@ Values are **cumulative per day**: if Joy has `New = 3` at 10 AM and you type `5
 
 The UI follows an **Editorial** direction: a warm, print-inspired look (think a well-set newspaper or annual report) for a daily-use data-entry tool. All tokens live in one file — `lib/design/app_theme.dart` — which both screens and widgets import; no screen hardcodes colors or spacing. Shared editorial building blocks (page scaffolds, headers, stat strips, mini bar charts, chips, leaderboard/mix rows) live in `lib/widgets/editorial.dart`.
 
-- **Type pairing**: *Instrument Serif* for display text and every meaningful figure (tabular figures keep columns aligned via `Dt.display` / `Dt.numeral`), *Instrument Sans* for all UI text. Both are bundled in `assets/fonts/` and registered in `pubspec.yaml`.
+- **Type**: *Inter* (400–700) for everything, with tabular figures for numbers. Bundled in `assets/fonts/` (SIL Open Font License, `Inter-LICENSE.txt`) and registered in `pubspec.yaml`.
 - **Uppercase micro-labels**: 12px / w600 with +1.1 tracking (`microLabel`) name every section — "THIS WEEK", "DAY TOTAL", "MOST CLIENTS" — like print captions.
 - **Duotone data pair, nothing else colored**: New clients are always **peach** (`Dt.newGreen`), Existing clients always **periwinkle** (`Dt.existingBlue`), in inputs, charts and figures alike. Everything else stays in the warm neutral palette; a soft green dot marks Active staff.
 - **Warm paper palette**: dark = ink on warm charcoal (`#141211` bg, `#1B1817` panels); light = warm paper (`#F7F4F1` bg, `#EFEAE5` panels). Depth is 1px hairline borders (`Dt.border` / `Dt.borderStrong`); no shadows or gradients.

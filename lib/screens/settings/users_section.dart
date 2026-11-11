@@ -325,7 +325,7 @@ class _UsersSectionState extends ConsumerState<UsersSection> {
           ? null
           : '${users.where((u) => u.active).length} active',
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

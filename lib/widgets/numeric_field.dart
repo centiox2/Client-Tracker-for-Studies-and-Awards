@@ -231,7 +231,7 @@ class _NumericFieldState extends State<NumericField> {
         : (widget.valueColor ?? scheme.onSurface);
     TextStyle digits(Color color, FontWeight weight) => Dt.tab(
       TextStyle(
-        fontFamily: 'Instrument Sans',
+        fontFamily: 'Inter',
         fontSize: widget.fontSize,
         fontWeight: weight,
         color: color,

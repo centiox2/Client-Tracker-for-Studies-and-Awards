@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
 import 'design/app_theme.dart';
 import 'screens/daily_reports/daily_reports_screen.dart';
@@ -26,11 +25,12 @@ import 'screens/weekly_tracker/weekly_tracker_screen.dart';
 import 'state/app_state.dart';
 import 'services/auto_backup.dart';
 import 'state/cloud_sync.dart';
-import 'screens/weekly_tracker/new_week_dialog.dart';
 import 'widgets/motion.dart';
 import 'widgets/sync_status.dart';
 import 'widgets/numeric_field.dart';
-import 'widgets/week_label.dart';
+import 'widgets/app_page_header.dart';
+import 'widgets/clarity.dart';
+import 'services/export_actions.dart';
 
 class ClientTrackerApp extends ConsumerWidget {
   const ClientTrackerApp({super.key});
@@ -71,27 +71,27 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   static const _reportsTab = _AppTabInfo(
     AppTab.reports,
     'Reports',
-    Icons.insights_outlined,
+    Icons.show_chart,
   );
 
   static const _adminTabs = <_AppTabInfo>[
     _AppTabInfo(
       AppTab.home,
       'Overview',
-      Icons.space_dashboard_outlined,
+      Icons.grid_view_outlined,
       shortLabel: 'Home',
     ),
     _dailyReportsTab,
     _AppTabInfo(
       AppTab.week,
       'Weekly tracker',
-      Icons.calendar_view_week_outlined,
+      Icons.calendar_today_outlined,
       shortLabel: 'Tracker',
     ),
     _revenueTab,
     _applicationsTab,
     _AppTabInfo(AppTab.history, 'History', Icons.history),
-    _AppTabInfo(AppTab.staff, 'Staff', Icons.groups_2_outlined),
+    _AppTabInfo(AppTab.staff, 'Staff', Icons.people_outline),
     _reportsTab,
     _AppTabInfo(AppTab.settings, 'Settings', Icons.settings_outlined),
   ];
@@ -99,7 +99,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   static const _dailyReportsTab = _AppTabInfo(
     AppTab.dailyReports,
     'Daily reports',
-    Icons.fact_check_outlined,
+    Icons.description_outlined,
     shortLabel: 'Daily',
   );
 
@@ -134,7 +134,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     _revenueTab,
     _applicationsTab,
     _AppTabInfo(AppTab.history, 'History', Icons.history),
-    _AppTabInfo(AppTab.staff, 'Staff', Icons.groups_2_outlined),
+    _AppTabInfo(AppTab.staff, 'Staff', Icons.people_outline),
   ];
 
   /// View-only profiles (Director, Team): nothing that changes data.
@@ -363,6 +363,33 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     AppTab.settings => const SettingsScreen(),
   };
 
+  /// Every page starts with its Clarity header (date, title, sync). The
+  /// Overview draws its own, with its toolbar.
+  Widget _withHeader(AppTab tab) {
+    final page = _page(tab);
+    if (tab == AppTab.home) return page;
+    final h = clarityHPad(context);
+    final phone = MediaQuery.sizeOf(context).width < 640;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: EdgeInsets.fromLTRB(h, phone ? 20 : 28, h, 4),
+          child: AppPageHeader(
+            tab: tab,
+            actions: [
+              // Narrow screens: the tracker's week (wide ones have it in the
+              // board's toolbar).
+              if (tab == AppTab.week && MediaQuery.sizeOf(context).width < 920)
+                WeekRangeButton(canStart: ref.read(canEditProvider)),
+            ],
+          ),
+        ),
+        Expanded(child: page),
+      ],
+    );
+  }
+
   /// The phone's "More" sheet: the pages that don't fit the bottom bar.
   void _showMore(List<_AppTabInfo> tabs, AppTab current) {
     showModalBottomSheet<void>(
@@ -402,14 +429,13 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         : (isViewer ? AppTab.reports : allowed.first.tab);
     final width = MediaQuery.sizeOf(context).width;
     final desktop = width >= 1050;
-    final theme = Theme.of(context);
 
     final content = Focus(
       focusNode: _focusNode,
       autofocus: true,
       onKeyEvent: (_, event) => _handleKey(event),
       child: FadeThroughSwitcher(
-        child: KeyedSubtree(key: ValueKey(tab), child: _page(tab)),
+        child: KeyedSubtree(key: ValueKey(tab), child: _withHeader(tab)),
       ),
     );
 
@@ -441,7 +467,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           child: Column(
             children: [
               const _MobileTopBar(),
-              if (!isViewer) _ContextBar(tab: tab),
+              Divider(height: 1, color: context.clarity.border),
               Expanded(child: content),
             ],
           ),
@@ -485,6 +511,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
     return Scaffold(
       body: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _AppSidebar(
             reportDue: reportDue,
@@ -493,21 +520,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             onSelect: (value) => ref.read(navTabProvider.notifier).set(value),
             onSearch: isViewer ? null : () => showQuickSearch(context),
           ),
-          VerticalDivider(
-            width: 1,
-            thickness: 1,
-            color: theme.colorScheme.outline,
-          ),
-          Expanded(
-            child: Column(
-              children: [
-                _TopBar(tab: tab),
-                // Navigation lives in the sidebar only (no duplicate tabs).
-                if (!isViewer && _weekTabs.contains(tab)) _ContextBar(tab: tab),
-                Expanded(child: content),
-              ],
-            ),
-          ),
+          Expanded(child: content),
         ],
       ),
     );
@@ -524,7 +537,9 @@ class _AppTabInfo {
   final String? shortLabel;
 }
 
-class _AppSidebar extends StatelessWidget {
+/// The sidebar (248px): the brand, search, the menu, a backup notice when
+/// one is due, and who's signed in with the light/dark switch and sign out.
+class _AppSidebar extends ConsumerWidget {
   const _AppSidebar({
     this.reportDue = false,
     required this.tabs,
@@ -543,54 +558,46 @@ class _AppSidebar extends StatelessWidget {
   final VoidCallback? onSearch;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final mainTabs = tabs.where((tab) => tab.tab != AppTab.settings).toList();
-    final settings = tabs
-        .where((tab) => tab.tab == AppTab.settings)
-        .firstOrNull;
+    final c = context.clarity;
 
     Widget navItem(_AppTabInfo item) {
       final active = selected == item.tab;
       return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 1),
-        child: AnimatedContainer(
-          duration: Motion.of(context, Motion.fast),
-          curve: Motion.curve,
-          decoration: BoxDecoration(
-            color: active ? scheme.surfaceContainerHigh : Colors.transparent,
+        padding: const EdgeInsets.only(bottom: 2),
+        child: Material(
+          color: active ? c.accentSoft : Colors.transparent,
+          borderRadius: BorderRadius.circular(Dt.rSm),
+          child: InkWell(
             borderRadius: BorderRadius.circular(Dt.rSm),
-          ),
-          child: Material(
-            type: MaterialType.transparency,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(Dt.rSm),
-              onTap: () => onSelect(item.tab),
+            hoverColor: c.neutralBg,
+            onTap: () => onSelect(item.tab),
+            child: Semantics(
+              selected: active,
+              button: true,
               child: SizedBox(
-                height: 34,
+                height: 40,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
                   child: Row(
                     children: [
                       Icon(
                         item.icon,
-                        size: 16,
-                        color: active
-                            ? Dt.brand(theme.brightness)
-                            : scheme.onSurfaceVariant,
+                        size: 18,
+                        color: active ? c.accent : c.textSecondary,
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 12),
                       Expanded(
                         child: Text(
                           item.label,
-                          style: theme.textTheme.labelMedium?.copyWith(
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
                             fontWeight: active
                                 ? FontWeight.w600
                                 : FontWeight.w400,
-                            color: active
-                                ? scheme.onSurface
-                                : scheme.onSurfaceVariant,
+                            color: active ? c.accent : c.textSecondary,
                           ),
                         ),
                       ),
@@ -602,16 +609,10 @@ class _AppSidebar extends StatelessWidget {
                             width: 8,
                             height: 8,
                             decoration: BoxDecoration(
-                              color: Dt.brand(theme.brightness),
+                              color: c.seriesNew,
                               shape: BoxShape.circle,
                             ),
                           ),
-                        ),
-                      if (item.tab == AppTab.week)
-                        Icon(
-                          Icons.chevron_right,
-                          size: 15,
-                          color: scheme.onSurfaceVariant,
                         ),
                     ],
                   ),
@@ -623,322 +624,299 @@ class _AppSidebar extends StatelessWidget {
       );
     }
 
-    return SizedBox(
-      width: 232,
-      child: ColoredBox(
-        color: theme.scaffoldBackgroundColor,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SizedBox(height: 12),
-            const _AccountMenu(),
-            const SizedBox(height: 15),
-            if (onSearch != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: SizedBox(
-                  height: 34,
-                  // Looks like a field but only opens the search dialog.
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: GestureDetector(
-                      // Opaque: the field below ignores pointers, so the
-                      // detector must claim the tap itself.
-                      behavior: HitTestBehavior.opaque,
-                      onTap: onSearch,
-                      child: IgnorePointer(
-                        child: TextField(
-                          readOnly: true,
-                          decoration: InputDecoration(
-                            hintText: 'Quick search…',
-                            prefixIcon: const Icon(Icons.search, size: 16),
-                            suffixIcon: Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: Center(
-                                widthFactor: 1,
-                                child: Text(
-                                  'Ctrl K',
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            contentPadding: EdgeInsets.zero,
-                            prefixIconConstraints: const BoxConstraints(
-                              minWidth: 34,
-                            ),
-                            suffixIconConstraints: const BoxConstraints(
-                              minWidth: 52,
-                            ),
-                            filled: true,
-                            fillColor: scheme.surfaceContainerLow,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(Dt.rSm),
-                              borderSide: BorderSide(color: scheme.outline),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(Dt.rSm),
-                              borderSide: BorderSide(color: scheme.outline),
-                            ),
-                          ),
-                          style: theme.textTheme.labelSmall,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            const SizedBox(height: 14),
-            _SidebarCaption(onSearch == null ? 'VIEW ONLY' : 'WORKSPACE'),
-            for (final item in mainTabs) navItem(item),
-            const SizedBox(height: 13),
-            const Divider(height: 1),
-            const Spacer(),
-            if (settings != null) ...[
-              const Divider(height: 1),
-              const SizedBox(height: 8),
-              navItem(settings),
-              const SizedBox(height: 10),
-            ],
-          ],
-        ),
+    final backupDue = ref.watch(backupDueProvider);
+    final lastBackup = ref.watch(lastBackupProvider);
+    return Container(
+      width: 248,
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(right: BorderSide(color: c.border)),
       ),
-    );
-  }
-}
-
-/// Sidebar header: who is signed in, with Sign out.
-class _AccountMenu extends ConsumerWidget {
-  const _AccountMenu();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final role = ref.watch(sessionProvider);
-    final user = ref.watch(currentUserProvider);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: PopupMenuButton<String>(
-        key: const ValueKey('account-menu'),
-        tooltip: 'Account',
-        position: PopupMenuPosition.under,
-        onSelected: (action) => action == 'password'
-            ? showChangeOwnPassword(context)
-            : ref.read(sessionProvider.notifier).signOut(),
-        itemBuilder: (_) => [
-          if (user != null) ...[
-            PopupMenuItem(
-              enabled: false,
-              child: Text(
-                '${user.fullName} · @${user.username}',
-                style: theme.textTheme.labelMedium,
-              ),
-            ),
-            const PopupMenuItem(
-              value: 'password',
-              child: Row(
-                children: [
-                  Icon(Icons.key_outlined, size: 16),
-                  SizedBox(width: 10),
-                  Text('Change password'),
-                ],
-              ),
-            ),
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const _Brand(),
+          const SizedBox(height: 20),
+          if (onSearch != null) ...[
+            _SearchBox(onTap: onSearch!),
+            const SizedBox(height: 20),
           ],
-          PopupMenuItem(
-            value: 'account',
-            child: Row(
-              children: [
-                Icon(
-                  user != null ? Icons.logout : Icons.switch_account_outlined,
-                  size: 16,
-                ),
-                const SizedBox(width: 10),
-                Text(user != null ? 'Sign out' : 'Switch profile'),
-              ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+            child: Text(
+              onSearch == null ? 'VIEW ONLY' : 'WORKSPACE',
+              style: microLabel(theme),
             ),
           ),
-        ],
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-          child: Row(
-            children: [
-              const _BrandMark(),
-              const SizedBox(width: 9),
-              Expanded(
+          Expanded(
+            child: ScrollConfiguration(
+              // No scrollbar over the menu; it scrolls only if the window
+              // is very short.
+              behavior: ScrollConfiguration.of(context)
+                  .copyWith(scrollbars: false),
+              child: SingleChildScrollView(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      Dt.appName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    Text(
-                      user != null
-                          ? '${user.fullName} · ${user.role.label}'
-                          : role == null
-                          ? ''
-                          : 'Signed in as ${role.label}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        fontSize: 10.5,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [for (final item in tabs) navItem(item)],
                 ),
               ),
-              Icon(Icons.unfold_more, size: 15, color: scheme.onSurfaceVariant),
-            ],
+            ),
           ),
-        ),
+          const SizedBox(height: 12),
+          if (backupDue) ...[
+            NoticeBox(
+              key: const ValueKey('backup-notice'),
+              title: lastBackup == null
+                  ? 'No backup yet'
+                  : 'Last backup '
+                        '${DateTime.now().difference(lastBackup).inDays} days ago',
+              message:
+                  'Data lives only on this device. Save a copy to USB or '
+                  'email.',
+              actionLabel: 'Back up now',
+              onAction: () => backupToFile(context, ref),
+            ),
+            const SizedBox(height: 12),
+          ],
+          const _UserRow(),
+        ],
       ),
     );
   }
 }
 
-class _SidebarCaption extends StatelessWidget {
-  const _SidebarCaption(this.label);
-  final String label;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(20, 0, 12, 6),
-    child: Text(
-      label,
-      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-        fontSize: 10,
-        letterSpacing: 0.4,
-        color: Theme.of(context).colorScheme.onSurfaceVariant,
-      ),
-    ),
-  );
-}
-
-/// Today's date and the time, ticking each minute — so a screen left open
-/// (e.g. on the boss's desk) shows at a glance how current it is.
-class _Clock extends StatefulWidget {
-  const _Clock();
-
-  @override
-  State<_Clock> createState() => _ClockState();
-}
-
-class _ClockState extends State<_Clock> {
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _schedule();
-  }
-
-  void _schedule() {
-    final now = DateTime.now();
-    _timer = Timer(Duration(seconds: 60 - now.second), () {
-      if (!mounted) return;
-      setState(() {});
-      _schedule();
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
+/// The "S&A" mark and the company.
+class _Brand extends StatelessWidget {
+  const _Brand();
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final now = DateTime.now();
-    final time =
-        '${now.hour.toString().padLeft(2, '0')}:'
-        '${now.minute.toString().padLeft(2, '0')}';
-    return Text(
-      '${DateFormat('EEEE d MMMM').format(now)} · $time',
-      style: theme.textTheme.labelSmall?.copyWith(
-        color: theme.colorScheme.onSurfaceVariant,
+    final c = context.clarity;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(
+        children: [
+          const _BrandMark(size: 36),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  Dt.appName,
+                  style: theme.textTheme.titleSmall?.copyWith(fontSize: 15),
+                ),
+                Text(
+                  Dt.companyShort,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: c.textMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _TopBar extends ConsumerWidget {
-  const _TopBar({required this.tab});
-  final AppTab tab;
+/// Looks like a field; opens the quick search (Ctrl K).
+class _SearchBox extends StatelessWidget {
+  const _SearchBox({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = context.clarity;
+    return Semantics(
+      button: true,
+      label: 'Search',
+      child: Material(
+        color: c.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Dt.rSm),
+          side: BorderSide(color: c.border),
+        ),
+        child: InkWell(
+          key: const ValueKey('sidebar-search'),
+          borderRadius: BorderRadius.circular(Dt.rSm),
+          onTap: onTap,
+          child: SizedBox(
+            height: 40,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: [
+                  Icon(Icons.search, size: 18, color: c.textMuted),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Search clients, staff…',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: c.textMuted,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 1,
+                    ),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: c.border),
+                      borderRadius: BorderRadius.circular(Dt.rTag),
+                    ),
+                    child: Text(
+                      'Ctrl K',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        fontSize: 11,
+                        color: c.textMuted,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Who's signed in (tap for the account menu), the light/dark switch and
+/// sign out.
+class _UserRow extends ConsumerWidget {
+  const _UserRow();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final color = theme.colorScheme.onSurfaceVariant;
-    final isViewer = !ref.watch(canEditProvider);
-    return SizedBox(
-      height: 46,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: theme.colorScheme.outline)),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              Text(
-                _tabLabel(tab),
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(width: 14),
-              const _Clock(),
-              const Spacer(),
-              const SyncStatusBadge(),
-              const SizedBox(width: 8),
-              // Week pages refresh from their context bar; elsewhere here.
-              if (isViewer || !_weekTabs.contains(tab)) ...[
-                TextButton.icon(
+    final c = context.clarity;
+    final role = ref.watch(sessionProvider);
+    final user = ref.watch(currentUserProvider);
+    final canEdit = ref.watch(canEditProvider);
+    final name = user?.fullName ?? role?.label ?? '';
+    final initials = name
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .take(2)
+        .map((w) => w[0].toUpperCase())
+        .join();
+    final dark = theme.brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: MenuAnchor(
+              alignmentOffset: const Offset(0, -4),
+              menuChildren: [
+                if (user != null)
+                  MenuItemButton(
+                    leadingIcon: const Icon(Icons.key_outlined, size: 16),
+                    onPressed: () => showChangeOwnPassword(context),
+                    child: const Text('Change password'),
+                  ),
+                if (canEdit)
+                  MenuItemButton(
+                    leadingIcon: const Icon(Icons.keyboard_outlined, size: 16),
+                    onPressed: () => showShortcutsDialog(context),
+                    child: const Text('Keyboard shortcuts'),
+                  ),
+                MenuItemButton(
+                  leadingIcon: const Icon(Icons.refresh, size: 16),
                   onPressed: () =>
                       ref.read(dataVersionProvider.notifier).bump(),
-                  style: TextButton.styleFrom(foregroundColor: color),
-                  icon: const Icon(Icons.refresh, size: 15),
-                  label: const Text('Refresh'),
+                  child: const Text('Refresh data'),
                 ),
-                const SizedBox(width: 6),
               ],
-              if (!isViewer)
-                IconButton(
-                  tooltip: 'Keyboard shortcuts',
-                  onPressed: () => showShortcutsDialog(context),
-                  icon: const Icon(Icons.help_outline, size: 17),
-                ),
-              if (ref.watch(currentUserProvider) case final user?)
-                TextButton.icon(
-                  key: const ValueKey('sign-out'),
-                  onPressed: () => ref.read(sessionProvider.notifier).signOut(),
-                  style: TextButton.styleFrom(foregroundColor: color),
-                  icon: const Icon(Icons.logout, size: 15),
-                  label: Text('${user.fullName} · Sign out'),
-                )
-              else
-                TextButton.icon(
-                  key: const ValueKey('switch-profile'),
-                  onPressed: () => ref.read(sessionProvider.notifier).signOut(),
-                  style: TextButton.styleFrom(foregroundColor: color),
-                  icon: const Icon(Icons.switch_account_outlined, size: 15),
-                  label: Text(
-                    '${ref.watch(sessionProvider)?.label ?? ''} · Switch',
+              builder: (context, controller, _) => InkWell(
+                key: const ValueKey('account-menu'),
+                borderRadius: BorderRadius.circular(Dt.rSm),
+                onTap: () =>
+                    controller.isOpen ? controller.close() : controller.open(),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 16,
+                        backgroundColor: c.border,
+                        child: Text(
+                          initials,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: c.text,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: c.text,
+                              ),
+                            ),
+                            Text(
+                              user?.role.label ??
+                                  (role == null ? '' : 'Profile'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: c.textMuted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-            ],
+              ),
+            ),
           ),
-        ),
+          IconButton(
+            key: const ValueKey('theme-toggle'),
+            tooltip: dark ? 'Switch to light' : 'Switch to dark',
+            onPressed: () => ref
+                .read(themeModeProvider.notifier)
+                .toggle(MediaQuery.platformBrightnessOf(context)),
+            icon: Icon(
+              dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+              size: 18,
+            ),
+          ),
+          if (user != null)
+            IconButton(
+              key: const ValueKey('sign-out'),
+              tooltip: 'Sign out',
+              onPressed: () => ref.read(sessionProvider.notifier).signOut(),
+              icon: const Icon(Icons.logout, size: 18),
+            )
+          else
+            IconButton(
+              key: const ValueKey('switch-profile'),
+              tooltip: 'Switch profile',
+              onPressed: () => ref.read(sessionProvider.notifier).signOut(),
+              icon: const Icon(Icons.switch_account_outlined, size: 18),
+            ),
+        ],
       ),
     );
   }
@@ -1017,188 +995,35 @@ class _MobileTopBar extends ConsumerWidget {
   );
 }
 
+/// The "S&A" mark: accent square, white letters.
 class _BrandMark extends StatelessWidget {
-  const _BrandMark();
+  const _BrandMark({this.size = 28});
+  final double size;
 
   @override
-  Widget build(BuildContext context) => ClipRRect(
-    borderRadius: BorderRadius.circular(Dt.rSm),
-    child: Image.asset(
-      Dt.logoAsset,
-      width: 28,
-      height: 28,
-      filterQuality: FilterQuality.medium,
-      semanticLabel: '${Dt.companyName} logo',
-    ),
-  );
-}
-
-class _ContextBar extends ConsumerWidget {
-  const _ContextBar({required this.tab});
-  final AppTab tab;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final compact = MediaQuery.sizeOf(context).width < 600;
-    final week = ref.watch(currentWeekProvider)?.week;
-    final range = week == null
-        ? 'No active week'
-        : '${week.startDate.day}/${week.startDate.month}/${week.startDate.year}  –  '
-              '${week.endDate.day}/${week.endDate.month}/${week.endDate.year}';
-    final picksWeek = tab == AppTab.home || tab == AppTab.week;
-    // On desktop the top bar already names the page; phones have no top bar.
-    final desktop = MediaQuery.sizeOf(context).width >= 1050;
-    final label = picksWeek ? range : (desktop ? '' : _tabLabel(tab));
-    final labelText = Text(
-      label,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w500),
-    );
-    final title = picksWeek
-        ? _WeekPicker(
-            selectedId: week?.id,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Flexible(child: labelText),
-                const Icon(Icons.arrow_drop_down, size: 17),
-              ],
-            ),
-          )
-        : labelText;
-    return SizedBox(
-      height: 48,
-      child: DecoratedBox(
+  Widget build(BuildContext context) {
+    final c = context.clarity;
+    return Semantics(
+      label: '${Dt.companyName} logo',
+      child: Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
         decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: theme.colorScheme.outline)),
+          color: c.accent,
+          borderRadius: BorderRadius.circular(Dt.rSm),
         ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              Expanded(
-                child: Align(alignment: Alignment.centerLeft, child: title),
-              ),
-              if (compact)
-                IconButton(
-                  tooltip: 'Refresh',
-                  visualDensity: VisualDensity.compact,
-                  onPressed: () =>
-                      ref.read(dataVersionProvider.notifier).bump(),
-                  icon: const Icon(Icons.refresh, size: 16),
-                )
-              else
-                TextButton.icon(
-                  onPressed: () =>
-                      ref.read(dataVersionProvider.notifier).bump(),
-                  icon: const Icon(Icons.refresh, size: 14),
-                  label: const Text('Refresh'),
-                ),
-              // Starting a week belongs with the weeks, not every page.
-              if (picksWeek || tab == AppTab.history) ...[
-                const SizedBox(width: 6),
-                OutlinedButton.icon(
-                  onPressed: () => showNewWeekDialog(context, ref),
-                  icon: const Icon(Icons.add, size: 14),
-                  label: const Text('New week'),
-                ),
-              ],
-            ],
+        child: Text(
+          'S&A',
+          style: TextStyle(
+            fontFamily: Dt.font,
+            fontSize: size * 0.36,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.3,
+            color: c.onAccent,
           ),
         ),
       ),
     );
   }
 }
-
-/// The context bar's week dropdown: switches the week shown on the
-/// Overview and in the Weekly tracker.
-class _WeekPicker extends ConsumerWidget {
-  const _WeekPicker({required this.selectedId, required this.child});
-  final int? selectedId;
-  final Widget child;
-
-  static const _maxListed = 10;
-  static const _allWeeks = -1;
-  static const _newWeek = -2;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    return PopupMenuButton<int>(
-      tooltip: 'Switch week',
-      position: PopupMenuPosition.under,
-      constraints: const BoxConstraints(minWidth: 260),
-      onSelected: (value) {
-        if (value == _allWeeks) {
-          ref.read(appActionsProvider).selectTab(AppTab.history);
-        } else if (value == _newWeek) {
-          showNewWeekDialog(context, ref);
-        } else {
-          ref.read(currentWeekIdProvider.notifier).set(value);
-        }
-      },
-      // Read (not watch) when the menu opens: watching kept every week's
-      // totals recalculating on each keystroke in the tracker, just to keep
-      // a closed menu up to date.
-      itemBuilder: (context) {
-        final weeks = ref.read(historyProvider);
-        return [
-          for (final w in weeks.take(_maxListed))
-            PopupMenuItem(
-              value: w.week.id,
-              height: 40,
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 22,
-                    child: w.week.id == selectedId
-                        ? const Icon(Icons.check, size: 15)
-                        : null,
-                  ),
-                  Expanded(
-                    child: Text(
-                      weekRangeLabel(w.week.startDate, w.week.endDate),
-                      style: theme.textTheme.labelMedium,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    '${w.totals.total}',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          if (weeks.isNotEmpty) const PopupMenuDivider(),
-          if (weeks.length > _maxListed)
-            const PopupMenuItem(value: _allWeeks, child: Text('All weeks…')),
-          const PopupMenuItem(value: _newWeek, child: Text('New week…')),
-        ];
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: child,
-      ),
-    );
-  }
-}
-
-/// Pages about weeks: their context bar picks the week and starts new ones.
-const _weekTabs = {AppTab.home, AppTab.week, AppTab.history};
-
-String _tabLabel(AppTab tab) => switch (tab) {
-  AppTab.home => 'Overview',
-  AppTab.dailyReports => 'Daily reports',
-  AppTab.revenue => 'Revenue',
-  AppTab.applications => 'Applications',
-  AppTab.week => 'Weekly tracker',
-  AppTab.history => 'History',
-  AppTab.staff => 'Staff',
-  AppTab.reports => 'Reports',
-  AppTab.settings => 'Settings',
-};

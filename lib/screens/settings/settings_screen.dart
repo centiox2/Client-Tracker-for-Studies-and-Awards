@@ -13,6 +13,7 @@ import '../../services/export_actions.dart';
 import '../../services/file_delivery.dart';
 import '../../state/app_state.dart';
 import '../../state/cloud_sync.dart';
+import '../../widgets/clarity.dart';
 import '../../widgets/panels.dart';
 import '../../widgets/sync_status.dart';
 import '../history/change_history_dialog.dart';
@@ -358,7 +359,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     return LayoutBuilder(
       builder: (context, viewport) {
-        final pad = viewport.maxWidth < 900 ? 14.0 : 18.0;
+        final pad = clarityHPad(context);
         final twoColumns = viewport.maxWidth >= 900;
         return Scrollbar(
           controller: _scroll,
@@ -867,7 +868,7 @@ class _Section extends StatelessWidget {
       title: title,
       icon: icon,
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

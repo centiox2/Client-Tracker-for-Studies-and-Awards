@@ -89,7 +89,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Latest updates'), findsOneWidget);
-    expect(find.text('Signed in as Director'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('account-menu')),
+        matching: find.text('Director'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Revenue'), findsWidgets); // the director sees it
     // Nothing that changes data.
     for (final hidden in [
@@ -121,7 +127,13 @@ void main() {
   ) async {
     WeekRepository(db).createWeekFor(DateTime.now());
     await pumpApp(tester, role: UserRole.adminTeam);
-    expect(find.text('Signed in as Admin team'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('account-menu')),
+        matching: find.text('Admin team'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Weekly tracker'), findsOneWidget);
     expect(find.text('Overview'), findsWidgets);
     expect(find.text('Revenue'), findsNothing);
@@ -152,7 +164,13 @@ void main() {
     );
     await tester.tap(find.byKey(const ValueKey('profile-open')));
     await tester.pumpAndSettle();
-    expect(find.text('Signed in as Team'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('account-menu')),
+        matching: find.text('Team'),
+      ),
+      findsOneWidget,
+    );
 
     // Switch profile goes back to the profiles.
     await tester.tap(find.byKey(const ValueKey('switch-profile')));
@@ -183,7 +201,13 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await pumpApp(tester, picker: true);
     expect(find.text('Who’s using the app?'), findsNothing);
-    expect(find.text('Signed in as Director'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('account-menu')),
+        matching: find.text('Director'),
+      ),
+      findsOneWidget,
+    );
 
     // Switch profile signs out for good.
     await tester.tap(find.byKey(const ValueKey('switch-profile')));
@@ -273,7 +297,7 @@ void main() {
     expect(find.byTooltip('Delete week'), findsNothing);
 
     // Staff: the team, with no add, rename, deactivate, delete or reorder.
-    await tester.tap(find.byIcon(Icons.groups_2_outlined));
+    await tester.tap(find.text('Staff').first);
     await tester.pumpAndSettle();
     expect(find.text('Team'), findsOneWidget);
     expect(find.text('Add to the team'), findsNothing);
@@ -310,7 +334,13 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Clients this month'), findsOneWidget);
-      expect(find.text('Signed in as Admin'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('account-menu')),
+          matching: find.text('Admin'),
+        ),
+        findsOneWidget,
+      );
       expect(AuthRepository(db).verifyAdmin('admin-pass'), isTrue);
     },
   );

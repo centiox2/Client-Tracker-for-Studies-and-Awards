@@ -155,7 +155,7 @@ void main() {
     expect(find.textContaining('Saved ·'), findsNothing);
 
     // Hover a cell to reveal its "+", then tap it twice.
-    final cell = find.byType(TextField).at(1);
+    final cell = find.byType(TextField).at(0);
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.addPointer(location: tester.getCenter(cell));
     addTearDown(gesture.removePointer);
@@ -330,11 +330,12 @@ void main() {
 
   testWidgets('backup reminder shows until a backup is saved', (tester) async {
     final container = await pumpApp(tester);
-    expect(find.text('No backup saved yet'), findsOneWidget);
+    expect(find.byKey(const ValueKey('backup-notice')), findsOneWidget);
+    expect(find.text('No backup yet'), findsOneWidget);
 
     container.read(lastBackupProvider.notifier).markNow();
     await tester.pumpAndSettle();
-    expect(find.text('No backup saved yet'), findsNothing);
+    expect(find.byKey(const ValueKey('backup-notice')), findsNothing);
   });
 
   testWidgets('a recent backup means no reminder', (tester) async {

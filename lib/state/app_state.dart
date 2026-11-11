@@ -510,7 +510,9 @@ class ThemeModeNotifier extends Notifier<ThemeMode> {
   @override
   ThemeMode build() {
     _load();
-    return ThemeMode.dark;
+    // Clarity is light-first: light, or dark when the computer is set to
+    // dark — until someone picks one with the moon button.
+    return ThemeMode.system;
   }
 
   Future<void> _load() async {
@@ -518,10 +520,21 @@ class ThemeModeNotifier extends Notifier<ThemeMode> {
     _loaded = true;
 
     final prefs = await SharedPreferences.getInstance();
-    final index = prefs.getInt('themeMode') ?? ThemeMode.dark.index;
+    final index = prefs.getInt('themeMode') ?? ThemeMode.system.index;
     if (index >= 0 && index < ThemeMode.values.length) {
       state = ThemeMode.values[index];
     }
+  }
+
+  /// The moon button: light ↔ dark ([platform] is the computer's setting,
+  /// for when nothing has been picked yet).
+  void toggle(Brightness platform) {
+    final dark = switch (state) {
+      ThemeMode.dark => true,
+      ThemeMode.light => false,
+      ThemeMode.system => platform == Brightness.dark,
+    };
+    set(dark ? ThemeMode.light : ThemeMode.dark);
   }
 
   void set(ThemeMode mode) {

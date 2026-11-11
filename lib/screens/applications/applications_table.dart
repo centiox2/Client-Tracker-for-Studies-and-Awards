@@ -293,7 +293,7 @@ class _ApplicationsTableState extends State<ApplicationsTable> {
       height: 46,
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHigh,
-        border: Border(bottom: BorderSide(color: scheme.outline)),
+        border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
       ),
       child: Row(
         children: [
