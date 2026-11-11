@@ -37,7 +37,10 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
   String? _status;
   String? _country;
   String? _assignee;
+  String? _rto;
   bool _inProgressOnly = false;
+  bool _offerOverdueOnly = false;
+  _AppSort _sort = _AppSort.stage;
   bool _dragging = false;
   bool _busy = false;
   bool _syncing = false;
@@ -342,7 +345,8 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
                 _view = _View.list;
                 _status = status;
                 _inProgressOnly = inProgress;
-                _country = _assignee = null;
+                _country = _assignee = _rto = null;
+                _offerOverdueOnly = false;
                 _search.clear();
               }),
         ),
@@ -686,13 +690,19 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
     final theme = Theme.of(context);
     final muted = Dt.textMuted(theme);
     final q = _search.text.trim().toLowerCase();
+    final now = DateTime.now();
     final shown = [
       for (final a in apps)
         if ((_status == null ||
                 (a.status.isEmpty ? 'No status' : a.status) == _status) &&
             (_country == null || a.country == _country) &&
-            (_assignee == null || a.assignee == _assignee) &&
+            (_assignee == null ||
+                (_assignee == _noAssignee
+                    ? a.assignee.isEmpty
+                    : a.assignee == _assignee)) &&
+            (_rto == null || a.rto == _rto) &&
             (!_inProgressOnly || a.inProgress) &&
+            (!_offerOverdueOnly || a.offerOverdue(now)) &&
             (q.isEmpty ||
                 '${a.student} ${a.rto} ${a.country} ${a.status} ${a.assignee} '
                         '${a.todo}'
@@ -711,6 +721,30 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
         (a, b) =>
             ApplicationRepository.statusRank(a)
                 .compareTo(ApplicationRepository.statusRank(b)),
+      );
+    // Any sort but "Stage" shows one flat list (each row with its status).
+    int byDate(DateTime? x, DateTime? y, {bool newest = true}) {
+      if (x == null && y == null) return 0;
+      if (x == null) return 1; // undated last either way
+      if (y == null) return -1;
+      return newest ? y.compareTo(x) : x.compareTo(y);
+    }
+
+    final flat = [...shown]
+      ..sort(
+        (x, y) => switch (_sort) {
+          _AppSort.stage => 0,
+          _AppSort.name => x.student.toLowerCase().compareTo(
+            y.student.toLowerCase(),
+          ),
+          _AppSort.appliedNewest => byDate(x.appDate, y.appDate),
+          _AppSort.appliedOldest => byDate(x.appDate, y.appDate, newest: false),
+          _AppSort.updated => byDate(x.updatedAt, y.updatedAt),
+          _AppSort.milestone => byDate(x.lastStep, y.lastStep),
+          _AppSort.offerWait => (y.offerWaitDays(now) ?? -1).compareTo(
+            x.offerWaitDays(now) ?? -1,
+          ),
+        },
       );
 
     List<String> options(String Function(Application) f) =>
@@ -783,17 +817,51 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
           options((a) => a.country),
           (v) => setState(() => _country = v),
         ),
+        filter('Assignee', _assignee, [
+          ...options((a) => a.assignee),
+          if (apps.any((a) => a.assignee.isEmpty)) _noAssignee,
+        ], (v) => setState(() => _assignee = v)),
         filter(
-          'Assignee',
-          _assignee,
-          options((a) => a.assignee),
-          (v) => setState(() => _assignee = v),
+          'Institution',
+          _rto,
+          options((a) => a.rto),
+          (v) => setState(() => _rto = v),
+        ),
+        SizedBox(
+          width: phone ? double.infinity : 230,
+          child: DropdownButtonFormField<_AppSort>(
+            key: const ValueKey('applications-sort'),
+            initialValue: _sort,
+            isExpanded: true,
+            isDense: true,
+            style: theme.textTheme.bodyMedium,
+            decoration: const InputDecoration(
+              labelText: 'Sort by',
+              isDense: true,
+              prefixIcon: Icon(Icons.sort, size: 18),
+            ),
+            items: [
+              for (final s in _AppSort.values)
+                DropdownMenuItem(value: s, child: Text(s.label)),
+            ],
+            onChanged: (v) => setState(() => _sort = v ?? _AppSort.stage),
+          ),
         ),
         FilterChip(
           key: const ValueKey('applications-in-progress'),
           label: const Text('In progress only'),
           selected: _inProgressOnly,
           onSelected: (v) => setState(() => _inProgressOnly = v),
+        ),
+        FilterChip(
+          key: const ValueKey('applications-offer-overdue'),
+          avatar: const Icon(Icons.notifications_active_outlined, size: 16),
+          label: Text(
+            'Offer letter overdue '
+            '(${apps.where((a) => a.offerOverdue(now)).length})',
+          ),
+          selected: _offerOverdueOnly,
+          onSelected: (v) => setState(() => _offerOverdueOnly = v),
         ),
       ],
     );
@@ -802,13 +870,18 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
         _status != null ||
         _country != null ||
         _assignee != null ||
+        _rto != null ||
         _inProgressOnly ||
+        _offerOverdueOnly ||
         q.isNotEmpty;
 
     return [
       AppPanel(
         // Keyed by the filters so the dropdowns show the current choice.
-        key: ValueKey('apps-$_status-$_country-$_assignee-$_inProgressOnly'),
+        key: ValueKey(
+          'apps-$_status-$_country-$_assignee-$_rto-$_inProgressOnly-'
+          '$_offerOverdueOnly-$_sort',
+        ),
         title: 'Applications',
         icon: Icons.school_outlined,
         trailing: filtered
@@ -824,8 +897,8 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
                 const SizedBox(height: 6),
                 TextButton.icon(
                   onPressed: () => setState(() {
-                    _status = _country = _assignee = null;
-                    _inProgressOnly = false;
+                    _status = _country = _assignee = _rto = null;
+                    _inProgressOnly = _offerOverdueOnly = false;
                     _search.clear();
                   }),
                   icon: const Icon(Icons.filter_alt_off_outlined, size: 16),
@@ -845,27 +918,37 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
         ),
       ),
       // Rows are separate list items so a long list scrolls smoothly.
-      for (final s in order) ...[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 14, 4, 6),
-          child: Row(
-            children: [
-              TagChip(s, AirtableTags.status(s)),
-              const SizedBox(width: 8),
-              Text(
-                '${groups[s]!.length}',
-                style: theme.textTheme.labelLarge?.copyWith(color: muted),
-              ),
-            ],
-          ),
-        ),
-        for (final a in groups[s]!)
+      if (_sort != _AppSort.stage) ...[
+        const SizedBox(height: 10),
+        for (final a in flat)
           ApplicationRow(
             app: a,
             phone: phone,
+            showStatus: true,
             onTap: () => showApplicationDetails(context, ref, a),
           ),
-      ],
+      ] else
+        for (final s in order) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 14, 4, 6),
+            child: Row(
+              children: [
+                TagChip(s, AirtableTags.status(s)),
+                const SizedBox(width: 8),
+                Text(
+                  '${groups[s]!.length}',
+                  style: theme.textTheme.labelLarge?.copyWith(color: muted),
+                ),
+              ],
+            ),
+          ),
+          for (final a in groups[s]!)
+            ApplicationRow(
+              app: a,
+              phone: phone,
+              onTap: () => showApplicationDetails(context, ref, a),
+            ),
+        ],
     ];
   }
 }
@@ -889,11 +972,15 @@ class ApplicationRow extends StatelessWidget {
     required this.app,
     required this.phone,
     required this.onTap,
+    this.showStatus = false,
   });
 
   final Application app;
   final bool phone;
   final VoidCallback onTap;
+
+  /// Show the status too (in a flat, sorted list rather than grouped).
+  final bool showStatus;
 
   @override
   Widget build(BuildContext context) {
@@ -901,10 +988,20 @@ class ApplicationRow extends StatelessWidget {
     final muted = Dt.textMuted(theme);
     final scheme = theme.colorScheme;
     final milestone = applicationMilestone(app);
+    final wait = app.offerOverdue(DateTime.now())
+        ? app.offerWaitDays(DateTime.now())
+        : null;
     final tags = Wrap(
       spacing: 6,
       runSpacing: 4,
       children: [
+        if (wait != null)
+          Tooltip(
+            message: 'Waiting $wait days for an offer letter',
+            child: StatusPill('Offer: $wait days', tone: PillTone.warning),
+          ),
+        if (showStatus && app.status.isNotEmpty)
+          TagChip(app.status, AirtableTags.status(app.status), dense: true),
         if (app.rto.isNotEmpty)
           TagChip(app.rto, AirtableTags.rto(app.rto), dense: true),
         if (app.country.isNotEmpty)
@@ -1154,6 +1251,11 @@ Future<void> showApplicationDetails(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (a.offerWaitDays(DateTime.now()) case final days?
+                    when a.offerOverdue(DateTime.now())) ...[
+                  OfferReminderBox(app: a, days: days),
+                  const SizedBox(height: 12),
+                ],
                 field(
                   'Status',
                   Align(
@@ -1337,3 +1439,82 @@ class _StatGrid extends StatelessWidget {
 }
 
 enum _View { quick, list, table }
+
+/// "Waiting 12 days for an offer letter": shown on an application whose
+/// offer letter is overdue (more than a week since it was submitted).
+class OfferReminderBox extends StatelessWidget {
+  const OfferReminderBox({super.key, required this.app, required this.days});
+  final Application app;
+  final int days;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.clarity;
+    return Container(
+      key: const ValueKey('offer-reminder'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: c.noticeBg,
+        border: Border.all(color: c.noticeBorder),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.notifications_active_outlined,
+            size: 18,
+            color: c.noticeFg,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Waiting $days days for an offer letter',
+                  style: TextStyle(
+                    fontFamily: Dt.font,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: c.noticeFg,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Submitted ${DateFormat('d MMM y').format(app.appDate!)}'
+                  '${app.rto.isEmpty ? '' : ' to ${app.rto}'}. Follow up '
+                  'with the institution'
+                  '${app.assignee.isEmpty ? '' : ' (${app.assignee})'}.',
+                  style: TextStyle(
+                    fontFamily: Dt.font,
+                    fontSize: 13,
+                    height: 1.45,
+                    color: c.noticeFg,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "No assignee" in the Assignee filter.
+const _noAssignee = 'No assignee';
+
+/// How the All applications list is ordered.
+enum _AppSort {
+  stage('Stage (grouped)'),
+  name('Student name (A–Z)'),
+  appliedNewest('Applied: newest first'),
+  appliedOldest('Applied: oldest first'),
+  updated('Recently updated'),
+  milestone('Latest milestone'),
+  offerWait('Waiting longest for offer');
+
+  const _AppSort(this.label);
+  final String label;
+}

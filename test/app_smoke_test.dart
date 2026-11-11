@@ -197,6 +197,10 @@ void main() {
     // field still needs to redraw its zero as a dash.
     await tester.tap(firstCountField);
     await tester.pump();
+    int outbox() =>
+        db.raw.select('SELECT COUNT(*) AS c FROM sync_outbox;').first['c']!
+            as int;
+    final queued = outbox();
     await tester.tap(find.text('Hide zeros'));
     await tester.pumpAndSettle();
     expect(find.text('Show zeros'), findsOneWidget);
@@ -206,6 +210,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Hide zeros'), findsOneWidget);
     expect(tester.widget<TextField>(firstCountField).controller!.text, '0');
+    // A display preference of this device: nothing to send online.
+    expect(outbox(), queued, reason: 'Show zeros must not start a sync');
   });
 
   testWidgets('history lists the week after creation', (tester) async {

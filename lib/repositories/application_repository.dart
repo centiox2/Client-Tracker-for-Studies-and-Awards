@@ -20,9 +20,13 @@ class Application {
     this.todo = '',
     this.followUp = '',
     this.position = 0,
+    this.updatedAt,
   });
 
   final int id;
+
+  /// When this application last changed (in an upload or a sync).
+  final DateTime? updatedAt;
 
   /// The student's name in lower case (with " #2" for a second application
   /// of the same name): how an application is recognised between uploads.
@@ -65,6 +69,22 @@ class Application {
     return out;
   }
 
+  /// Days an offer letter has been awaited (counted from the application
+  /// date), or null when it isn't awaited: there's an offer date, the
+  /// application isn't submitted yet (no date), it's no longer in progress,
+  /// or its status is past the offer stage (fees, GTE, COE, CAS, visa…).
+  int? offerWaitDays(DateTime today) {
+    if (offerDate != null || appDate == null || !inProgress) return null;
+    if (ApplicationRepository.isPastOffer(status)) return null;
+    final t = DateTime(today.year, today.month, today.day);
+    final days = t.difference(appDate!).inDays;
+    return days < 0 ? 0 : days;
+  }
+
+  /// An offer letter awaited longer than [ApplicationRepository.offerReminderDays].
+  bool offerOverdue(DateTime today) =>
+      (offerWaitDays(today) ?? 0) > ApplicationRepository.offerReminderDays;
+
   /// The newest milestone date reached (documents, applied, offer, COE).
   DateTime? get lastStep => [coeDate, offerDate, appDate, docDate]
       .whereType<DateTime>()
@@ -85,6 +105,9 @@ class Application {
     todo: (r['todo'] as String?) ?? '',
     followUp: (r['follow_up'] as String?) ?? '',
     position: (r['position'] as int?) ?? 0,
+    updatedAt: r['updated_at'] is String
+        ? DateTime.tryParse(r['updated_at']! as String)
+        : null,
   );
 
   static DateTime? _date(Object? v) =>
@@ -227,6 +250,32 @@ class ApplicationRepository {
   static bool isInProgress(String status) =>
       status.trim().isNotEmpty &&
       !_notInProgress.contains(status.trim().toLowerCase());
+
+  /// After this many days without an offer letter, a reminder shows.
+  static const offerReminderDays = 7;
+
+  /// Statuses that come after the offer letter (so none is awaited).
+  static const _pastOfferWords = [
+    'offer letter received',
+    'sign offer',
+    'conditional offer',
+    'gte',
+    'gsr',
+    'payment list',
+    'school fees',
+    'awaiting coe',
+    'coe',
+    'cas',
+    'visa',
+    'gap justification',
+    'ielts',
+    'blocked account',
+  ];
+
+  static bool isPastOffer(String status) {
+    final s = status.trim().toLowerCase();
+    return _pastOfferWords.any(s.contains);
+  }
 
   static bool isDone(String status) =>
       status.trim().toLowerCase() == 'coe issued/done';

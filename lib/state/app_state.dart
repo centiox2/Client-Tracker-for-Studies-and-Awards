@@ -623,20 +623,10 @@ class AppActions {
     _touch();
   }
 
-  /// Sets whether everyday day cells show `0` instead of a blank placeholder.
-  void setShowZeros(int weekId, bool on) {
-    _ref.read(weekRepositoryProvider).setShowZeros(weekId, on);
-    _touch();
-  }
-
-  /// Toggles the persisted preference instead of relying on a value captured
-  /// by the last widget build. This keeps rapid consecutive taps from
-  /// applying the same stale value twice before Riverpod rebuilds the button.
-  void toggleShowZeros(int weekId) {
-    final week = _ref.read(weekRepositoryProvider).getWeek(weekId);
-    if (week == null) return;
-    setShowZeros(weekId, !week.showZeros);
-  }
+  /// Show / hide zeros: a display preference of this device only. It used
+  /// to be saved on the week, which is shared online — so each press
+  /// queued an upload and flipped every other device too.
+  void toggleShowZeros() => _ref.read(showZerosProvider.notifier).toggle();
 
   void _touch() => _ref.read(dataVersionProvider.notifier).bump();
 
@@ -831,3 +821,34 @@ class AppActions {
 }
 
 final appActionsProvider = Provider<AppActions>((ref) => AppActions(ref));
+
+/// Empty tracker cells as "0" (true) or a dash. Kept on this device only
+/// (in the local sync_state table, which is never uploaded), so changing it
+/// starts no sync and leaves everyone else's screen as it is.
+final showZerosProvider = NotifierProvider<ShowZerosNotifier, bool>(
+  ShowZerosNotifier.new,
+);
+
+class ShowZerosNotifier extends Notifier<bool> {
+  static const _key = 'show_zeros';
+
+  @override
+  bool build() {
+    final rows = ref.read(databaseProvider).raw.select(
+      'SELECT v FROM sync_state WHERE k = ?;',
+      [_key],
+    );
+    return rows.isEmpty ? true : rows.first['v'] == '1';
+  }
+
+  void toggle() => set(!state);
+
+  void set(bool on) {
+    state = on;
+    ref.read(databaseProvider).raw.execute(
+      'INSERT INTO sync_state (k, v) VALUES (?, ?) '
+      'ON CONFLICT(k) DO UPDATE SET v = excluded.v;',
+      [_key, on ? '1' : '0'],
+    );
+  }
+}

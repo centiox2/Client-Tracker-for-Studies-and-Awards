@@ -6,6 +6,7 @@ import '../../design/airtable_tags.dart';
 import '../../design/app_theme.dart';
 import '../../repositories/application_repository.dart';
 import '../../state/app_state.dart';
+import '../../widgets/clarity.dart';
 import '../../widgets/panels.dart';
 import 'applications_screen.dart'
     show ApplicationUpdateRow, showApplicationDetails;
@@ -405,6 +406,97 @@ class ApplicationsQuickView extends ConsumerWidget {
       ),
     );
 
+    // ---- Offer letter reminders: applied over a week ago, no offer ----
+    final offerWaits = [
+      for (final a in apps)
+        if (a.offerOverdue(today)) (a, a.offerWaitDays(today)!),
+    ]..sort((x, y) => y.$2.compareTo(x.$2));
+    final c = context.clarity;
+    final offerPanel = AppPanel(
+      key: const ValueKey('offer-reminders'),
+      title: 'Offer letter reminders',
+      subtitle:
+          'Submitted more than ${ApplicationRepository.offerReminderDays} '
+          'days ago, no offer letter yet',
+      trailingWidget: offerWaits.isEmpty
+          ? null
+          : StatusPill('${offerWaits.length} waiting', tone: PillTone.warning),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (offerWaits.isEmpty)
+              Text(
+                'Every application submitted over a week ago has its offer '
+                'letter (or has moved on).',
+                style: theme.textTheme.bodySmall?.copyWith(color: muted),
+              )
+            else
+              FirstFew(
+                showAllKey: const ValueKey('offer-show-all'),
+                children: [
+                  for (final (a, days) in offerWaits)
+                    InkWell(
+                      key: ValueKey('offer-wait-${a.key}'),
+                      onTap: () => showApplicationDetails(context, ref, a),
+                      borderRadius: BorderRadius.circular(Dt.rSm),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 7),
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: 72,
+                              child: Text(
+                                '$days days',
+                                style: Dt.tab(theme.textTheme.bodyMedium!)
+                                    .copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: days > 21
+                                          ? c.negativeFg
+                                          : c.warningFg,
+                                    ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    a.student,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  Text(
+                                    [
+                                      if (a.rto.isNotEmpty) a.rto,
+                                      'submitted '
+                                          '${DateFormat('d MMM').format(a.appDate!)}',
+                                      if (a.assignee.isNotEmpty) a.assignee,
+                                    ].join(' · '),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: muted,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+
     // ---- Who's handling what ----
     final byAssignee = <String, List<Application>>{};
     for (final a in inProgress) {
@@ -712,7 +804,15 @@ class ApplicationsQuickView extends ConsumerWidget {
     );
 
     Widget gap() => const SizedBox(height: 12);
-    final left = [activityPanel, gap(), attentionPanel, gap(), standPanel];
+    final left = [
+      offerPanel,
+      gap(),
+      activityPanel,
+      gap(),
+      attentionPanel,
+      gap(),
+      standPanel,
+    ];
     final right = [
       weekPanel,
       gap(),
@@ -926,8 +1026,13 @@ class _TileRow extends StatelessWidget {
 
 /// The first [count] children, with "Show all" for the rest.
 class FirstFew extends StatefulWidget {
-  const FirstFew({super.key, required this.children});
+  const FirstFew({
+    super.key,
+    required this.children,
+    this.showAllKey = const ValueKey('today-show-all'),
+  });
   final List<Widget> children;
+  final Key showAllKey;
   static const count = 8;
 
   @override
@@ -950,7 +1055,7 @@ class FirstFewState extends State<FirstFew> {
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton(
-              key: const ValueKey('today-show-all'),
+              key: widget.showAllKey,
               onPressed: () => setState(() => _all = !_all),
               child: Text(
                 _all ? 'Show fewer' : 'Show all ${widget.children.length}',

@@ -143,7 +143,7 @@ class _EditorialBoardState extends ConsumerState<_EditorialBoard> {
     final now = DateTime.now();
     final sig = StringBuffer()
       ..write(staff.staffName)
-      ..write('|${data.week.id}|${data.week.showZeros}')
+      ..write('|${data.week.id}|${ref.read(showZerosProvider)}')
       ..write('|$rowHeight|$fieldHeight|$fieldFontSize')
       ..write('|${now.year}-${now.month}-${now.day}');
     for (final d in data.days) {
@@ -203,6 +203,8 @@ class _EditorialBoardState extends ConsumerState<_EditorialBoard> {
     final data = widget.data;
     final theme = Theme.of(context);
     final now = DateTime.now();
+    // Rows are cached; rebuild them when zeros are shown or hidden.
+    ref.watch(showZerosProvider);
 
     final summary =
         '${data.totals.newClients} new · '
@@ -666,9 +668,8 @@ class _ShowZerosToggle extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final week = ref.watch(currentWeekProvider);
     final theme = Theme.of(context);
-    final showZeros = week?.week.showZeros ?? false;
+    final showZeros = ref.watch(showZerosProvider);
     final label = showZeros ? 'Hide zeros' : 'Show zeros';
     return Tooltip(
       message: showZeros
@@ -676,9 +677,8 @@ class _ShowZerosToggle extends ConsumerWidget {
           : 'Show empty cells as 0',
       waitDuration: const Duration(milliseconds: 400),
       child: TextButton.icon(
-        onPressed: week == null
-            ? null
-            : () => ref.read(appActionsProvider).toggleShowZeros(week.week.id),
+        key: const ValueKey('show-zeros'),
+        onPressed: () => ref.read(appActionsProvider).toggleShowZeros(),
         style: TextButton.styleFrom(foregroundColor: Dt.textMuted(theme)),
         icon: Icon(
           showZeros ? Icons.visibility_off_outlined : Icons.visibility_outlined,
@@ -1216,7 +1216,7 @@ class _BoardStaffRow extends ConsumerWidget {
                                 valueColor: isNew
                                     ? Dt.newGreenBright(theme.brightness)
                                     : Dt.existingBlueBright(theme.brightness),
-                                showZero: data.week.showZeros,
+                                showZero: ref.watch(showZerosProvider),
                                 placeholder: '–',
                                 confirmEdit:
                                     isDayGuarded(
@@ -1805,7 +1805,7 @@ class _MobileWeekViewState extends State<_MobileWeekView> {
                   key: ValueKey('mobile-${day.day.id}-${row.staffId}'),
                   day: day,
                   row: row,
-                  showZero: widget.data.week.showZeros,
+                  showZero: true,
                 ),
               const SizedBox(height: Dt.s8),
               _daySummaryCard(context, day),
@@ -1954,6 +1954,8 @@ class _MobileStaffRow extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // A display preference of this device (not of the week).
+    final showZero = ref.watch(showZerosProvider) && this.showZero;
     final actions = ref.read(appActionsProvider);
     final theme = Theme.of(context);
     final isOff = day.isOff(row.staffId);

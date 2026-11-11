@@ -232,6 +232,8 @@ void main() {
     // Every in-progress one here has a date; none are left unaccounted.
     expect(find.textContaining('no dates in the tracker'), findsNothing);
     // Tapping a stage lists it.
+    await tester.ensureVisible(find.text('Awaiting offer letter · 1'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Awaiting offer letter · 1'));
     await tester.pumpAndSettle();
     expect(find.text('1 of 5'), findsOneWidget);
