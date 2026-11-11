@@ -393,28 +393,15 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
     final theme = Theme.of(context);
     final muted = Dt.textMuted(theme);
     final latest = imports.firstOrNull;
-    final viewSwitch = SegmentedButton<_View>(
+    final viewSwitch = UnderlineTabs<_View>(
       key: const ValueKey('applications-view'),
-      segments: [
-        ButtonSegment(
-          value: _View.quick,
-          icon: phone ? null : const Icon(Icons.bolt_outlined, size: 16),
-          label: Text(phone ? 'Quick' : 'Quick view'),
-        ),
-        ButtonSegment(
-          value: _View.list,
-          icon: phone ? null : const Icon(Icons.list_alt_outlined, size: 16),
-          label: Text(phone ? 'List' : 'All applications'),
-        ),
-        ButtonSegment(
-          value: _View.table,
-          icon: phone ? null : const Icon(Icons.table_chart_outlined, size: 16),
-          label: const Text('Table'),
-        ),
+      tabs: const [
+        (_View.quick, 'Quick view'),
+        (_View.list, 'All applications'),
+        (_View.table, 'Table'),
       ],
-      selected: {_view},
-      showSelectedIcon: false,
-      onSelectionChanged: (v) => setState(() => _view = v.first),
+      selected: _view,
+      onChanged: (v) => setState(() => _view = v),
     );
     final airtable = ref.watch(airtableStatusProvider).value;
     final synced = airtable?.enabled ?? false;
@@ -459,13 +446,20 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
               ],
             ),
           );
+    final actions = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (updated != null) Flexible(child: updated),
+        if (widget.canUpload) ...[const SizedBox(width: 12), _uploadButton()],
+      ],
+    );
     if (phone) {
-      // Phones: the switch on its own line, then when + upload.
+      // Phones: the tabs, then when + upload.
       return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           viewSwitch,
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(child: updated ?? const SizedBox()),
@@ -475,18 +469,12 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
         ],
       );
     }
-    return Row(
-      children: [
-        viewSwitch,
-        const SizedBox(width: 16),
-        Expanded(
-          child: Align(
-            alignment: Alignment.centerRight,
-            child: updated ?? const SizedBox(),
-          ),
-        ),
-        if (widget.canUpload) ...[const SizedBox(width: 12), _uploadButton()],
-      ],
+    return UnderlineTabs<_View>(
+      key: const ValueKey('applications-view'),
+      tabs: viewSwitch.tabs,
+      selected: _view,
+      onChanged: (v) => setState(() => _view = v),
+      trailing: actions,
     );
   }
 

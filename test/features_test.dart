@@ -539,10 +539,9 @@ void main() {
   test('brand colours drive primary actions', () {
     final light = buildAppTheme(Brightness.light);
     final dark = buildAppTheme(Brightness.dark);
-    // Clarity: navy on light, periwinkle on dark (dark text on it).
-    expect(light.colorScheme.primary, Clarity.light.accent);
-    expect(light.colorScheme.primary, const Color(0xFF1D3A8A));
-    expect(dark.colorScheme.primary, const Color(0xFF8EA8FF));
-    expect(dark.colorScheme.onPrimary, Clarity.dark.onAccent);
+    // The Studies and Awards navy on light; its gold on dark, navy text.
+    expect(light.colorScheme.primary, Dt.brandNavy);
+    expect(dark.colorScheme.primary, Dt.brandGold);
+    expect(dark.colorScheme.onPrimary, Dt.brandNavy);
   });
 }

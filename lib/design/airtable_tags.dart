@@ -252,7 +252,7 @@ class TagChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (label.trim().isEmpty) return const SizedBox.shrink();
-    final (bg, fg) = colors;
+    final (bg, fg) = clarityTagColors(colors.$1, Theme.of(context).brightness);
     return Container(
       padding: EdgeInsets.symmetric(horizontal: dense ? 7 : 9, vertical: 2),
       decoration: BoxDecoration(
@@ -265,11 +265,37 @@ class TagChip extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
           color: fg,
-          fontSize: dense ? 11.5 : 12.5,
+          fontFamily: 'Inter',
+          fontSize: dense ? 12 : 13,
           fontWeight: FontWeight.w500,
           height: 1.35,
         ),
       ),
     );
   }
+}
+
+/// Airtable's tag colour, the Clarity way: the same hue as a pale tint with
+/// darker text (light), or a faint tint with light text (dark) — so a
+/// status keeps the colour the team knows from Airtable without the loud
+/// fill. Greys become the neutral pill.
+(Color, Color) clarityTagColors(Color airtable, Brightness brightness) {
+  final hsl = HSLColor.fromColor(airtable);
+  final light = brightness == Brightness.light;
+  if (hsl.saturation < 0.12) {
+    return light
+        ? (const Color(0xFFF2F4F7), const Color(0xFF475467))
+        : (const Color(0xFF222A36), const Color(0xFFB8C1CE));
+  }
+  final sat = hsl.saturation.clamp(0.45, 0.85).toDouble();
+  if (light) {
+    return (
+      HSLColor.fromAHSL(1, hsl.hue, sat, 0.94).toColor(),
+      HSLColor.fromAHSL(1, hsl.hue, sat, 0.28).toColor(),
+    );
+  }
+  return (
+    HSLColor.fromAHSL(1, hsl.hue, sat * 0.55, 0.18).toColor(),
+    HSLColor.fromAHSL(1, hsl.hue, sat, 0.78).toColor(),
+  );
 }

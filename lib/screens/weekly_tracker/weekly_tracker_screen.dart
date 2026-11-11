@@ -115,7 +115,6 @@ class _EditorialBoardState extends ConsumerState<_EditorialBoard> {
   // Explicit controllers: the board has two vertical scrollables (staff rows
   // + analytics rail) and they must not fight over the primary one.
   final _rowsController = ScrollController();
-  final _railController = ScrollController();
 
   FocusNode _nodeFor(int staffId, int dayIndex, bool isNew) {
     final key = '$staffId-$dayIndex-${isNew ? 'n' : 'e'}';
@@ -194,7 +193,6 @@ class _EditorialBoardState extends ConsumerState<_EditorialBoard> {
       node.dispose();
     }
     _rowsController.dispose();
-    _railController.dispose();
     super.dispose();
   }
 
@@ -206,11 +204,6 @@ class _EditorialBoardState extends ConsumerState<_EditorialBoard> {
     // Rows are cached; rebuild them when zeros are shown or hidden.
     ref.watch(showZerosProvider);
 
-    final summary =
-        '${data.totals.newClients} new · '
-        '${data.totals.existingClients} existing · '
-        '${data.totals.total} total · '
-        'avg ${data.totals.dailyAverage.toStringAsFixed(1)}/day';
     final thisMonday = _mondayOf(now);
     final onThisWeek = data.week.startDate == thisMonday;
     // Arrows step between weeks that exist; past the newest one, "next"
@@ -244,7 +237,11 @@ class _EditorialBoardState extends ConsumerState<_EditorialBoard> {
                               .read(currentWeekIdProvider.notifier)
                               .set(previousWeek.id),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 8),
+                  WeekRangeButton(
+                    prefix: 'Week ${_isoWeekNumber(data.week.startDate)} · ',
+                  ),
+                  const SizedBox(width: 8),
                   _RoundIconButton(
                     icon: Icons.chevron_right,
                     tooltip: nextWeek == null
@@ -260,15 +257,6 @@ class _EditorialBoardState extends ConsumerState<_EditorialBoard> {
                               .read(currentWeekIdProvider.notifier)
                               .set(nextWeek.id),
                   ),
-                  const SizedBox(width: 12),
-                  // The date range is already in the week picker directly
-                  // above; the week number is what the arrows step through.
-                  Text(
-                    'Week ${_isoWeekNumber(data.week.startDate)}',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
                   if (!onThisWeek) ...[
                     const SizedBox(width: 10),
                     TextButton(
@@ -277,8 +265,6 @@ class _EditorialBoardState extends ConsumerState<_EditorialBoard> {
                       child: const Text('Go to this week'),
                     ),
                   ],
-                  const SizedBox(width: 12),
-                  const WeekRangeButton(),
                   const Spacer(),
                   const _SavedIndicator(),
                   const SizedBox(width: 14),
@@ -286,15 +272,40 @@ class _EditorialBoardState extends ConsumerState<_EditorialBoard> {
                   // "Go to this week" and the saved time are both showing.
                   Flexible(
                     flex: 100,
-                    child: Text(
-                      summary,
+                    child: Text.rich(
+                      key: const ValueKey('week-summary'),
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: '${data.totals.newClients} new',
+                            style: TextStyle(
+                              color: Dt.newGreen(theme.brightness),
+                            ),
+                          ),
+                          const TextSpan(text: ' · '),
+                          TextSpan(
+                            text: '${data.totals.existingClients} existing',
+                            style: TextStyle(
+                              color: Dt.existingBlue(theme.brightness),
+                            ),
+                          ),
+                          TextSpan(
+                            text:
+                                ' · ${data.totals.total} total · '
+                                '${data.totals.dailyAverage.toStringAsFixed(1)}'
+                                ' / day',
+                          ),
+                        ],
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Dt.tab(theme.textTheme.labelSmall!)
-                          .copyWith(color: Dt.textMuted(theme)),
+                      style: Dt.tab(theme.textTheme.labelMedium!).copyWith(
+                        color: Dt.textMuted(theme),
+                        fontWeight: FontWeight.w400,
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 12),
                   const _ShowZerosToggle(),
                   _WeekMenu(week: data.week),
                 ],
@@ -310,14 +321,11 @@ class _EditorialBoardState extends ConsumerState<_EditorialBoard> {
                 constraints: const BoxConstraints(maxWidth: _boardMaxWidth),
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    const railWidth = 270.0;
-                    const railGap = 14.0;
                     const headerH = 58.0;
                     const footerH = _footerHeight + 1;
                     // Give the entry grid the available width on ordinary
                     // laptop screens. The analytics rail moves below it until
                     // there is enough room for both without compressing cells.
-                    final showRail = constraints.maxWidth >= 1380;
                     final staffCount = data.days.isEmpty
                         ? 0
                         : data.days.first.rows.length;
@@ -355,45 +363,15 @@ class _EditorialBoardState extends ConsumerState<_EditorialBoard> {
                     );
                     final rail = _AnalyticsRail(data: data, now: now);
 
-                    if (!showRail) {
-                      // The board contains `Expanded`s, so it needs a bounded
-                      // height inside the ListView. The board draws its own
-                      // header/footer, so it takes the full height here (the
-                      // rowHeight math above already accounts for them); the
-                      // analytics rail scrolls below.
-                      return ListView(
-                        children: [
-                          SizedBox(height: constraints.maxHeight, child: board),
-                          const SizedBox(height: 12),
-                          rail,
-                          const SizedBox(height: 12),
-                        ],
-                      );
-                    }
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    // The board fills the page; the summary cards sit below
+                    // it (scroll down), three side by side when wide.
+                    return ListView(
+                      key: const ValueKey('tracker-page'),
                       children: [
-                        Expanded(child: board),
-                        const SizedBox(width: railGap),
-                        SizedBox(
-                          width: railWidth,
-                          child: ScrollConfiguration(
-                            // The app theme forces scrollbar thumbs visible.
-                            // Override the behavior itself here so Flutter
-                            // cannot insert a desktop scrollbar over this
-                            // narrow rail; wheel and trackpad scrolling stay
-                            // enabled.
-                            behavior: const _RailScrollBehavior(),
-                            child: SingleChildScrollView(
-                              controller: _railController,
-                              child: _AnalyticsRail(
-                                data: data,
-                                now: now,
-                                stacked: true,
-                              ),
-                            ),
-                          ),
-                        ),
+                        SizedBox(height: constraints.maxHeight, child: board),
+                        const SizedBox(height: Dt.gap),
+                        rail,
+                        const SizedBox(height: Dt.gap),
                       ],
                     );
                   },
@@ -517,17 +495,6 @@ class _DayOffStatus extends StatelessWidget {
 
 /// Scroll behavior for the analytics rail, which intentionally has no painted
 /// scrollbar because the values are aligned against the panel's right edge.
-class _RailScrollBehavior extends MaterialScrollBehavior {
-  const _RailScrollBehavior();
-
-  @override
-  Widget buildScrollbar(
-    BuildContext context,
-    Widget child,
-    ScrollableDetails details,
-  ) => child;
-}
-
 /// "✓ Saved · 10:42" after a number is stored — quiet proof that autosave
 /// worked. Empty until the first save in this session.
 class _SavedIndicator extends ConsumerWidget {
@@ -670,21 +637,43 @@ class _ShowZerosToggle extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final showZeros = ref.watch(showZerosProvider);
-    final label = showZeros ? 'Hide zeros' : 'Show zeros';
+    // A display preference of this device only: no sync, nothing saved
+    // online (see showZerosProvider).
     return Tooltip(
       message: showZeros
-          ? 'Show empty cells as a dash'
-          : 'Show empty cells as 0',
+          ? 'Empty cells show 0. Untick to show a dash.'
+          : 'Empty cells show a dash. Tick to show 0.',
       waitDuration: const Duration(milliseconds: 400),
-      child: TextButton.icon(
+      child: InkWell(
         key: const ValueKey('show-zeros'),
-        onPressed: () => ref.read(appActionsProvider).toggleShowZeros(),
-        style: TextButton.styleFrom(foregroundColor: Dt.textMuted(theme)),
-        icon: Icon(
-          showZeros ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-          size: 14,
+        borderRadius: BorderRadius.circular(Dt.rSm),
+        onTap: () => ref.read(appActionsProvider).toggleShowZeros(),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IgnorePointer(
+                child: SizedBox.square(
+                  dimension: 20,
+                  child: Checkbox(
+                    value: showZeros,
+                    onChanged: (_) {},
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Show zeros',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: context.clarity.textSecondary,
+                ),
+              ),
+            ],
+          ),
         ),
-        label: Text(label),
       ),
     );
   }
@@ -697,11 +686,10 @@ const double _nameWidth = 168;
 const double _totalWidth = 72;
 const double _footerHeight = 54;
 
-/// Neutral tint behind today's column — enough to find your place without
-/// borrowing a data colour.
-Color _todayTint(ThemeData theme) => theme.colorScheme.onSurface.withValues(
-  alpha: theme.brightness == Brightness.dark ? 0.04 : 0.035,
-);
+/// The accent's soft tint behind today's column (Clarity).
+Color _todayTint(ThemeData theme) =>
+    Clarity.of(theme).accentSoft
+        .withValues(alpha: theme.brightness == Brightness.dark ? 0.10 : 0.7);
 
 DateTime _mondayOf(DateTime d) {
   final day = DateTime(d.year, d.month, d.day);
@@ -807,22 +795,11 @@ class _BoardTable extends ConsumerWidget {
                     ),
                     if (isToday) ...[
                       const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 1,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Dt.brand(theme.brightness),
-                          borderRadius: BorderRadius.circular(Dt.rPill),
-                        ),
-                        child: Text(
-                          'Today',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w600,
-                            color: Dt.onBrand(theme.brightness),
-                          ),
+                      Text(
+                        'Today',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          fontWeight: FontWeight.w500,
+                          color: context.clarity.accent,
                         ),
                       ),
                     ],
@@ -1280,15 +1257,10 @@ class _BoardStaffRow extends ConsumerWidget {
 /// mix. [stacked] puts them in one column (the narrow rail beside the board
 /// on very wide screens); otherwise they sit side by side under the board.
 class _AnalyticsRail extends ConsumerWidget {
-  const _AnalyticsRail({
-    required this.data,
-    required this.now,
-    this.stacked = false,
-  });
+  const _AnalyticsRail({required this.data, required this.now});
 
   final CurrentWeekData data;
   final DateTime now;
-  final bool stacked;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1343,6 +1315,20 @@ class _AnalyticsRail extends ConsumerWidget {
                 : '${DateFormat('EEEE').format(bestDay.day.date)} · $bestTotal',
             last: true,
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Client mix',
+                style: theme.textTheme.bodyMedium?.copyWith(color: muted),
+              ),
+            ),
+          ),
+          _MixBar(
+            newCount: data.totals.newClients,
+            existingCount: data.totals.existingClients,
+          ),
         ],
       ),
     );
@@ -1391,42 +1377,31 @@ class _AnalyticsRail extends ConsumerWidget {
             ),
     );
 
-    final mix = AppPanel(
-      title: 'Client mix',
-      icon: Icons.donut_small_outlined,
-      child: _MixBar(
-        newCount: data.totals.newClients,
-        existingCount: data.totals.existingClients,
-      ),
-    );
-
     final column = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         facts,
-        const SizedBox(height: 12),
+        const SizedBox(height: Dt.gap),
         chart,
-        const SizedBox(height: 12),
+        const SizedBox(height: Dt.gap),
         leaderPanel,
-        const SizedBox(height: 12),
-        mix,
       ],
     );
-    if (stacked) return column;
+    // Under the board: three cards side by side when there's room.
     return LayoutBuilder(
       builder: (context, c) {
-        if (c.maxWidth < 760) return column;
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Column(children: [facts, const SizedBox(height: 12), mix]),
-            ),
-            const SizedBox(width: 12),
-            Expanded(flex: 2, child: chart),
-            const SizedBox(width: 12),
-            Expanded(child: leaderPanel),
-          ],
+        if (c.maxWidth < 900) return column;
+        return IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(child: facts),
+              const SizedBox(width: Dt.gap),
+              Expanded(child: chart),
+              const SizedBox(width: Dt.gap),
+              Expanded(child: leaderPanel),
+            ],
+          ),
         );
       },
     );

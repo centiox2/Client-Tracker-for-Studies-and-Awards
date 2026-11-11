@@ -91,10 +91,13 @@ class _AppPageHeaderState extends ConsumerState<AppPageHeader> {
 /// "📅 9 – 13 Nov 2026 ▾": the week shown on the Overview and in the
 /// Weekly tracker; opens the recent weeks, all weeks and "New week".
 class WeekRangeButton extends ConsumerWidget {
-  const WeekRangeButton({super.key, this.canStart = true});
+  const WeekRangeButton({super.key, this.canStart = true, this.prefix = ''});
 
   /// Offer "New week…" (people who can change data).
   final bool canStart;
+
+  /// Before the dates ("Week 46 · ").
+  final String prefix;
 
   static const _maxListed = 10;
 
@@ -104,7 +107,7 @@ class WeekRangeButton extends ConsumerWidget {
     final week = ref.watch(currentWeekProvider)?.week;
     final label = week == null
         ? 'No active week'
-        : shortRangeLabel(week.startDate, week.endDate);
+        : '$prefix${shortRangeLabel(week.startDate, week.endDate)}';
     return MenuAnchor(
       alignmentOffset: const Offset(0, 6),
       menuChildren: [

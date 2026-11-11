@@ -152,13 +152,12 @@ void main() {
     await tester.pumpAndSettle();
 
     // The compact summary line under the stat strip must now show 7 new.
-    final summaryTexts = tester.widgetList<Text>(
-      find.byWidgetPredicate(
-        (w) => w is Text && (w.data?.contains(' new ·') ?? false),
-      ),
-    );
+    final summary = tester
+        .widget<Text>(find.byKey(const ValueKey('week-summary')))
+        .textSpan!
+        .toPlainText();
     expect(
-      summaryTexts.any((t) => t.data!.startsWith('7 new')),
+      summary.startsWith('7 new'),
       isTrue,
       reason: 'weekly totals must update instantly',
     );
@@ -177,7 +176,7 @@ void main() {
             ).first['new_clients']!
             as int;
     expect(stored, 7);
-    expect(find.textContaining(RegExp(r'^Week \d+$')), findsOneWidget);
+    expect(find.textContaining(RegExp(r'^Week \d+ · ')), findsOneWidget);
   });
 
   testWidgets('show zeros toggle refreshes even the focused count field', (
@@ -201,14 +200,23 @@ void main() {
         db.raw.select('SELECT COUNT(*) AS c FROM sync_outbox;').first['c']!
             as int;
     final queued = outbox();
-    await tester.tap(find.text('Hide zeros'));
+    bool ticked() => tester
+        .widget<Checkbox>(
+          find.descendant(
+            of: find.byKey(const ValueKey('show-zeros')),
+            matching: find.byType(Checkbox),
+          ),
+        )
+        .value!;
+    expect(ticked(), isTrue);
+    await tester.tap(find.byKey(const ValueKey('show-zeros')));
     await tester.pumpAndSettle();
-    expect(find.text('Show zeros'), findsOneWidget);
+    expect(ticked(), isFalse);
     expect(tester.widget<TextField>(firstCountField).controller!.text, '');
 
-    await tester.tap(find.text('Show zeros'));
+    await tester.tap(find.byKey(const ValueKey('show-zeros')));
     await tester.pumpAndSettle();
-    expect(find.text('Hide zeros'), findsOneWidget);
+    expect(ticked(), isTrue);
     expect(tester.widget<TextField>(firstCountField).controller!.text, '0');
     // A display preference of this device: nothing to send online.
     expect(outbox(), queued, reason: 'Show zeros must not start a sync');
@@ -265,7 +273,11 @@ void main() {
     expect(find.text('Time off — Beatrice'), findsOneWidget);
 
     // Toggle Monday off (first checkbox after the whole-week switch) and save.
-    await tester.tap(find.byType(Checkbox).first);
+    await tester.tap(
+      find
+          .descendant(of: find.byType(Dialog), matching: find.byType(Checkbox))
+          .first,
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
@@ -333,7 +345,7 @@ void main() {
     }
   });
 
-  testWidgets('fullscreen tracker rail has no overlay scrollbar', (
+  testWidgets('fullscreen tracker: summary cards below the board', (
     tester,
   ) async {
     WeekRepository(db).createWeekFor(DateTime.now());
@@ -342,8 +354,19 @@ void main() {
     await tester.tap(find.text('Weekly tracker').first);
     await tester.pumpAndSettle();
 
+    // The summary cards sit under the board (Clarity), side by side.
+    await tester.dragUntilVisible(
+      find.text('Most clients this week'),
+      find.byKey(const ValueKey('tracker-page')),
+      const Offset(0, -300),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('Most clients this week'), findsOneWidget);
-    expect(find.byType(Scrollbar), findsNothing);
+    expect(find.text('By day'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('By day')).dy,
+      tester.getTopLeft(find.text('Most clients this week')).dy,
+    );
     expect(tester.takeException(), isNull);
   }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 }

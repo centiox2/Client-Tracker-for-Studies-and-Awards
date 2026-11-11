@@ -69,10 +69,6 @@ class ApplicationsQuickView extends ConsumerWidget {
       runSpacing: 4,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        Text(
-          DateFormat('EEEE d MMMM').format(now),
-          style: theme.textTheme.titleMedium,
-        ),
         if (latest != null)
           Text(
             todaysUploads.isEmpty
@@ -97,24 +93,28 @@ class ApplicationsQuickView extends ConsumerWidget {
     }
 
     final tiles = [
-      _Tile(
+      KpiCard(
         label: 'Applications submitted',
         value: '${countOn((a) => a.appDate, today)}',
+        unit: 'today',
         caption: weekCaption((a) => a.appDate),
       ),
-      _Tile(
+      KpiCard(
         label: 'Offer letters',
         value: '${countOn((a) => a.offerDate, today)}',
+        unit: 'today',
         caption: weekCaption((a) => a.offerDate),
       ),
-      _Tile(
+      KpiCard(
         label: 'COEs issued',
         value: '${countOn((a) => a.coeDate, today)}',
+        unit: 'today',
         caption: weekCaption((a) => a.coeDate),
       ),
-      _Tile(
+      KpiCard(
         label: 'Students updated',
         value: '$updatedToday',
+        unit: 'today',
         caption: '${notesToday.length} notes dated today',
       ),
     ];
@@ -827,7 +827,7 @@ class ApplicationsQuickView extends ConsumerWidget {
       children: [
         header,
         const SizedBox(height: 12),
-        _TileRow(tiles: tiles, phone: phone),
+        KpiGrid(minWidth: phone ? 150 : 190, children: tiles),
         gap(),
         if (phone) ...[
           ...left,
@@ -940,86 +940,6 @@ class _EventRow extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _Tile extends StatelessWidget {
-  const _Tile({
-    required this.label,
-    required this.value,
-    required this.caption,
-  });
-  final String label;
-  final String value;
-  final String caption;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        border: Border.all(color: scheme.outline),
-        borderRadius: BorderRadius.circular(Dt.rLg),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: Dt.textMuted(theme),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: Dt.tab(theme.textTheme.headlineMedium!)
-                .copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            caption,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: Dt.textMuted(theme),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TileRow extends StatelessWidget {
-  const _TileRow({required this.tiles, required this.phone});
-  final List<Widget> tiles;
-  final bool phone;
-
-  @override
-  Widget build(BuildContext context) {
-    final perRow = phone ? 2 : 4;
-    return Column(
-      children: [
-        for (var i = 0; i < tiles.length; i += perRow) ...[
-          if (i > 0) const SizedBox(height: 10),
-          IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (var j = i; j < i + perRow && j < tiles.length; j++) ...[
-                  if (j > i) const SizedBox(width: 10),
-                  Expanded(child: tiles[j]),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ],
     );
   }
 }

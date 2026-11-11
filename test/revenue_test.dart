@@ -405,7 +405,15 @@ void main() {
     await tester.tap(find.text('Year'));
     await tester.pumpAndSettle();
     expect(find.text('By month'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('M-Pesa'), 300);
+    await tester.scrollUntilVisible(
+      find.text('M-Pesa'),
+      300,
+      scrollable: find
+          .byWidgetPredicate(
+            (w) => w is Scrollable && w.axisDirection == AxisDirection.down,
+          )
+          .last,
+    );
     expect(find.text('Cash'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
@@ -617,7 +625,7 @@ void main() {
     await pumpApp(tester, admin: true);
     await tester.tap(find.text('Revenue').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('All'));
+    await tester.tap(find.byKey(const ValueKey('tab-All')));
     await tester.pumpAndSettle();
     expect(find.text('Cash'), findsOneWidget);
     expect(find.textContaining('Old Payer'), findsNothing);

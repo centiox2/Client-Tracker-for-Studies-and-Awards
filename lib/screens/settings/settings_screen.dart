@@ -863,26 +863,17 @@ class _Section extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    // Clarity: the description sits under the title, in the card head.
     return AppPanel(
       title: title,
       icon: icon,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              description,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: Dt.textMuted(theme),
-                height: 1.45,
-              ),
+      subtitle: description,
+      child: child == null
+          ? const SizedBox.shrink()
+          : Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
+              child: child!,
             ),
-            if (child != null) ...[const SizedBox(height: 12), child!],
-          ],
-        ),
-      ),
     );
   }
 }

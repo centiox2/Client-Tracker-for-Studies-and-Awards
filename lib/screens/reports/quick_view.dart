@@ -98,6 +98,9 @@ class _QuickView extends ConsumerWidget {
       );
     }
 
+    // The first few tiles are about today (clients, revenue, new,
+    // existing); the rest about the week and month.
+    final todayCount = seesRevenue ? 4 : 3;
     final tiles = <Widget>[
       _Tile(
         label: isToday ? 'Clients today' : 'Clients on $dayName',
@@ -322,10 +325,25 @@ class _QuickView extends ConsumerWidget {
             ],
           ),
         ],
-        const SizedBox(height: 12),
-        // Clients beside revenue: today, new/existing, week, month.
-        _TileGrid(perRow: compact ? 2 : 4, children: tiles),
-        const SizedBox(height: 12),
+        const SizedBox(height: 20),
+        // Clients beside revenue: today first, then the week and month.
+        Text('TODAY', style: microLabel(theme)),
+        const SizedBox(height: 10),
+        KpiGrid(
+          minWidth: compact ? 150 : 190,
+          children: tiles.take(todayCount).toList(),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          'THIS WEEK & ${DateFormat('MMMM').format(day).toUpperCase()}',
+          style: microLabel(theme),
+        ),
+        const SizedBox(height: 10),
+        KpiGrid(
+          minWidth: compact ? 150 : 190,
+          children: tiles.skip(todayCount).toList(),
+        ),
+        const SizedBox(height: 24),
         if (compact) ...[
           whoPanel,
           const SizedBox(height: 12),
@@ -340,19 +358,26 @@ class _QuickView extends ConsumerWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(flex: 5, child: whoPanel),
-              const SizedBox(width: 12),
               Expanded(
-                flex: 4,
+                flex: 5,
+                child: Column(
+                  children: [
+                    whoPanel,
+                    if (applicationsPanel != null) ...[
+                      const SizedBox(height: Dt.gap),
+                      applicationsPanel,
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: Dt.gap),
+              Expanded(
+                flex: 3,
                 child: Column(
                   children: [
                     weekPanel,
-                    const SizedBox(height: 12),
+                    const SizedBox(height: Dt.gap),
                     activityPanel,
-                    if (applicationsPanel != null) ...[
-                      const SizedBox(height: 12),
-                      applicationsPanel,
-                    ],
                   ],
                 ),
               ),

@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 
 /// Design system for S&A Hub: "Clarity".
 ///
-/// Calm, light-first and data-focused: white cards on a soft grey page, one
-/// navy accent (periwinkle in dark mode), an orange/blue pair for data and
+/// Calm, light-first and data-focused: white cards on a soft grey page, the
+/// Studies and Awards navy as the one accent (the logo's gold in dark mode),
+/// an orange/blue pair for data and
 /// plain status colours. The rules every screen follows:
 ///
 ///  1. **Numbers first.** The key figure on a card is the biggest thing on
@@ -63,7 +64,7 @@ abstract final class Dt {
   static const Color brandNavy = Color(0xFF001A45);
   static const Color brandGold = Color(0xFFFBBA00);
 
-  /// The accent: navy on light, periwinkle on dark.
+  /// The accent: the brand navy on light, the brand gold on dark.
   static Color brand(Brightness b) => Clarity.forBrightness(b).accent;
 
   /// Text and icons on [brand].
@@ -170,6 +171,7 @@ class Clarity extends ThemeExtension<Clarity> {
     required this.neutralFg,
     required this.negativeFg,
     required this.focus,
+    required this.brandGold,
   });
 
   final Color bg;
@@ -206,6 +208,9 @@ class Clarity extends ThemeExtension<Clarity> {
   /// The focus ring.
   final Color focus;
 
+  /// The logo's gold (snackbar actions; the dark theme's accent).
+  final Color brandGold;
+
   static const light = Clarity(
     bg: Color(0xFFF5F6F8),
     surface: Color(0xFFFFFFFF),
@@ -216,9 +221,10 @@ class Clarity extends ThemeExtension<Clarity> {
     text: Color(0xFF0F172A),
     textSecondary: Color(0xFF344054),
     textMuted: Color(0xFF5B6474),
-    accent: Color(0xFF1D3A8A),
-    accentHover: Color(0xFF142A66),
-    accentSoft: Color(0xFFEEF2FB),
+    // Studies and Awards navy (the logo's), for the accent.
+    accent: Color(0xFF001A45),
+    accentHover: Color(0xFF0B2E6B),
+    accentSoft: Color(0xFFEAEFF7),
     onAccent: Color(0xFFFFFFFF),
     seriesNew: Color(0xFFE8833A),
     seriesExisting: Color(0xFF3B5BDB),
@@ -237,7 +243,8 @@ class Clarity extends ThemeExtension<Clarity> {
     neutralBg: Color(0xFFF2F4F7),
     neutralFg: Color(0xFF475467),
     negativeFg: Color(0xFFB42318),
-    focus: Color(0x401D3A8A),
+    focus: Color(0x40001A45),
+    brandGold: Color(0xFFFBBA00),
   );
 
   static const dark = Clarity(
@@ -250,10 +257,11 @@ class Clarity extends ThemeExtension<Clarity> {
     text: Color(0xFFE6EAF0),
     textSecondary: Color(0xFFC3CAD5),
     textMuted: Color(0xFF9AA4B2),
-    accent: Color(0xFF8EA8FF),
-    accentHover: Color(0xFFB3C4FF),
-    accentSoft: Color(0x248EA8FF),
-    onAccent: Color(0xFF0E1116),
+    // Studies and Awards gold on dark (navy would vanish), navy text on it.
+    accent: Color(0xFFFBBA00),
+    accentHover: Color(0xFFFFD24D),
+    accentSoft: Color(0x24FBBA00),
+    onAccent: Color(0xFF001A45),
     seriesNew: Color(0xFFF0A060),
     seriesExisting: Color(0xFF6F8BFF),
     seriesThird: Color(0xFF3CC8B4),
@@ -271,7 +279,8 @@ class Clarity extends ThemeExtension<Clarity> {
     neutralBg: Color(0xFF222A36),
     neutralFg: Color(0xFFB8C1CE),
     negativeFg: Color(0xFFFF8A80),
-    focus: Color(0x598EA8FF),
+    focus: Color(0x59FBBA00),
+    brandGold: Color(0xFFFBBA00),
   );
 
   static Clarity forBrightness(Brightness b) =>
@@ -319,6 +328,7 @@ class Clarity extends ThemeExtension<Clarity> {
       neutralFg: c(neutralFg, other.neutralFg),
       negativeFg: c(negativeFg, other.negativeFg),
       focus: c(focus, other.focus),
+      brandGold: c(brandGold, other.brandGold),
     );
   }
 }
@@ -679,16 +689,17 @@ ThemeData buildAppTheme(Brightness brightness) {
       ),
     ),
 
+    // A soft pill group: a grey track, the chosen option a white chip.
     segmentedButtonTheme: SegmentedButtonThemeData(
       style: ButtonStyle(
         elevation: const WidgetStatePropertyAll(0),
-        side: WidgetStatePropertyAll(BorderSide(color: c.borderStrong)),
+        side: WidgetStatePropertyAll(BorderSide(color: c.neutralBg, width: 3)),
         shape: WidgetStatePropertyAll(buttonShape),
         backgroundColor: WidgetStateProperty.resolveWith(
-          (s) => s.contains(WidgetState.selected) ? c.accentSoft : c.surface,
+          (s) => s.contains(WidgetState.selected) ? c.surface : c.neutralBg,
         ),
         foregroundColor: WidgetStateProperty.resolveWith(
-          (s) => s.contains(WidgetState.selected) ? c.accent : c.textSecondary,
+          (s) => s.contains(WidgetState.selected) ? c.text : c.textSecondary,
         ),
         overlayColor: const WidgetStatePropertyAll(Colors.transparent),
         textStyle: WidgetStateProperty.resolveWith(
@@ -700,7 +711,10 @@ ThemeData buildAppTheme(Brightness brightness) {
                 : FontWeight.w500,
           ),
         ),
-        minimumSize: const WidgetStatePropertyAll(Size(0, 40)),
+        minimumSize: const WidgetStatePropertyAll(Size(0, 38)),
+        padding: const WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: 14),
+        ),
       ),
     ),
 
@@ -857,7 +871,7 @@ ThemeData buildAppTheme(Brightness brightness) {
         fontSize: 14,
         color: c.surface,
       ),
-      actionTextColor: light ? const Color(0xFFB3C4FF) : c.accentHover,
+      actionTextColor: c.brandGold,
       closeIconColor: c.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(Dt.rSm),

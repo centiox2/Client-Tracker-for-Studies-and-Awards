@@ -6,6 +6,7 @@ import '../../models/staff.dart';
 import '../../repositories/client_count_repository.dart';
 import '../../state/app_state.dart';
 import '../../widgets/clarity.dart';
+import '../../widgets/panels.dart';
 import '../reports/reports_screen.dart' show showStaffProfile;
 
 /// The team: order, rename, deactivate or delete staff, and add new ones.
@@ -96,6 +97,10 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
               inactive: inactive,
               onReactivate: (m) => _setActive(m, true),
             ),
+            if (weekData != null) ...[
+              const SizedBox(height: Dt.gap),
+              _WeekGlance(data: weekData),
+            ],
           ],
         );
 
@@ -419,10 +424,8 @@ class _StaffRow extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w500,
+              fontWeight: FontWeight.w600,
               color: member.active ? null : muted,
-              decoration: TextDecoration.underline,
-              decorationColor: Dt.textFaint(theme),
             ),
           ),
         ),
@@ -475,7 +478,11 @@ class _StaffRow extends StatelessWidget {
                   color: scheme.surfaceContainerHigh,
                 ),
                 child: Text(
-                  member.name.isEmpty ? '?' : member.name[0].toUpperCase(),
+                  member.name.isEmpty
+                      ? '?'
+                      : member.name.trim().contains(' ')
+                      ? initialsOf(member.name)
+                      : member.name[0].toUpperCase(),
                   style: theme.textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w600,
                     color: scheme.onSurfaceVariant,
@@ -729,6 +736,67 @@ class _InactivePanel extends StatelessWidget {
                   ),
               ],
             ),
+    );
+  }
+}
+
+/// "This week at a glance": who saw clients, who saw the most, who hasn't
+/// yet (of the people on this week's board).
+class _WeekGlance extends StatelessWidget {
+  const _WeekGlance({required this.data});
+  final CurrentWeekData data;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = context.clarity;
+    final rows = data.staffTotals;
+    final saw = rows.where((r) => r.total > 0).toList();
+    final top = saw.isEmpty
+        ? 0
+        : saw.map((r) => r.total).reduce((a, b) => a > b ? a : b);
+    final leaders = saw.where((r) => r.total == top).map((r) => r.name);
+    final none = rows.where((r) => r.total == 0).map((r) => r.name).toList();
+    Widget line(String label, String value) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(
+              label,
+              style: theme.textTheme.bodyMedium?.copyWith(color: c.textMuted),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    return AppPanel(
+      key: const ValueKey('week-glance'),
+      title: 'This week at a glance',
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
+        child: Column(
+          children: [
+            line('Saw clients', '${saw.length} of ${rows.length}'),
+            line(
+              'Most clients',
+              saw.isEmpty ? '—' : '${leaders.join(', ')} · $top',
+            ),
+            line('No clients yet', none.isEmpty ? '—' : none.join(', ')),
+          ],
+        ),
+      ),
     );
   }
 }

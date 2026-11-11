@@ -21,6 +21,7 @@ import 'screens/revenue/scan_payments.dart';
 import 'services/share_receiver.dart';
 import 'screens/settings/settings_screen.dart';
 import 'screens/staff_management/staff_management_screen.dart';
+import 'screens/weekly_tracker/new_week_dialog.dart';
 import 'screens/weekly_tracker/weekly_tracker_screen.dart';
 import 'state/app_state.dart';
 import 'services/auto_backup.dart';
@@ -375,19 +376,47 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       children: [
         Padding(
           padding: EdgeInsets.fromLTRB(h, phone ? 20 : 28, h, 4),
-          child: AppPageHeader(
-            tab: tab,
-            actions: [
-              // Narrow screens: the tracker's week (wide ones have it in the
-              // board's toolbar).
-              if (tab == AppTab.week && MediaQuery.sizeOf(context).width < 920)
-                WeekRangeButton(canStart: ref.read(canEditProvider)),
-            ],
-          ),
+          child: AppPageHeader(tab: tab, actions: _headerActions(tab)),
         ),
         Expanded(child: page),
       ],
     );
+  }
+
+  /// The buttons in a page's header (the main one last).
+  List<Widget> _headerActions(AppTab tab) {
+    final canEdit = ref.read(canEditProvider);
+    final narrow = MediaQuery.sizeOf(context).width < 920;
+    Widget refresh() => OutlinedButton.icon(
+      key: const ValueKey('header-refresh'),
+      onPressed: () => ref.read(dataVersionProvider.notifier).bump(),
+      icon: const Icon(Icons.refresh),
+      label: const Text('Refresh'),
+    );
+    Widget newWeek() => FilledButton.icon(
+      key: const ValueKey('header-new-week'),
+      onPressed: () => showNewWeekDialog(context, ref),
+      icon: const Icon(Icons.add),
+      label: const Text('New week'),
+    );
+    return switch (tab) {
+      AppTab.week => [
+        // Narrow screens: the week (wide ones have it on the board).
+        if (narrow) WeekRangeButton(canStart: canEdit),
+        if (!narrow) refresh(),
+        if (canEdit && !narrow) newWeek(),
+      ],
+      AppTab.history => [refresh(), if (canEdit) newWeek()],
+      AppTab.revenue when !narrow => [
+        OutlinedButton.icon(
+          key: const ValueKey('header-change-log'),
+          onPressed: () => showRevenueHistory(context, ref),
+          icon: const Icon(Icons.history),
+          label: const Text('Change log'),
+        ),
+      ],
+      _ => const [],
+    };
   }
 
   /// The phone's "More" sheet: the pages that don't fit the bottom bar.
@@ -569,6 +598,7 @@ class _AppSidebar extends ConsumerWidget {
         child: Material(
           color: active ? c.accentSoft : Colors.transparent,
           borderRadius: BorderRadius.circular(Dt.rSm),
+          clipBehavior: Clip.antiAlias,
           child: InkWell(
             borderRadius: BorderRadius.circular(Dt.rSm),
             hoverColor: c.neutralBg,
@@ -658,7 +688,10 @@ class _AppSidebar extends ConsumerWidget {
               child: SingleChildScrollView(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [for (final item in tabs) navItem(item)],
+                  children: [
+                    for (final item in tabs)
+                      if (item.tab != AppTab.settings) navItem(item),
+                  ],
                 ),
               ),
             ),
@@ -679,6 +712,13 @@ class _AppSidebar extends ConsumerWidget {
             ),
             const SizedBox(height: 12),
           ],
+          // Settings at the foot of the menu, above who's signed in.
+          for (final item in tabs)
+            if (item.tab == AppTab.settings) navItem(item),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Divider(height: 1, color: c.border),
+          ),
           const _UserRow(),
         ],
       ),
@@ -805,12 +845,7 @@ class _UserRow extends ConsumerWidget {
     final user = ref.watch(currentUserProvider);
     final canEdit = ref.watch(canEditProvider);
     final name = user?.fullName ?? role?.label ?? '';
-    final initials = name
-        .split(RegExp(r'\s+'))
-        .where((w) => w.isNotEmpty)
-        .take(2)
-        .map((w) => w[0].toUpperCase())
-        .join();
+    final initials = initialsOf(name);
     final dark = theme.brightness == Brightness.dark;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -874,8 +909,10 @@ class _UserRow extends ConsumerWidget {
                               ),
                             ),
                             Text(
-                              user?.role.label ??
-                                  (role == null ? '' : 'Profile'),
+                              user?.role == UserRole.admin
+                                  ? 'Administrator'
+                                  : user?.role.label ??
+                                        (role == null ? '' : 'Profile'),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodySmall?.copyWith(
@@ -995,35 +1032,22 @@ class _MobileTopBar extends ConsumerWidget {
   );
 }
 
-/// The "S&A" mark: accent square, white letters.
+/// The Studies and Awards logo, on its light square (readable on both
+/// themes).
 class _BrandMark extends StatelessWidget {
   const _BrandMark({this.size = 28});
   final double size;
 
   @override
-  Widget build(BuildContext context) {
-    final c = context.clarity;
-    return Semantics(
-      label: '${Dt.companyName} logo',
-      child: Container(
-        width: size,
-        height: size,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: c.accent,
-          borderRadius: BorderRadius.circular(Dt.rSm),
-        ),
-        child: Text(
-          'S&A',
-          style: TextStyle(
-            fontFamily: Dt.font,
-            fontSize: size * 0.36,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.3,
-            color: c.onAccent,
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: BorderRadius.circular(Dt.rSm),
+    child: Image.asset(
+      Dt.logoAsset,
+      key: const ValueKey('brand-logo'),
+      width: size,
+      height: size,
+      filterQuality: FilterQuality.medium,
+      semanticLabel: '${Dt.companyName} logo',
+    ),
+  );
 }

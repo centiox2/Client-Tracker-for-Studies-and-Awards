@@ -43,7 +43,9 @@ void main() {
     expect(dark.scaffoldBackgroundColor, const Color(0xFF0E1116));
     expect(Clarity.of(light).seriesNew, const Color(0xFFE8833A));
     expect(Clarity.of(light).seriesExisting, const Color(0xFF3B5BDB));
-    expect(Clarity.of(dark).accent, const Color(0xFF8EA8FF));
+    // The brand: navy accent on light, gold on dark.
+    expect(Clarity.of(light).accent, Dt.brandNavy);
+    expect(Clarity.of(dark).accent, Dt.brandGold);
     // Text styles carry Inter (not Roboto falling back to the system font).
     expect(light.textTheme.bodyMedium!.fontFamily, 'Inter');
     expect(light.textTheme.headlineMedium!.fontSize, 28);
@@ -108,5 +110,38 @@ void main() {
       tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
       ThemeMode.light,
     );
+  });
+
+  testWidgets('Staff: this week at a glance; History: the month total', (
+    tester,
+  ) async {
+    final weeks = WeekRepository(db);
+    final now = DateTime.now();
+    final week = weeks.createWeekFor(now);
+    weeks.createWeekFor(now.subtract(const Duration(days: 7)));
+    final monday = weeks.getDays(week.id).first;
+    final staff = StaffRepository(db).getAll();
+    ClientCountRepository(db).saveCount(
+      dayId: monday.id,
+      staffId: staff.first.id,
+      newClients: 1,
+      existingClients: 2,
+    );
+    await pumpApp(tester);
+    await tester.tap(find.text('Staff').first);
+    await tester.pumpAndSettle();
+    final glance = find.byKey(const ValueKey('week-glance'));
+    expect(glance, findsOneWidget);
+    expect(
+      find.descendant(
+        of: glance,
+        matching: find.text('${staff.first.name} · 3'),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('History').first);
+    await tester.pumpAndSettle();
+    expect(find.textContaining(' total'), findsWidgets);
+    expect(tester.takeException(), isNull);
   });
 }

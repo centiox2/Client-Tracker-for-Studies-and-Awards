@@ -417,6 +417,43 @@ class _MonthPanel extends StatelessWidget {
                   ? null
                   : () => onDelete!(weeks[i].week.id),
             ),
+          // The month's totals (Clarity: a bold footer row).
+          if (!compact && weeks.length > 1)
+            Container(
+              key: ValueKey('month-total-${month.year}-${month.month}'),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              decoration: BoxDecoration(
+                color: context.clarity.bg,
+                border: Border(top: BorderSide(color: scheme.outline)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${DateFormat('MMMM').format(month)} total',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  for (final n in [
+                    weeks.fold<int>(0, (a, w) => a + w.totals.newClients),
+                    weeks.fold<int>(0, (a, w) => a + w.totals.existingClients),
+                    clients,
+                  ])
+                    SizedBox(
+                      width: _numW,
+                      child: Text(
+                        '$n',
+                        textAlign: TextAlign.right,
+                        style: Dt.tab(theme.textTheme.bodyMedium!)
+                            .copyWith(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  const SizedBox(width: 24 + _barsW + _actionsW),
+                ],
+              ),
+            ),
         ],
       ),
     );

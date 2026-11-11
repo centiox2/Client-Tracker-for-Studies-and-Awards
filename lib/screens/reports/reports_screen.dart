@@ -183,7 +183,6 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     return LayoutBuilder(
       builder: (context, viewport) {
         final compact = viewport.maxWidth < 760;
-        final phone = viewport.maxWidth < 600;
         final pad = clarityHPad(context);
         return ListView(
           padding: EdgeInsets.fromLTRB(pad, 18, pad, 28),
@@ -194,82 +193,48 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      alignment: WrapAlignment.spaceBetween,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        SegmentedButton<_View>(
-                          segments: [
-                            ButtonSegment(
-                              value: _View.quick,
-                              icon: phone
-                                  ? null
-                                  : const Icon(Icons.bolt_outlined, size: 16),
-                              label: const Text('Quick view', maxLines: 1),
-                            ),
-                            ButtonSegment(
-                              value: _View.details,
-                              icon: phone
-                                  ? null
-                                  : const Icon(
-                                      Icons.table_chart_outlined,
-                                      size: 16,
-                                    ),
-                              label: const Text('Details', maxLines: 1),
-                            ),
-                            ButtonSegment(
-                              value: _View.trends,
-                              icon: phone
-                                  ? null
-                                  : const Icon(Icons.show_chart, size: 16),
-                              label: const Text('Trends', maxLines: 1),
-                            ),
-                          ],
-                          selected: {_view},
-                          showSelectedIcon: false,
-                          expandedInsets: phone ? EdgeInsets.zero : null,
-                          style: phone ? Dt.phoneSegments : null,
-                          onSelectionChanged: (s) =>
-                              setState(() => _view = s.first),
-                        ),
-                        if (_view == _View.quick)
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: compact
-                                ? [
-                                    IconButton(
-                                      tooltip: 'Share summary',
-                                      onPressed: () =>
-                                          showDailySummary(context),
-                                      icon: const Icon(Icons.ios_share),
-                                    ),
-                                    IconButton(
-                                      tooltip: 'TV mode',
-                                      onPressed: () => openTvView(context),
-                                      icon: const Icon(Icons.tv),
-                                    ),
-                                  ]
-                                : [
-                                    OutlinedButton.icon(
-                                      onPressed: () =>
-                                          showDailySummary(context),
-                                      icon: const Icon(
-                                        Icons.ios_share,
-                                        size: 15,
-                                      ),
-                                      label: const Text('Share summary'),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    OutlinedButton.icon(
-                                      onPressed: () => openTvView(context),
-                                      icon: const Icon(Icons.tv, size: 15),
-                                      label: const Text('TV mode'),
-                                    ),
-                                  ],
-                          ),
+                    UnderlineTabs<_View>(
+                      key: const ValueKey('reports-view'),
+                      tabs: const [
+                        (_View.quick, 'Quick view'),
+                        (_View.details, 'Details'),
+                        (_View.trends, 'Trends'),
                       ],
+                      selected: _view,
+                      onChanged: (v) => setState(() => _view = v),
+                      trailing: _view != _View.quick
+                          ? null
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: compact
+                                  ? [
+                                      IconButton(
+                                        tooltip: 'Share summary',
+                                        onPressed: () =>
+                                            showDailySummary(context),
+                                        icon: const Icon(Icons.ios_share),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'TV mode',
+                                        onPressed: () => openTvView(context),
+                                        icon: const Icon(Icons.tv),
+                                      ),
+                                    ]
+                                  : [
+                                      OutlinedButton.icon(
+                                        onPressed: () =>
+                                            showDailySummary(context),
+                                        icon: const Icon(Icons.ios_share),
+                                        label: const Text('Share summary'),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      OutlinedButton.icon(
+                                        onPressed: () => openTvView(context),
+                                        icon: const Icon(Icons.tv),
+                                        label: const Text('TV mode'),
+                                      ),
+                                    ],
+                            ),
                     ),
                     const SizedBox(height: 16),
                     if (_view != _View.details)
@@ -749,13 +714,14 @@ class _Tile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    final c = context.clarity;
+    // The Clarity KPI card: label, the big number, then the caption.
     return FadeSlideIn(
       child: Container(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
         decoration: BoxDecoration(
-          color: scheme.surfaceContainerLow,
-          border: Border.all(color: scheme.outline),
+          color: c.surface,
+          border: Border.all(color: c.border),
           borderRadius: BorderRadius.circular(Dt.rMd),
         ),
         child: Column(
@@ -763,13 +729,11 @@ class _Tile extends StatelessWidget {
           children: [
             Text(
               label,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
+              style: theme.textTheme.labelMedium?.copyWith(color: c.textMuted),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             // Shrinks a long value ("Wednesday") rather than cutting it off.
             FittedBox(
               fit: BoxFit.scaleDown,
@@ -782,37 +746,36 @@ class _Tile extends StatelessWidget {
                   if (unit != null) ...[
                     Text(
                       unit!,
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: c.textMuted,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 6),
                   ],
                   AnimatedValueText(
                     value,
                     maxLines: 1,
-                    style: Dt.tab(theme.textTheme.headlineSmall!)
-                        .copyWith(fontWeight: FontWeight.w700, color: color),
+                    style: Dt.tab(theme.textTheme.displaySmall!)
+                        .copyWith(color: color),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 10),
             Text(
               caption,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelSmall?.copyWith(
-                fontSize: 10.5,
-                color: scheme.onSurfaceVariant,
-              ),
+              style: theme.textTheme.labelSmall?.copyWith(color: c.textMuted),
             ),
-            if (footer != null)
+            if (footer != null) ...[
+              const SizedBox(height: 4),
               ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: 18),
                 child: footer,
               ),
+            ],
           ],
         ),
       ),

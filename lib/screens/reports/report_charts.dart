@@ -33,35 +33,23 @@ class _Delta extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final c = context.clarity;
     final diff = current - previous;
-    final style = theme.textTheme.labelSmall?.copyWith(
-      fontSize: 10.5,
-      color: theme.colorScheme.onSurfaceVariant,
-    );
+    final style = theme.textTheme.labelSmall?.copyWith(color: c.textMuted);
     if (diff == 0) {
       return Text('Same as $against', style: style, maxLines: 1);
     }
     final pct = previous == 0
         ? ''
         : ' (${(diff.abs() * 100 / previous).round()}%)';
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          diff > 0 ? Icons.arrow_drop_up : Icons.arrow_drop_down,
-          size: 16,
-          color: style?.color,
-        ),
-        Flexible(
-          child: Text(
-            '${format?.call(diff.abs()) ?? diff.abs()}$pct vs $against',
-            style: style,
-            // Wraps on a phone instead of cutting off "vs last week".
-            maxLines: MediaQuery.sizeOf(context).width < 600 ? 2 : 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
+    // Clarity: "↓ 5 (71%) vs last Wednesday", red down, green up.
+    return Text(
+      '${diff > 0 ? '↑' : '↓'} '
+      '${format?.call(diff.abs()) ?? diff.abs()}$pct vs $against',
+      style: style?.copyWith(color: diff > 0 ? c.positiveFg : c.negativeFg),
+      // Wraps on a phone instead of cutting off "vs last week".
+      maxLines: MediaQuery.sizeOf(context).width < 600 ? 2 : 1,
+      overflow: TextOverflow.ellipsis,
     );
   }
 }

@@ -133,24 +133,14 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
                         ],
                       ),
                       if (meta.seesOthers)
-                        SegmentedButton<_Tab>(
+                        UnderlineTabs<_Tab>(
                           key: const ValueKey('reports-tab'),
-                          segments: const [
-                            ButtonSegment(
-                              value: _Tab.mine,
-                              icon: Icon(Icons.edit_note, size: 16),
-                              label: Text('My reports'),
-                            ),
-                            ButtonSegment(
-                              value: _Tab.overview,
-                              icon: Icon(Icons.dashboard_outlined, size: 16),
-                              label: Text('Overview'),
-                            ),
+                          tabs: const [
+                            (_Tab.mine, 'My reports'),
+                            (_Tab.overview, 'Overview'),
                           ],
-                          selected: {tab},
-                          showSelectedIcon: false,
-                          onSelectionChanged: (v) =>
-                              setState(() => _tab = v.first),
+                          selected: tab,
+                          onChanged: (v) => setState(() => _tab = v),
                         ),
                     ],
                   ),

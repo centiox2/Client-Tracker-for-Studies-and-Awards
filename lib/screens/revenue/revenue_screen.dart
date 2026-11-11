@@ -138,54 +138,34 @@ class _RevenueScreenState extends ConsumerState<RevenueScreen> {
       builder: (context, viewport) {
         final phone = viewport.maxWidth < 600;
         final pad = clarityHPad(context);
-        final switchButton = SegmentedButton<RevenueView>(
+        final viewSwitch = UnderlineTabs<RevenueView>(
           key: const ValueKey('revenue-view'),
-          segments: [
-            ButtonSegment(
-              value: RevenueView.day,
-              icon: phone ? null : const Icon(Icons.today_outlined, size: 16),
-              label: const Text('Day'),
-            ),
-            ButtonSegment(
-              value: RevenueView.all,
-              icon: phone
-                  ? null
-                  : const Icon(Icons.receipt_long_outlined, size: 16),
-              label: const Text('All'),
-            ),
-            ButtonSegment(
-              value: RevenueView.insights,
-              icon: phone
-                  ? null
-                  : const Icon(Icons.insights_outlined, size: 16),
-              label: const Text('Insights'),
-            ),
+          tabs: [
+            (RevenueView.day, 'Day'),
+            (RevenueView.all, phone ? 'All' : 'All transactions'),
+            (RevenueView.insights, 'Insights'),
           ],
-          selected: {_view},
-          showSelectedIcon: false,
-          onSelectionChanged: (s) => setState(() => _view = s.first),
-        );
-        final viewSwitch = Row(
-          children: [
-            Expanded(
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: switchButton,
+          selected: _view,
+          onChanged: (v) => setState(() => _view = v),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                key: const ValueKey('revenue-search'),
+                tooltip: 'Search payments',
+                onPressed: () => _openSearch(''),
+                icon: const Icon(Icons.search),
               ),
-            ),
-            IconButton(
-              key: const ValueKey('revenue-search'),
-              tooltip: 'Search payments',
-              onPressed: () => _openSearch(''),
-              icon: const Icon(Icons.search),
-            ),
-            IconButton(
-              key: const ValueKey('revenue-history'),
-              tooltip: 'Revenue history',
-              onPressed: () => showRevenueHistory(context, ref),
-              icon: const Icon(Icons.history),
-            ),
-          ],
+              // Wide screens have "Change log" in the page header.
+              if (MediaQuery.sizeOf(context).width < 920)
+                IconButton(
+                  key: const ValueKey('revenue-history'),
+                  tooltip: 'Revenue history',
+                  onPressed: () => showRevenueHistory(context, ref),
+                  icon: const Icon(Icons.history),
+                ),
+            ],
+          ),
         );
         if (_view == RevenueView.all) {
           return AllRevenue(

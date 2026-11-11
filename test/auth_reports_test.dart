@@ -574,7 +574,7 @@ void main() {
 
     await tester.tap(find.text('Edit in tracker'));
     await tester.pumpAndSettle();
-    expect(find.textContaining(RegExp(r'^Week \d+$')), findsOneWidget);
+    expect(find.textContaining(RegExp(r'^Week \d+ · ')), findsOneWidget);
   });
 
   testWidgets('Reports renders at phone width', (tester) async {

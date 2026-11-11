@@ -69,7 +69,7 @@ class AppPanel extends StatelessWidget {
                           const SizedBox(height: 2),
                           Text(
                             subtitle!,
-                            maxLines: 2,
+                            maxLines: 4,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.labelMedium?.copyWith(
                               color: c.textMuted,

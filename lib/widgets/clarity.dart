@@ -608,3 +608,102 @@ class ListRows extends StatelessWidget {
     diff < 0 ? DeltaTone.down : DeltaTone.up,
   );
 }
+
+/// A page's sections as underlined text tabs ("Day · All transactions ·
+/// Insights"): the current one in the accent with a 2px line under it, on a
+/// full-width subtle rule. Scrolls sideways if the tabs don't fit.
+class UnderlineTabs<T> extends StatelessWidget {
+  const UnderlineTabs({
+    super.key,
+    required this.tabs,
+    required this.selected,
+    required this.onChanged,
+    this.trailing,
+  });
+
+  /// (value, label) for each tab.
+  final List<(T, String)> tabs;
+  final T selected;
+  final ValueChanged<T> onChanged;
+
+  /// Something on the right of the tab row (a status line, a button).
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = context.clarity;
+    final row = SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final (i, (value, label)) in tabs.indexed) ...[
+            if (i > 0) const SizedBox(width: 28),
+            Semantics(
+              selected: value == selected,
+              button: true,
+              child: InkWell(
+                key: ValueKey('tab-$label'),
+                onTap: () => onChanged(value),
+                hoverColor: Colors.transparent,
+                child: Container(
+                  padding: const EdgeInsets.only(top: 8, bottom: 10),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(
+                        color: value == selected
+                            ? c.accent
+                            : Colors.transparent,
+                        width: 2,
+                      ),
+                    ),
+                  ),
+                  child: Text(
+                    label,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      fontWeight: value == selected
+                          ? FontWeight.w600
+                          : FontWeight.w500,
+                      color: value == selected ? c.accent : c.textMuted,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: c.border)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: Align(alignment: Alignment.centerLeft, child: row),
+          ),
+          if (trailing != null) ...[
+            const SizedBox(width: 12),
+            Padding(padding: const EdgeInsets.only(bottom: 8), child: trailing),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Two letters for an avatar: "Canisius Yego" → "CY", "Admin" → "AD".
+String initialsOf(String name) {
+  final words = name
+      .split(RegExp(r'[\s/]+'))
+      .where((w) => w.isNotEmpty)
+      .toList();
+  if (words.isEmpty) return '';
+  if (words.length == 1) {
+    final w = words.first;
+    return (w.length >= 2 ? w.substring(0, 2) : w).toUpperCase();
+  }
+  return (words[0][0] + words[1][0]).toUpperCase();
+}
