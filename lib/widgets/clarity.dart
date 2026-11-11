@@ -1,6 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../design/app_theme.dart';
+import '../state/app_state.dart';
 
 /// Clarity building blocks (see the design kit): page header, KPI cards,
 /// status pills, meters, notices and list rows. Colours always come from
@@ -140,18 +143,24 @@ class KpiCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final c = context.clarity;
+    // Phones: tighter cards and a smaller number, so two fit side by side
+    // without the words wrapping into tall boxes.
+    final phone = MediaQuery.sizeOf(context).width < 600;
     final card = ClarityCard(
+      padding: phone
+          ? const EdgeInsets.fromLTRB(14, 12, 14, 12)
+          : const EdgeInsets.fromLTRB(20, 18, 20, 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
             label,
-            maxLines: 1,
+            maxLines: phone ? 2 : 1,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.labelMedium?.copyWith(color: c.textMuted),
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: phone ? 6 : 10),
           Row(
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
@@ -162,8 +171,13 @@ class KpiCard extends StatelessWidget {
                   alignment: Alignment.centerLeft,
                   child: Text(
                     value,
-                    style: Dt.tab(theme.textTheme.displaySmall!)
-                        .copyWith(color: valueColor),
+                    style: Dt.tab(
+                      phone
+                          ? theme.textTheme.headlineMedium!.copyWith(
+                              fontWeight: FontWeight.w700,
+                            )
+                          : theme.textTheme.displaySmall!,
+                    ).copyWith(color: valueColor),
                   ),
                 ),
               ),
@@ -184,7 +198,7 @@ class KpiCard extends StatelessWidget {
             ],
           ),
           if (caption != null) ...[
-            const SizedBox(height: 10),
+            SizedBox(height: phone ? 6 : 10),
             Text(
               caption!,
               maxLines: 2,
@@ -210,31 +224,172 @@ class KpiCard extends StatelessWidget {
 }
 
 /// A row of KPI cards that wraps by itself: each at least [minWidth] wide.
-class KpiGrid extends StatelessWidget {
-  const KpiGrid({super.key, required this.children, this.minWidth = 190});
+///
+/// With [orderKey], the cards can be rearranged by dragging (press and hold
+/// on a phone or tablet); the order is remembered on this device. A card is
+/// known by its label (or its key), so cards a profile doesn't see keep
+/// their place.
+class KpiGrid extends ConsumerStatefulWidget {
+  const KpiGrid({
+    super.key,
+    required this.children,
+    this.minWidth = 190,
+    this.orderKey,
+    this.columns,
+    this.ids,
+  });
 
   final List<Widget> children;
   final double minWidth;
+  final String? orderKey;
+
+  /// A fixed number per row (else as many as [minWidth] allows).
+  final int? columns;
+
+  /// Names for the cards, in order (else their labels or keys).
+  final List<String>? ids;
+
+  @override
+  ConsumerState<KpiGrid> createState() => _KpiGridState();
+}
+
+class _KpiGridState extends ConsumerState<KpiGrid> {
+  String? _over;
+
+  static String _idOf(Widget w, int i) => switch (w) {
+    KpiCard(:final label) => label,
+    Widget(key: ValueKey<String>(:final value)) => value,
+    _ => '#$i',
+  };
+
+  String get _pref => 'cards.${widget.orderKey}';
+
+  List<String> _saved() {
+    final raw = ref.read(uiPrefProvider).get(_pref);
+    return raw == null || raw.isEmpty ? const [] : raw.split('\u0001');
+  }
+
+  /// [ids] in the saved order; new ones keep their place among the rest.
+  List<String> _ordered(List<String> ids) {
+    final saved = [
+      for (final id in _saved())
+        if (ids.contains(id)) id,
+    ];
+    if (saved.isEmpty) return ids;
+    final out = [...saved];
+    for (final (i, id) in ids.indexed) {
+      if (!out.contains(id)) out.insert(i.clamp(0, out.length), id);
+    }
+    return out;
+  }
+
+  void _move(List<String> order, String from, String to) {
+    final next = [...order]..remove(from);
+    final at = next.indexOf(to);
+    // Dropped on a later card: it goes after it; on an earlier one, before.
+    final after = order.indexOf(from) < order.indexOf(to);
+    next.insert(after ? at + 1 : at, from);
+    ref.read(uiPrefProvider).set(_pref, next.join('\u0001'));
+    setState(() => _over = null);
+  }
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(cardOrderVersionProvider);
+    final c = context.clarity;
+    final byId = {
+      for (final (i, w) in widget.children.indexed)
+        (widget.ids != null && i < widget.ids!.length
+                ? widget.ids![i]
+                : _idOf(w, i)):
+            w,
+    };
+    final order = widget.orderKey == null
+        ? byId.keys.toList()
+        : _ordered(byId.keys.toList());
+    final touch =
+        MediaQuery.sizeOf(context).width < 1050 ||
+        defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS;
+
     return LayoutBuilder(
       builder: (context, box) {
         const gap = Dt.gap;
-        var cols = ((box.maxWidth + gap) / (minWidth + gap)).floor();
-        cols = cols.clamp(1, children.isEmpty ? 1 : children.length);
+        final n = order.length;
+        var cols =
+            widget.columns ??
+            ((box.maxWidth + gap) / (widget.minWidth + gap)).floor();
+        cols = cols.clamp(1, n == 0 ? 1 : n);
         final w = (box.maxWidth - gap * (cols - 1)) / cols;
+
+        Widget cell(String id, double width) {
+          final child = byId[id]!;
+          if (widget.orderKey == null) return child;
+          final feedback = Material(
+            color: Colors.transparent,
+            elevation: 8,
+            borderRadius: BorderRadius.circular(Dt.rMd),
+            child: SizedBox(width: width, child: child),
+          );
+          final ghost = Opacity(opacity: 0.35, child: child);
+          final drag = touch
+              ? LongPressDraggable<String>(
+                  data: id,
+                  feedback: feedback,
+                  childWhenDragging: ghost,
+                  hapticFeedbackOnStart: true,
+                  child: child,
+                )
+              : Draggable<String>(
+                  data: id,
+                  feedback: feedback,
+                  childWhenDragging: ghost,
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.grab,
+                    child: child,
+                  ),
+                );
+          return DragTarget<String>(
+            onWillAcceptWithDetails: (d) {
+              if (d.data == id) return false;
+              if (_over != id) setState(() => _over = id);
+              return true;
+            },
+            onLeave: (_) {
+              if (_over == id) setState(() => _over = null);
+            },
+            onAcceptWithDetails: (d) => _move(order, d.data, id),
+            builder: (context, candidates, _) => DecoratedBox(
+              key: ValueKey('kpi-slot-$id'),
+              position: DecorationPosition.foreground,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(Dt.rMd),
+                border: candidates.isEmpty
+                    ? null
+                    : Border.all(color: c.accent, width: 2),
+              ),
+              child: drag,
+            ),
+          );
+        }
+
         final rows = <Widget>[];
-        for (var i = 0; i < children.length; i += cols) {
-          final row = children.sublist(i, (i + cols).clamp(0, children.length));
+        for (var i = 0; i < n; i += cols) {
+          final row = order.sublist(i, (i + cols).clamp(0, n));
+          // Two to a row and one left over: it takes the whole row rather
+          // than leaving a hole beside it.
+          if (cols == 2 && row.length == 1) {
+            rows.add(cell(row.single, box.maxWidth));
+            continue;
+          }
           rows.add(
             IntrinsicHeight(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  for (final (j, child) in row.indexed) ...[
+                  for (final (j, id) in row.indexed) ...[
                     if (j > 0) const SizedBox(width: gap),
-                    SizedBox(width: w, child: child),
+                    SizedBox(width: w, child: cell(id, w)),
                   ],
                 ],
               ),

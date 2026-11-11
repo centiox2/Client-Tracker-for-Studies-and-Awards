@@ -7,6 +7,7 @@ import '../../repositories/revenue_repository.dart';
 import '../../services/export_actions.dart' show deliverFile;
 import '../../services/revenue_export.dart';
 import '../../state/app_state.dart';
+import '../../widgets/clarity.dart';
 import '../../widgets/motion.dart';
 import '../../widgets/panels.dart';
 
@@ -569,19 +570,14 @@ class _RevenueInsightsState extends ConsumerState<RevenueInsights> {
       children: [
         picker,
         const SizedBox(height: 12),
-        LayoutBuilder(
-          builder: (context, c) {
-            final perRow = phone ? 2 : 3;
-            final w = ((c.maxWidth - 10 * (perRow - 1)) / perRow).clamp(
-              0.0,
-              double.infinity,
-            );
-            return Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [for (final t in tiles) SizedBox(width: w, child: t)],
-            );
-          },
+        KpiGrid(
+          orderKey: 'insights',
+          columns: phone ? 2 : 3,
+          ids: [
+            for (final t in tiles)
+              if (t is _Stat) t.label else '$t',
+          ],
+          children: tiles,
         ),
         const SizedBox(height: 12),
         mainChart,

@@ -330,6 +330,7 @@ class _QuickView extends ConsumerWidget {
         Text('TODAY', style: microLabel(theme)),
         const SizedBox(height: 10),
         KpiGrid(
+          orderKey: 'reports.today',
           minWidth: compact ? 150 : 190,
           children: tiles.take(todayCount).toList(),
         ),
@@ -340,6 +341,7 @@ class _QuickView extends ConsumerWidget {
         ),
         const SizedBox(height: 10),
         KpiGrid(
+          orderKey: 'reports.period',
           minWidth: compact ? 150 : 190,
           children: tiles.skip(todayCount).toList(),
         ),
@@ -691,7 +693,7 @@ class _Activity extends StatelessWidget {
             child: Row(
               children: [
                 SizedBox(
-                  width: 74,
+                  width: 56,
                   child: Text(
                     _sameDay(entries[i].updatedAt, now)
                         ? DateFormat('HH:mm').format(entries[i].updatedAt)
@@ -708,17 +710,16 @@ class _Activity extends StatelessWidget {
                     ),
                   ),
                 ),
-                Flexible(
-                  child: Text(
-                    '${entries[i].newClients} new · '
-                    '${entries[i].existingClients} existing'
-                    '${_sameDay(entries[i].date, now) ? '' : ' (${DateFormat('EEE').format(entries[i].date)})'}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.right,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+                // Never cut short: the name gives way instead.
+                Text(
+                  '${entries[i].newClients} new · '
+                  '${entries[i].existingClients} existing'
+                  '${_sameDay(entries[i].date, now) ? '' : ' · ${DateFormat('EEE').format(entries[i].date)}'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
               ],

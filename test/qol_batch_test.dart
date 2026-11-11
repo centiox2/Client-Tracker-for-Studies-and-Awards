@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -267,4 +268,88 @@ void main() {
     expect(month.left - prev.right, lessThan(16));
     expect(next.left - month.right, lessThan(16));
   });
+
+  testWidgets('summary cards can be dragged into a new order, kept and reset', (
+    tester,
+  ) async {
+    WeekRepository(db).createWeekFor(DateTime.now());
+    await pumpApp(tester);
+    Offset at(String label) => tester.getCenter(find.text(label).first);
+    expect(at('New clients').dx, lessThan(at('Total clients').dx));
+
+    // Tests run as Android: press and hold, then drag.
+    final gesture = await tester.startGesture(at('New clients'));
+    await tester.pump(const Duration(milliseconds: 700));
+    await gesture.moveBy(const Offset(20, 0));
+    await tester.pump();
+    await gesture.moveTo(at('Total clients'));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(at('New clients').dx, greaterThan(at('Total clients').dx));
+    final saved = db.raw.select(
+      "SELECT v FROM sync_state WHERE k = 'ui.cards.overview';",
+    );
+    expect(saved, isNotEmpty);
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ClientTrackerApp)),
+    );
+    container.read(uiPrefProvider).clearPrefix('cards.');
+    container.read(cardOrderVersionProvider.notifier).bump();
+    await tester.pumpAndSettle();
+    expect(at('New clients').dx, lessThan(at('Total clients').dx));
+  });
+
+  testWidgets('phone bottom bar: Applications where Daily reports was', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          adminSessionProvider.overrideWith(SignedInSession.new),
+          accountsEnabledProvider.overrideWithValue(true),
+        ],
+        child: const ClientTrackerApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final bar = find.byType(NavigationBar);
+    List<String> labels() => [
+      for (final d in tester.widgetList<NavigationDestination>(
+        find.descendant(of: bar, matching: find.byType(NavigationDestination)),
+      ))
+        d.label,
+    ];
+    expect(labels(), ['Home', 'Apps', 'Tracker', 'Reports', 'More']);
+
+    await tester.tap(find.byTooltip('More pages'));
+    await tester.pumpAndSettle();
+    expect(find.text('Daily reports'), findsOneWidget);
+  });
+
+  testWidgets('on a Windows PC a card drags straight away with the mouse', (
+    tester,
+  ) async {
+    WeekRepository(db).createWeekFor(DateTime.now());
+    await pumpApp(tester);
+    Offset at(String label) => tester.getCenter(find.text(label).first);
+    final gesture = await tester.startGesture(
+      at('Existing clients'),
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.moveBy(const Offset(30, 0));
+    await tester.pump();
+    await gesture.moveTo(at('Active staff'));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(at('Existing clients').dy, at('Active staff').dy);
+    expect(at('Existing clients').dx, greaterThan(at('Active staff').dx));
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 }

@@ -268,6 +268,9 @@ class _NumericFieldState extends State<NumericField> {
                   keyboardType: TextInputType.number,
                   textAlign: TextAlign.center,
                   textAlignVertical: TextAlignVertical.center,
+                  // Fill the whole box, so the "+" is centred on it.
+                  expands: true,
+                  maxLines: null,
                   cursorWidth: 1,
                   style: digits(valueColor, FontWeight.w600),
                   inputFormatters: [

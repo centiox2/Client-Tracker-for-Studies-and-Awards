@@ -395,7 +395,11 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
     return [
       header,
       const SizedBox(height: 12),
-      _StatGrid(tiles: tiles, phone: phone),
+      KpiGrid(
+        orderKey: 'applications.all',
+        columns: phone ? 2 : 4,
+        children: tiles,
+      ),
       const SizedBox(height: 12),
       _stagePanel(context, apps),
       const SizedBox(height: 12),
@@ -429,7 +433,8 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
         : latest == null
         ? null
         : 'Updated ${_when(latest.at)}'
-              '${latest.device.isEmpty ? '' : ' on ${latest.device}'}';
+              // Phones: no room for the device's name.
+              '${latest.device.isEmpty || phone ? '' : ' on ${latest.device}'}';
     final updated = when == null && !warn
         ? null
         : Tooltip(
@@ -759,13 +764,16 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
         (apps.map(f).where((v) => v.isNotEmpty).toSet().toList()
           ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())));
 
+    // Phones: two filters to a row (not five full-width boxes).
+    final half =
+        (MediaQuery.sizeOf(context).width - 2 * clarityHPad(context) - 46) / 2;
     Widget filter(
       String label,
       String? value,
       List<String> values,
       ValueChanged<String?> onChanged,
     ) => SizedBox(
-      width: phone ? double.infinity : 200,
+      width: phone ? half : 200,
       child: DropdownButtonFormField<String?>(
         initialValue: value,
         isExpanded: true,
@@ -786,7 +794,7 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
 
     final filters = Wrap(
       spacing: 10,
-      runSpacing: 10,
+      runSpacing: phone ? 8 : 10,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         SizedBox(
@@ -896,7 +904,9 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
             ? '${shown.length} of ${apps.length}'
             : '${apps.length}',
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+          padding: phone
+              ? const EdgeInsets.fromLTRB(16, 12, 16, 12)
+              : const EdgeInsets.fromLTRB(20, 12, 20, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1427,38 +1437,6 @@ class _Stat extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// Two tiles a row on phones, four otherwise, equal heights.
-class _StatGrid extends StatelessWidget {
-  const _StatGrid({required this.tiles, required this.phone});
-  final List<Widget> tiles;
-  final bool phone;
-
-  @override
-  Widget build(BuildContext context) {
-    final perRow = phone ? 2 : 4;
-    return Column(
-      children: [
-        for (var i = 0; i < tiles.length; i += perRow) ...[
-          if (i > 0) const SizedBox(height: 10),
-          IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (var j = i; j < i + perRow; j++) ...[
-                  if (j > i) const SizedBox(width: 10),
-                  Expanded(
-                    child: j < tiles.length ? tiles[j] : const SizedBox(),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ],
     );
   }
 }

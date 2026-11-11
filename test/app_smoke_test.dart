@@ -300,9 +300,9 @@ void main() {
     await tester.pumpAndSettle();
     final trackerLayoutError = tester.takeException();
     expect(trackerLayoutError, isNull, reason: '$trackerLayoutError');
-    final visibleNewFields = find.text('New').evaluate().length;
-    expect(visibleNewFields, greaterThan(0));
-    expect(find.text('Exist.'), findsWidgets);
+    // Column headings once, over a row of fields per person.
+    expect(find.text('NEW'), findsOneWidget);
+    expect(find.text('EXISTING'), findsOneWidget);
     expect(find.byType(TextField), findsWidgets);
 
     // Staff is under "More" in the phone's bottom bar.

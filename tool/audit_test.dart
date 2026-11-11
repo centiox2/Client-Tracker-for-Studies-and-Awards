@@ -99,97 +99,190 @@ class _Shot {
 const _phone = Size(390, 844);
 const _tablet = Size(1024, 768);
 
-final _shots = <_Shot>[
-  const _Shot('profiles', signedIn: false),
-  const _Shot('profiles-phone', size: _phone, ratio: 2, signedIn: false),
-  const _Shot('revenue-all', steps: ['Revenue', 'All transactions']),
-  const _Shot('revenue-insights', steps: ['Revenue', 'Insights']),
-  const _Shot(
-    'revenue-insights-dark',
-    dark: true,
-    steps: ['Revenue', 'Insights'],
-  ),
-  const _Shot('apps-list', steps: ['Applications', 'All applications']),
-  const _Shot(
-    'apps-list-dark',
-    dark: true,
-    steps: ['Applications', 'All applications'],
-  ),
-  const _Shot('apps-table', steps: ['Applications', 'Table']),
-  const _Shot('apps-details', steps: ['Applications', 'Brian Sample']),
-  const _Shot('reports-details', steps: ['Reports', 'Details']),
-  const _Shot(
-    'reports-details-dark',
-    dark: true,
-    steps: ['Reports', 'Details'],
-  ),
-  const _Shot('reports-trends', steps: ['Reports', 'Trends']),
-  const _Shot('quick-search', steps: [ValueKey('sidebar-search')]),
-  const _Shot(
-    'new-week',
-    steps: ['Weekly tracker', ValueKey('header-new-week')],
-  ),
-  const _Shot('week-menu', steps: [ValueKey('week-picker')]),
-  const _Shot('account-menu', steps: [ValueKey('account-menu')]),
-  const _Shot('sidebar-closed', steps: [ValueKey('sidebar-collapse')]),
-  const _Shot(
-    'sidebar-closed-dark',
-    dark: true,
-    steps: [ValueKey('sidebar-collapse'), ValueKey('strip-week')],
-  ),
-  const _Shot('tablet-overview', size: _tablet),
-  const _Shot('tablet-tracker', size: _tablet, steps: ['Tracker']),
-  const _Shot(
-    'tablet-apps',
-    size: _tablet,
-    steps: [ValueKey('more'), 'Applications'],
-  ),
-  const _Shot('tablet-reports', size: _tablet, steps: ['Reports']),
-  const _Shot('tablet-revenue', size: _tablet, steps: ['Revenue']),
-  const _Shot(
-    'tablet-settings',
-    size: _tablet,
-    steps: [ValueKey('more'), 'Settings'],
-  ),
-  const _Shot(
-    'phone-revenue-insights',
-    size: _phone,
-    ratio: 2,
-    steps: ['Revenue', 'Insights'],
-  ),
-  const _Shot(
-    'phone-apps',
-    size: _phone,
-    ratio: 2,
-    steps: [ValueKey('more'), 'Applications'],
-  ),
-  const _Shot(
-    'phone-apps-list',
-    size: _phone,
-    ratio: 2,
+// Tall screens show a whole page in one picture (for the mobile review).
+const _tallPhone = Size(390, 2200);
+const _tallTablet = Size(820, 2000);
+
+List<_Shot> _pages(String prefix, Size size, double ratio) => [
+  _Shot('$prefix-overview', size: size, ratio: ratio),
+  _Shot('$prefix-tracker', size: size, ratio: ratio, steps: ['Tracker']),
+  _Shot('$prefix-apps', size: size, ratio: ratio, steps: [ValueKey('more'), 'Applications']),
+  _Shot(
+    '$prefix-apps-all',
+    size: size,
+    ratio: ratio,
     steps: [ValueKey('more'), 'Applications', 'All applications'],
   ),
-  const _Shot(
-    'phone-reports-details',
-    size: _phone,
-    ratio: 2,
+  _Shot(
+    '$prefix-apps-table',
+    size: size,
+    ratio: ratio,
+    steps: [ValueKey('more'), 'Applications', 'Table'],
+  ),
+  _Shot(
+    '$prefix-apps-details',
+    size: size,
+    ratio: ratio,
+    steps: [ValueKey('more'), 'Applications', 'All applications', 'Brian Sample'],
+  ),
+  _Shot('$prefix-reports', size: size, ratio: ratio, steps: ['Reports']),
+  _Shot(
+    '$prefix-reports-details',
+    size: size,
+    ratio: ratio,
     steps: ['Reports', 'Details'],
   ),
-  const _Shot(
-    'phone-history',
-    size: _phone,
-    ratio: 2,
-    steps: [ValueKey('more'), 'History'],
+  _Shot(
+    '$prefix-reports-trends',
+    size: size,
+    ratio: ratio,
+    steps: ['Reports', 'Trends'],
   ),
-  const _Shot('phone-dark', size: _phone, ratio: 2, dark: true),
-  const _Shot('revenue-all', steps: ['Revenue', 'All transactions']),
-  const _Shot(
-    'phone-revenue-all',
-    size: _phone,
-    ratio: 2,
+  _Shot(
+    '$prefix-revenue',
+    size: size,
+    ratio: ratio,
+    steps: ['Revenue'],
+  ),
+  _Shot(
+    '$prefix-revenue-all',
+    size: size,
+    ratio: ratio,
     steps: ['Revenue', 'All'],
   ),
-  const _Shot('settings-about', steps: ['Settings', ValueKey('about-section')]),
+  _Shot(
+    '$prefix-revenue-insights',
+    size: size,
+    ratio: ratio,
+    steps: ['Revenue', 'Insights'],
+  ),
+  _Shot(
+    '$prefix-history',
+    size: size,
+    ratio: ratio,
+    steps: [ValueKey('more'), 'History'],
+  ),
+  _Shot(
+    '$prefix-staff',
+    size: size,
+    ratio: ratio,
+    steps: [ValueKey('more'), 'Staff'],
+  ),
+  _Shot(
+    '$prefix-settings',
+    size: size,
+    ratio: ratio,
+    steps: [ValueKey('more'), 'Settings'],
+  ),
+  _Shot('$prefix-more', size: size, ratio: ratio, steps: [ValueKey('more')]),
+  _Shot(
+    '$prefix-menu',
+    size: size,
+    ratio: ratio,
+    steps: [ValueKey('phone-menu')],
+  ),
+];
+
+final _shots = <_Shot>[
+  if (Platform.environment['MOBILE_ONLY'] != null) ...[
+    ..._pages('m', _tallPhone, 1),
+    ..._pages('t', _tallTablet, 1),
+    ..._pages('l', const Size(1024, 1500), 1),
+  ] else ...[
+    const _Shot('profiles', signedIn: false),
+    const _Shot('profiles-phone', size: _phone, ratio: 2, signedIn: false),
+    const _Shot('revenue-all', steps: ['Revenue', 'All transactions']),
+    const _Shot('revenue-insights', steps: ['Revenue', 'Insights']),
+    const _Shot(
+      'revenue-insights-dark',
+      dark: true,
+      steps: ['Revenue', 'Insights'],
+    ),
+    const _Shot('apps-list', steps: ['Applications', 'All applications']),
+    const _Shot(
+      'apps-list-dark',
+      dark: true,
+      steps: ['Applications', 'All applications'],
+    ),
+    const _Shot('apps-table', steps: ['Applications', 'Table']),
+    const _Shot('apps-details', steps: ['Applications', 'Brian Sample']),
+    const _Shot('reports-details', steps: ['Reports', 'Details']),
+    const _Shot(
+      'reports-details-dark',
+      dark: true,
+      steps: ['Reports', 'Details'],
+    ),
+    const _Shot('reports-trends', steps: ['Reports', 'Trends']),
+    const _Shot('quick-search', steps: [ValueKey('sidebar-search')]),
+    const _Shot(
+      'new-week',
+      steps: ['Weekly tracker', ValueKey('header-new-week')],
+    ),
+    const _Shot('week-menu', steps: [ValueKey('week-picker')]),
+    const _Shot('account-menu', steps: [ValueKey('account-menu')]),
+    const _Shot('sidebar-closed', steps: [ValueKey('sidebar-collapse')]),
+    const _Shot(
+      'sidebar-closed-dark',
+      dark: true,
+      steps: [ValueKey('sidebar-collapse'), ValueKey('strip-week')],
+    ),
+    const _Shot('tablet-overview', size: _tablet),
+    const _Shot('tablet-tracker', size: _tablet, steps: ['Tracker']),
+    const _Shot(
+      'tablet-apps',
+      size: _tablet,
+      steps: [ValueKey('more'), 'Applications'],
+    ),
+    const _Shot('tablet-reports', size: _tablet, steps: ['Reports']),
+    const _Shot('tablet-revenue', size: _tablet, steps: ['Revenue']),
+    const _Shot(
+      'tablet-settings',
+      size: _tablet,
+      steps: [ValueKey('more'), 'Settings'],
+    ),
+    const _Shot(
+      'phone-revenue-insights',
+      size: _phone,
+      ratio: 2,
+      steps: ['Revenue', 'Insights'],
+    ),
+    const _Shot(
+      'phone-apps',
+      size: _phone,
+      ratio: 2,
+      steps: [ValueKey('more'), 'Applications'],
+    ),
+    const _Shot(
+      'phone-apps-list',
+      size: _phone,
+      ratio: 2,
+      steps: [ValueKey('more'), 'Applications', 'All applications'],
+    ),
+    const _Shot(
+      'phone-reports-details',
+      size: _phone,
+      ratio: 2,
+      steps: ['Reports', 'Details'],
+    ),
+    const _Shot(
+      'phone-history',
+      size: _phone,
+      ratio: 2,
+      steps: [ValueKey('more'), 'History'],
+    ),
+    const _Shot('phone-dark', size: _phone, ratio: 2, dark: true),
+    const _Shot('revenue-all', steps: ['Revenue', 'All transactions']),
+    const _Shot(
+      'phone-revenue-all',
+      size: _phone,
+      ratio: 2,
+      steps: ['Revenue', 'All'],
+    ),
+    const _Shot(
+      'settings-about',
+      steps: ['Settings', ValueKey('about-section')],
+    ),
+  ],
 ];
 
 void main() {

@@ -120,8 +120,11 @@ class _StaffDayMatrixState extends State<_StaffDayMatrix> {
       ..sort((a, b) => a.displayOrder.compareTo(b.displayOrder));
     final now = DateTime.now();
     final wide = days.length > 7;
-    const nameW = 150.0;
-    const totalW = 64.0;
+    // Phones: a narrower name column and two-line day headings, so a week
+    // fits without the headings breaking mid-word.
+    final narrow = MediaQuery.sizeOf(context).width < 600;
+    final nameW = narrow ? 92.0 : 150.0;
+    final totalW = narrow ? 44.0 : 64.0;
     const rowH = 34.0;
     final head = _headStyle(theme);
     final hairline = BorderSide(color: scheme.outline.withValues(alpha: 0.6));
@@ -194,7 +197,10 @@ class _StaffDayMatrixState extends State<_StaffDayMatrix> {
         child: Text(
           wide
               ? '${DateFormat('E').format(d.date)[0]}\n${d.date.day}'
+              : narrow
+              ? '${DateFormat('EEE').format(d.date)}\n${d.date.day}'
               : DateFormat('EEE d').format(d.date),
+          maxLines: 2,
           textAlign: TextAlign.center,
           style: head.copyWith(
             height: 1.15,
@@ -301,7 +307,9 @@ class _StaffDayMatrixState extends State<_StaffDayMatrix> {
                 onSelectionChanged: (s) => setState(() => _metric = s.first),
               ),
               Text(
-                'Hover a number for the new / existing split.',
+                narrow
+                    ? 'Press and hold a number for the new / existing split.'
+                    : 'Hover a number for the new / existing split.',
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: Dt.textFaint(theme),
                 ),

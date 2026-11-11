@@ -69,7 +69,9 @@ class ApplicationsQuickView extends ConsumerWidget {
       runSpacing: 4,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        if (latest != null)
+        // "As of the upload" repeats the line above it on a phone.
+        if (latest != null &&
+            (todaysUploads.isEmpty || MediaQuery.sizeOf(context).width >= 600))
           Text(
             todaysUploads.isEmpty
                 ? 'No upload yet today · last upload '
@@ -827,7 +829,11 @@ class ApplicationsQuickView extends ConsumerWidget {
       children: [
         header,
         const SizedBox(height: 12),
-        KpiGrid(minWidth: phone ? 150 : 190, children: tiles),
+        KpiGrid(
+          orderKey: 'applications.quick',
+          minWidth: phone ? 150 : 190,
+          children: tiles,
+        ),
         gap(),
         if (phone) ...[
           ...left,

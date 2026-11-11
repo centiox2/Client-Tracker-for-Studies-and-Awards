@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.2.0';
+  static const version = '1.2.1';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,15 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.2.1', 'November 2026', [
+      'Tidier phone and tablet layouts: the weekly tracker is one clear '
+          'table, cards are more compact, filters sit two to a row, and '
+          'tables fit without words breaking.',
+      'Applications is in the phone bottom bar; Daily reports moved under '
+          'More.',
+      'Drag the summary cards into any order (press and hold on a phone or '
+          'tablet). Reset in Settings › Appearance.',
+    ]),
     Release('1.2.0', 'November 2026', [
       'A new look: the Clarity design, in the Studies and Awards colours, '
           'with light and dark modes.',

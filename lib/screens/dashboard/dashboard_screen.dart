@@ -118,7 +118,11 @@ class DashboardScreen extends ConsumerWidget {
                 _StartWeekBanner(monday: suggestedWeek),
                 const SizedBox(height: Dt.gap),
               ],
-              KpiGrid(minWidth: width < 640 ? 150 : 190, children: kpis),
+              KpiGrid(
+                orderKey: 'overview',
+                minWidth: width < 640 ? 150 : 190,
+                children: kpis,
+              ),
               const SizedBox(height: 24),
               MainAndSide(
                 main: _ThisWeek(data: data, isCurrent: isCurrent),

@@ -118,7 +118,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         icon: Icons.palette_outlined,
         description:
             'Choose a theme, or follow your computer’s setting, and the text '
-            'size on this device.',
+            'size on this device. Summary cards can be dragged into any order '
+            '(press and hold on a phone or tablet).',
         child: Wrap(
           spacing: 16,
           runSpacing: 12,
@@ -135,6 +136,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ref.read(themeModeProvider.notifier).set(s.first),
             ),
             const TextSizePicker(),
+            OutlinedButton.icon(
+              key: const ValueKey('reset-card-order'),
+              onPressed: () {
+                ref.read(uiPrefProvider).clearPrefix('cards.');
+                ref.read(cardOrderVersionProvider.notifier).bump();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Cards are back in order.')),
+                );
+              },
+              icon: const Icon(Icons.dashboard_customize_outlined, size: 16),
+              label: const Text('Reset card order'),
+            ),
           ],
         ),
       ),

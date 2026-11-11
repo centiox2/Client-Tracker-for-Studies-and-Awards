@@ -1705,14 +1705,12 @@ class _MobileWeekViewState extends State<_MobileWeekView> {
     }
     final index = days.indexWhere((d) => d.day.id == selectedId);
     final day = days[index];
+    final pad = clarityHPad(context);
 
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: Dt.s16,
-            vertical: Dt.s8,
-          ),
+          padding: EdgeInsets.fromLTRB(pad, Dt.s12, pad, Dt.s4),
           // Full width with equal segments so all five days always fit.
           child: SegmentedButton<int>(
             expandedInsets: EdgeInsets.zero,
@@ -1741,13 +1739,15 @@ class _MobileWeekViewState extends State<_MobileWeekView> {
         ),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(Dt.s16, Dt.s16, Dt.s16, Dt.s32),
+            padding: EdgeInsets.fromLTRB(pad, Dt.s12, pad, Dt.s32),
             children: [
               Row(
                 children: [
                   Expanded(
                     child: Text(
-                      '${DateFormat('EEEE').format(day.day.date)} · ${DateFormat('d MMMM y').format(day.day.date)}',
+                      MediaQuery.sizeOf(context).width < 600
+                          ? DateFormat('EEEE d MMM').format(day.day.date)
+                          : '${DateFormat('EEEE').format(day.day.date)} · ${DateFormat('d MMMM y').format(day.day.date)}',
                       style: Theme.of(context).textTheme.titleMedium
                           ?.copyWith(fontWeight: FontWeight.w700),
                     ),
@@ -1787,21 +1787,39 @@ class _MobileWeekViewState extends State<_MobileWeekView> {
                   ],
                 ),
               ],
-              const SizedBox(height: Dt.s4),
+              const SizedBox(height: Dt.s12),
+              // One card: column headings once, then a row per person.
+              Container(
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: context.clarity.surface,
+                  borderRadius: BorderRadius.circular(Dt.rLg),
+                  border: Border.all(color: context.clarity.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const _MobileHeadings(),
+                    for (final (i, row) in day.rows.indexed) ...[
+                      if (i > 0)
+                        Divider(height: 1, color: context.clarity.border),
+                      _MobileStaffRow(
+                        key: ValueKey('mobile-${day.day.id}-${row.staffId}'),
+                        day: day,
+                        row: row,
+                        showZero: true,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: Dt.s8),
               Text(
-                'Tap a name to set time off',
+                'Tap a name to mark time off. Tap + to add one.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: Dt.textMuted(theme),
                 ),
               ),
-              const SizedBox(height: Dt.s12),
-              for (final row in day.rows)
-                _MobileStaffRow(
-                  key: ValueKey('mobile-${day.day.id}-${row.staffId}'),
-                  day: day,
-                  row: row,
-                  showZero: true,
-                ),
               const SizedBox(height: Dt.s8),
               _daySummaryCard(context, day),
             ],
@@ -1817,10 +1835,11 @@ class _MobileWeekViewState extends State<_MobileWeekView> {
     final n = working.fold<int>(0, (a, r) => a + r.newClients);
     final e = working.fold<int>(0, (a, r) => a + r.existingClients);
     return Container(
-      padding: const EdgeInsets.all(Dt.s12),
+      padding: const EdgeInsets.symmetric(vertical: Dt.s16),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(Dt.rMd),
-        border: Border.all(color: theme.colorScheme.outline),
+        color: context.clarity.surface,
+        borderRadius: BorderRadius.circular(Dt.rLg),
+        border: Border.all(color: context.clarity.border),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -1899,38 +1918,79 @@ class InlineCountPair extends StatelessWidget {
     final accent = isNew ? newColor : existingColor;
     final bright = isNew ? newColorBright : existingColorBright;
     final v = isNew ? newClients : existingClients;
-    final label = isNew ? 'New' : 'Exist.';
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Row(
+    return NumericField(
+      value: v,
+      showZero: showZero,
+      plusOne: PlusOne.always,
+      // Room for the number plus the always-visible "+"; tall enough to tap.
+      width: _mobileFieldWidth,
+      height: 38,
+      fontSize: 15,
+      accent: accent,
+      valueColor: bright,
+      placeholder: '–',
+      confirmEdit: confirmEdit,
+      onClear: () => actions.undoCount(day.day.id, row.staffId, isNew),
+      onChanged: (nv) => actions.saveCount(
+        dayId: day.day.id,
+        staffId: row.staffId,
+        newClients: isNew ? nv : newClients,
+        existingClients: isNew ? existingClients : nv,
+      ),
+    );
+  }
+}
+
+const _mobileFieldWidth = 82.0;
+const _mobileTotalWidth = 40.0;
+
+/// "Staff · New · Existing · Total" over the phone list.
+class _MobileHeadings extends StatelessWidget {
+  const _MobileHeadings();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    Widget head(String text, double width, {Color? dot}) => SizedBox(
+      width: width,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            MeaningDot(accent),
-            const SizedBox(width: Dt.s4),
-            Text(label, style: microLabel(theme)),
+            if (dot != null) ...[MeaningDot(dot), const SizedBox(width: 4)],
+            Text(text, style: microLabel(theme)),
           ],
         ),
-        const SizedBox(height: Dt.s4),
-        NumericField(
-          value: v,
-          showZero: showZero,
-          plusOne: PlusOne.always,
-          // Room for the number plus the always-visible "+".
-          width: 78,
-          accent: accent,
-          valueColor: bright,
-          placeholder: '–',
-          confirmEdit: confirmEdit,
-          onClear: () => actions.undoCount(day.day.id, row.staffId, isNew),
-          onChanged: (nv) => actions.saveCount(
-            dayId: day.day.id,
-            staffId: row.staffId,
-            newClients: isNew ? nv : newClients,
-            existingClients: isNew ? existingClients : nv,
+      ),
+    );
+    return Container(
+      color: context.clarity.bg,
+      padding: const EdgeInsets.fromLTRB(Dt.s16, 10, Dt.s12, 10),
+      child: Row(
+        children: [
+          Expanded(child: Text('STAFF', style: microLabel(theme))),
+          head('NEW', _mobileFieldWidth, dot: Dt.newGreen(theme.brightness)),
+          const SizedBox(width: Dt.s8),
+          head(
+            'EXISTING',
+            _mobileFieldWidth,
+            dot: Dt.existingBlue(theme.brightness),
           ),
-        ),
-      ],
+          const SizedBox(width: Dt.s8),
+          SizedBox(
+            width: _mobileTotalWidth,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text('TOTAL', style: microLabel(theme)),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1963,13 +2023,8 @@ class _MobileStaffRow extends ConsumerWidget {
           )
         : null;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: Dt.s8),
-      padding: const EdgeInsets.symmetric(horizontal: Dt.s12, vertical: Dt.s12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(Dt.rMd),
-        border: Border.all(color: theme.colorScheme.outline),
-      ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Dt.s16, 8, Dt.s12, 8),
       child: Row(
         children: [
           Expanded(
@@ -1996,11 +2051,17 @@ class _MobileStaffRow extends ConsumerWidget {
           ),
           const SizedBox(width: Dt.s8),
           if (isOff)
-            Text(
-              'Off',
-              style: theme.textTheme.bodySmall?.copyWith(
-                fontStyle: FontStyle.italic,
-                color: Dt.textMuted(theme),
+            SizedBox(
+              width: _mobileFieldWidth * 2 + Dt.s16 + _mobileTotalWidth,
+              height: 38,
+              child: Center(
+                child: Text(
+                  'Off this day',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontStyle: FontStyle.italic,
+                    color: Dt.textMuted(theme),
+                  ),
+                ),
               ),
             )
           else ...[
@@ -2039,7 +2100,7 @@ class _MobileStaffRow extends ConsumerWidget {
             ),
             const SizedBox(width: Dt.s8),
             SizedBox(
-              width: 28,
+              width: _mobileTotalWidth,
               child: Text(
                 row.total == 0 ? '–' : '${row.total}',
                 textAlign: TextAlign.right,

@@ -132,10 +132,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   );
 
   /// The phone's bottom bar holds five buttons at most; with more pages the
-  /// main ones stay and the rest go under "More".
+  /// first four of these this profile has stay, in this order, and the rest
+  /// go under "More" (Daily reports included: its dot shows on More).
   static const _phoneMain = [
-    AppTab.dailyReports,
     AppTab.home,
+    AppTab.applications,
     AppTab.week,
     AppTab.reports,
     AppTab.revenue,
@@ -532,16 +533,21 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       final tabs = allowed;
       final useMore = tabs.length > 5;
       // Four main pages (the most important this profile has) plus More.
+      // Applications takes Daily reports' place in the bar (Daily reports
+      // moves under More); without Daily reports the bar is as it was.
+      final hasDaily = tabs.any((i) => i.tab == AppTab.dailyReports);
       final main = useMore
           ? (([
               for (final t in _phoneMain)
-                if (tabs.any((i) => i.tab == t)) t,
+                if (tabs.any((i) => i.tab == t) &&
+                    (t != AppTab.applications || hasDaily))
+                  t,
             ]).take(4).toSet())
           : const <AppTab>{};
       final barTabs = useMore
           ? [
-              for (final t in tabs)
-                if (main.contains(t.tab)) t,
+              for (final t in _phoneMain)
+                if (main.contains(t)) tabs.firstWhere((i) => i.tab == t),
             ]
           : tabs;
       final moreTabs = useMore
@@ -585,7 +591,13 @@ class _HomeShellState extends ConsumerState<HomeShell> {
               ),
             if (useMore)
               NavigationDestination(
-                icon: const Icon(Icons.menu),
+                icon: Badge(
+                  isLabelVisible:
+                      reportDue &&
+                      moreTabs.any((t) => t.tab == AppTab.dailyReports),
+                  smallSize: 8,
+                  child: const Icon(Icons.menu),
+                ),
                 selectedIcon: const Icon(Icons.menu),
                 label: barIndex >= 0
                     ? 'More'
@@ -1181,6 +1193,7 @@ class _MobileTopBar extends ConsumerWidget {
           const Spacer(),
           const SyncStatusBadge(compact: true),
           PopupMenuButton<String>(
+            key: const ValueKey('phone-menu'),
             tooltip: 'More options',
             onSelected: (action) {
               if (action == 'search') {

@@ -174,7 +174,11 @@ class _TrendsViewState extends ConsumerState<_TrendsView> {
       children: [
         Align(alignment: Alignment.centerLeft, child: picker),
         const SizedBox(height: 14),
-        _TileGrid(perRow: widget.compact ? 2 : tiles.length, children: tiles),
+        KpiGrid(
+          orderKey: 'reports.trends',
+          columns: widget.compact ? 2 : tiles.length,
+          children: tiles,
+        ),
         const SizedBox(height: 12),
         if (widget.compact) ...[
           weekdayPanel,

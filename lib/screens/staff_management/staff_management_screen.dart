@@ -107,7 +107,9 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
 
         return Padding(
           padding: EdgeInsets.fromLTRB(pad, 18, pad, 18),
-          child: Center(
+          // Top, not centred: a short page mustn't float mid-screen.
+          child: Align(
+            alignment: Alignment.topCenter,
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: Dt.contentMaxWidth),
               child: wide
@@ -131,10 +133,11 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           // Bounded so the reorderable list inside has a
-                          // height to work with; it scrolls within it.
+                          // height to work with: tall enough for everyone,
+                          // so the page scrolls, not a box inside it.
                           SizedBox(
-                            height: (staff.length * 48 + 90)
-                                .clamp(240.0, 560.0)
+                            height: (staff.length * 49 + 96)
+                                .clamp(240.0, double.infinity)
                                 .toDouble(),
                             child: team,
                           ),

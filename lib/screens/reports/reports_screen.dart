@@ -460,13 +460,7 @@ class _Toolbar extends ConsumerWidget {
           onPressed: () => onStep(-1),
           icon: const Icon(Icons.chevron_left, size: 18),
         ),
-        IconButton(
-          tooltip: 'Next $unit',
-          visualDensity: VisualDensity.compact,
-          onPressed: () => onStep(1),
-          icon: const Icon(Icons.chevron_right, size: 18),
-        ),
-        const SizedBox(width: 6),
+        // The arrows either side of what they change.
         Flexible(
           child: Text(
             label,
@@ -476,6 +470,12 @@ class _Toolbar extends ConsumerWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
+        ),
+        IconButton(
+          tooltip: 'Next $unit',
+          visualDensity: VisualDensity.compact,
+          onPressed: () => onStep(1),
+          icon: const Icon(Icons.chevron_right, size: 18),
         ),
         if (!isCurrent) ...[
           const SizedBox(width: 8),
@@ -652,8 +652,10 @@ class _Kpis extends StatelessWidget {
         null,
       ),
     ];
-    return _TileGrid(
-      perRow: compact ? 2 : tiles.length,
+    return KpiGrid(
+      orderKey: 'reports.details',
+      columns: compact ? 2 : tiles.length,
+      ids: [for (final t in tiles) t.$1],
       children: [
         for (final (label, value, caption, color, footer) in tiles)
           _Tile(
@@ -669,43 +671,6 @@ class _Kpis extends StatelessWidget {
 
   static String _share(int part, int total) =>
       total == 0 ? '–' : '${(part * 100 / total).round()}% of all clients';
-}
-
-/// Tiles in rows of [perRow], every tile in a row the same height (one
-/// with a comparison line doesn't stand taller than its neighbour). A short
-/// last row keeps the same column widths.
-class _TileGrid extends StatelessWidget {
-  const _TileGrid({required this.perRow, required this.children});
-  final int perRow;
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    final n = perRow < 1 ? 1 : perRow;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (var start = 0; start < children.length; start += n) ...[
-          if (start > 0) const SizedBox(height: 10),
-          IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (var i = 0; i < n; i++) ...[
-                  if (i > 0) const SizedBox(width: 10),
-                  Expanded(
-                    child: start + i < children.length
-                        ? children[start + i]
-                        : const SizedBox.shrink(),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ],
-    );
-  }
 }
 
 class _Tile extends StatelessWidget {

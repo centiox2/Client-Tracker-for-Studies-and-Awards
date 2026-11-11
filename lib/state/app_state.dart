@@ -926,6 +926,11 @@ class TextScaleNotifier extends Notifier<double> {
 
 /// Small per-device remembered choices (a page's last tab, sort…), kept in
 /// the local sync_state table under "ui." plus the name. Never synced.
+/// Bumped when card orders are reset, so every grid reloads its order.
+final cardOrderVersionProvider = NotifierProvider<DataVersionNotifier, int>(
+  DataVersionNotifier.new,
+);
+
 final uiPrefProvider = Provider<UiPrefs>(
   (ref) => UiPrefs(ref.read(databaseProvider)),
 );
@@ -952,6 +957,15 @@ class UiPrefs {
         'ON CONFLICT(k) DO UPDATE SET v = excluded.v;',
         ['ui.$name', value],
       );
+    } catch (_) {}
+  }
+
+  /// Forgets every setting whose name starts with [prefix].
+  void clearPrefix(String prefix) {
+    try {
+      _db.raw.execute('DELETE FROM sync_state WHERE k LIKE ?;', [
+        'ui.$prefix%',
+      ]);
     } catch (_) {}
   }
 

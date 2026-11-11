@@ -501,13 +501,6 @@ class _DayNavigator extends StatelessWidget {
           onPressed: () => onStep(-1),
           icon: const Icon(Icons.chevron_left, size: 20),
         ),
-        IconButton(
-          tooltip: 'Next day',
-          visualDensity: VisualDensity.compact,
-          onPressed: canStepForward ? () => onStep(1) : null,
-          icon: const Icon(Icons.chevron_right, size: 20),
-        ),
-        const SizedBox(width: 4),
         Flexible(
           child: InkWell(
             borderRadius: BorderRadius.circular(Dt.rMd),
@@ -519,7 +512,11 @@ class _DayNavigator extends StatelessWidget {
                 children: [
                   Flexible(
                     child: Text(
-                      DateFormat('EEEE d MMMM y').format(day),
+                      DateFormat(
+                        MediaQuery.sizeOf(context).width < 600
+                            ? 'EEE d MMM'
+                            : 'EEEE d MMMM y',
+                      ).format(day),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleSmall?.copyWith(
@@ -533,6 +530,12 @@ class _DayNavigator extends StatelessWidget {
               ),
             ),
           ),
+        ),
+        IconButton(
+          tooltip: 'Next day',
+          visualDensity: VisualDensity.compact,
+          onPressed: canStepForward ? () => onStep(1) : null,
+          icon: const Icon(Icons.chevron_right, size: 20),
         ),
         if (!isToday) ...[
           const SizedBox(width: 8),
