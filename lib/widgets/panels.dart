@@ -61,7 +61,7 @@ class AppPanel extends StatelessWidget {
                       children: [
                         Text(
                           title,
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.titleMedium,
                         ),
@@ -69,8 +69,6 @@ class AppPanel extends StatelessWidget {
                           const SizedBox(height: 2),
                           Text(
                             subtitle!,
-                            maxLines: 4,
-                            overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.labelMedium?.copyWith(
                               color: c.textMuted,
                               fontWeight: FontWeight.w400,

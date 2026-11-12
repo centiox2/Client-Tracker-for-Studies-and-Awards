@@ -201,7 +201,7 @@ class KpiCard extends StatelessWidget {
             SizedBox(height: phone ? 6 : 10),
             Text(
               caption!,
-              maxLines: 2,
+              maxLines: 3,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.labelSmall?.copyWith(
                 color: switch (tone) {

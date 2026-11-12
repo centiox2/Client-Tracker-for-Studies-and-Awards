@@ -428,13 +428,21 @@ class _StaffRow extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(Dt.rSm),
           onTap: () => showStaffProfile(context, member.id),
-          child: Text(
-            member.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-              color: member.active ? null : muted,
+          // Rows are a fixed height: a long name shrinks a little to fit
+          // rather than being cut short.
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                member.name,
+                maxLines: 1,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: member.active ? null : muted,
+                ),
+              ),
             ),
           ),
         ),

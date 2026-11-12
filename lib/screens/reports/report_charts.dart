@@ -48,7 +48,7 @@ class _Delta extends StatelessWidget {
       '${format?.call(diff.abs()) ?? diff.abs()}$pct vs $against',
       style: style?.copyWith(color: diff > 0 ? c.positiveFg : c.negativeFg),
       // Wraps on a phone instead of cutting off "vs last week".
-      maxLines: MediaQuery.sizeOf(context).width < 600 ? 2 : 1,
+      maxLines: MediaQuery.sizeOf(context).width < 1100 ? 2 : 1,
       overflow: TextOverflow.ellipsis,
     );
   }
@@ -230,12 +230,16 @@ class _StaffDayMatrixState extends State<_StaffDayMatrix> {
         _matrixRow(
           name: Text(
             s.name,
-            maxLines: 1,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w500,
-              color: rowTotal(s) == 0 ? Dt.textMuted(theme) : null,
-            ),
+            style:
+                (narrow
+                        ? theme.textTheme.bodySmall?.copyWith(height: 1.15)
+                        : theme.textTheme.bodyMedium)
+                    ?.copyWith(
+                      fontWeight: FontWeight.w500,
+                      color: rowTotal(s) == 0 ? Dt.textMuted(theme) : null,
+                    ),
           ),
           days: dayCells([for (final d in days) cell(s, d)]),
           total: _count(theme, rowTotal(s), bold: true),
@@ -328,7 +332,8 @@ class _StaffDayMatrixState extends State<_StaffDayMatrix> {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.only(bottom: 10),
               child: SizedBox(
-                width: nameW + totalW + 28 + 44.0 * days.length,
+                // The rows' 20px padding on each side, plus the columns.
+                width: nameW + totalW + 40 + 44.0 * days.length,
                 child: table,
               ),
             ),

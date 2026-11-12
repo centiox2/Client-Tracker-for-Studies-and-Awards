@@ -483,6 +483,98 @@ class _Toolbar extends ConsumerWidget {
         ],
       ],
     );
+    final muted = Dt.textMuted(theme);
+    final lastEntry = lastUpdated == null
+        ? null
+        : Text(
+            'Last entry ${_relative(lastUpdated!)}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(color: muted),
+          );
+    final compare = period == ReportPeriod.year
+        ? null
+        : PopupMenuButton<bool>(
+            tooltip: 'What to compare with',
+            position: PopupMenuPosition.under,
+            initialValue: vsLastYear,
+            onSelected: onVsLastYear,
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: false,
+                child: Text('Compare with the previous $unit'),
+              ),
+              PopupMenuItem(
+                value: true,
+                child: Text('Compare with the same $unit last year'),
+              ),
+            ],
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.compare_arrows, size: 15, color: muted),
+                  const SizedBox(width: 4),
+                  Text(
+                    vsLastYear ? 'vs last year' : 'vs previous $unit',
+                    style: theme.textTheme.labelSmall?.copyWith(color: muted),
+                  ),
+                  Icon(Icons.arrow_drop_down, size: 16, color: muted),
+                ],
+              ),
+            ),
+          );
+    final download = _DownloadMenu(
+      report: report,
+      title: label,
+      previous: previous,
+    );
+    final edit = editWeekId == null
+        ? null
+        : OutlinedButton.icon(
+            onPressed: () => ref
+                .read(appActionsProvider)
+                .selectTab(AppTab.week, weekId: editWeekId),
+            icon: const Icon(Icons.edit_outlined, size: 14),
+            label: const Text('Edit in tracker'),
+          );
+
+    // Phones and tablets: fixed lines, each the same height whatever the
+    // period, so switching Day / Week / Month / Year never moves the page.
+    if (MediaQuery.sizeOf(context).width < 1050) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Align(alignment: Alignment.centerLeft, child: segments),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 44,
+            child: Row(children: [Expanded(child: navigator)]),
+          ),
+          SizedBox(
+            height: 36,
+            child: Row(
+              children: [
+                Expanded(child: lastEntry ?? const SizedBox()),
+                ?compare,
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          // Two equal halves: the same height whether or not "Edit in
+          // tracker" is offered, and never too wide for a phone.
+          Row(
+            children: [
+              Expanded(child: download),
+              const SizedBox(width: 10),
+              Expanded(child: edit ?? const SizedBox()),
+            ],
+          ),
+        ],
+      );
+    }
+
     return Wrap(
       spacing: 12,
       runSpacing: 10,
@@ -490,77 +582,17 @@ class _Toolbar extends ConsumerWidget {
       alignment: WrapAlignment.spaceBetween,
       children: [
         segments,
-        // On a phone the Wrap puts this on its own line, and the flexible
-        // label ellipsizes instead of overflowing.
         navigator,
         Wrap(
           spacing: 0,
           runSpacing: 6,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            if (lastUpdated != null)
-              Text(
-                'Last entry ${_relative(lastUpdated!)}',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: Dt.textMuted(theme),
-                ),
-              ),
-            if (period != ReportPeriod.year) ...[
-              const SizedBox(width: 10),
-              PopupMenuButton<bool>(
-                tooltip: 'What to compare with',
-                position: PopupMenuPosition.under,
-                initialValue: vsLastYear,
-                onSelected: onVsLastYear,
-                itemBuilder: (_) => [
-                  PopupMenuItem(
-                    value: false,
-                    child: Text('Compare with the previous $unit'),
-                  ),
-                  PopupMenuItem(
-                    value: true,
-                    child: Text('Compare with the same $unit last year'),
-                  ),
-                ],
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.compare_arrows,
-                        size: 15,
-                        color: Dt.textMuted(theme),
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        vsLastYear ? 'vs last year' : 'vs previous $unit',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: Dt.textMuted(theme),
-                        ),
-                      ),
-                      Icon(
-                        Icons.arrow_drop_down,
-                        size: 16,
-                        color: Dt.textMuted(theme),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+            ?lastEntry,
+            if (compare != null) ...[const SizedBox(width: 10), compare],
             const SizedBox(width: 10),
-            _DownloadMenu(report: report, title: label, previous: previous),
-            if (editWeekId != null) ...[
-              const SizedBox(width: 10),
-              OutlinedButton.icon(
-                onPressed: () => ref
-                    .read(appActionsProvider)
-                    .selectTab(AppTab.week, weekId: editWeekId),
-                icon: const Icon(Icons.edit_outlined, size: 14),
-                label: const Text('Edit in tracker'),
-              ),
-            ],
+            download,
+            if (edit != null) ...[const SizedBox(width: 10), edit],
           ],
         ),
       ],

@@ -352,4 +352,28 @@ void main() {
     expect(at('Existing clients').dy, at('Active staff').dy);
     expect(at('Existing clients').dx, greaterThan(at('Active staff').dx));
   }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  for (final size in const [Size(390, 844), Size(820, 1180)]) {
+    testWidgets('Reports › Details: switching period never moves the bar '
+        '(${size.width.toInt()} wide)', (tester) async {
+      WeekRepository(db).createWeekFor(DateTime.now());
+      await pumpApp(tester, size: size);
+      ProviderScope.containerOf(tester.element(find.byType(ClientTrackerApp)))
+          .read(navTabProvider.notifier)
+          .set(AppTab.reports);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Details'));
+      await tester.pumpAndSettle();
+
+      final tops = <String, double>{};
+      for (final p in ['Day', 'Week', 'Month', 'Year', 'Week']) {
+        await tester.tap(find.text(p).first);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        final y = tester.getTopLeft(find.text('Download')).dy;
+        tops[p] = y;
+        expect(y, tops.values.first, reason: '$p moved the Download button');
+      }
+    });
+  }
 }

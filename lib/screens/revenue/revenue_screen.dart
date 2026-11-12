@@ -695,8 +695,13 @@ class _AddPanel extends StatelessWidget {
     final dateBox = PickerBox(
       key: const ValueKey('revenue-date'),
       label: 'Date',
+      // Small phones: no weekday, so the date isn't cut short.
       value: DateFormat(
-        day.year == DateTime.now().year ? 'EEE d MMM' : 'd MMM y',
+        day.year != DateTime.now().year
+            ? 'd MMM y'
+            : MediaQuery.sizeOf(context).width < 400
+            ? 'd MMM'
+            : 'EEE d MMM',
       ).format(day),
       icon: Icons.calendar_today_outlined,
       onTap: onPickDay,
@@ -979,7 +984,9 @@ class RevenueEntryRow extends StatelessWidget {
                 children: [
                   Text(
                     entry.note.isEmpty ? 'Transaction' : entry.note,
-                    maxLines: 1,
+                    // Phones and tablets: two lines, so the name and code
+                    // aren't cut off.
+                    maxLines: MediaQuery.sizeOf(context).width < 1100 ? 2 : 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: entry.note.isEmpty ? muted : null,

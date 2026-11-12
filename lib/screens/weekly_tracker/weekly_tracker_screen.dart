@@ -2038,7 +2038,7 @@ class _MobileStaffRow extends ConsumerWidget {
               ),
               child: Text(
                 row.staffName,
-                maxLines: 1,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyLarge?.copyWith(
                   fontWeight: FontWeight.w500,

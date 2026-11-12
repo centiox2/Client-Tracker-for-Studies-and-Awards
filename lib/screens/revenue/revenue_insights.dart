@@ -536,7 +536,7 @@ class _RevenueInsightsState extends ConsumerState<RevenueInsights> {
                               if (e.note.isNotEmpty) e.note,
                               if (e.purpose.isNotEmpty) e.purpose,
                             ].join(' · ').ifEmpty('Transaction'),
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall,
                           ),
@@ -847,7 +847,9 @@ class _Stat extends StatelessWidget {
     final number = money?.group(2) ?? value;
     return Container(
       constraints: const BoxConstraints(minHeight: 104),
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      padding: MediaQuery.sizeOf(context).width < 600
+          ? const EdgeInsets.fromLTRB(14, 12, 14, 12)
+          : const EdgeInsets.fromLTRB(20, 18, 20, 18),
       decoration: BoxDecoration(
         color: c.surface,
         border: Border.all(color: c.border),
@@ -858,7 +860,7 @@ class _Stat extends StatelessWidget {
         children: [
           Text(
             label,
-            maxLines: 1,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.labelMedium?.copyWith(color: c.textMuted),
           ),
@@ -892,7 +894,7 @@ class _Stat extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             caption,
-            maxLines: 3,
+            maxLines: 4,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.labelSmall?.copyWith(color: c.textMuted),
           ),

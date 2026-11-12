@@ -154,7 +154,9 @@ class _AllRevenueState extends ConsumerState<AllRevenue> {
       onChanged: (_) => setState(() {}),
       decoration: InputDecoration(
         prefixIcon: const Icon(Icons.search, size: 18),
-        hintText: 'Search any date: name, M-Pesa code, amount, purpose…',
+        hintText: MediaQuery.sizeOf(context).width < 900
+            ? 'Name, M-Pesa code, amount…'
+            : 'Search any date: name, M-Pesa code, amount, purpose…',
         isDense: true,
         suffixIcon: searching
             ? IconButton(

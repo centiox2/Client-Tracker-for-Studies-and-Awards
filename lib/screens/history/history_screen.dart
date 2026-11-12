@@ -300,7 +300,9 @@ class _SearchField extends StatelessWidget {
                     icon: const Icon(Icons.close, size: 16),
                     onPressed: onClear,
                   ),
-            hintText: 'Search by month or date, e.g. September or 28/09/2026',
+            hintText: MediaQuery.sizeOf(context).width < 900
+                ? 'Month or date, e.g. September'
+                : 'Search by month or date, e.g. September or 28/09/2026',
           ),
           onChanged: onChanged,
         ),
@@ -518,19 +520,19 @@ class _WeekRow extends ConsumerWidget {
       ),
     );
 
-    final title = Row(
+    // Wraps (badge under the dates) rather than cutting the dates short.
+    final title = Wrap(
+      spacing: 8,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        Flexible(
-          child: Text(
-            weekRangeLabel(summary.week.startDate, summary.week.endDate),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
+        Text(
+          weekRangeLabel(summary.week.startDate, summary.week.endDate),
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w600,
           ),
         ),
-        if (isCurrent) ...[const SizedBox(width: 8), const _ThisWeekBadge()],
+        if (isCurrent) const _ThisWeekBadge(),
       ],
     );
     final range = Text(

@@ -8,6 +8,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -103,89 +104,160 @@ const _tablet = Size(1024, 768);
 const _tallPhone = Size(390, 2200);
 const _tallTablet = Size(820, 2000);
 
-List<_Shot> _pages(String prefix, Size size, double ratio) => [
+List<_Shot> _pages(
+  String prefix,
+  Size size,
+  double ratio, {
+  bool dark = false,
+}) => [
   _Shot('$prefix-overview', size: size, ratio: ratio),
-  _Shot('$prefix-tracker', size: size, ratio: ratio, steps: ['Tracker']),
-  _Shot('$prefix-apps', size: size, ratio: ratio, steps: [ValueKey('more'), 'Applications']),
+  _Shot(
+    '$prefix-tracker',
+    size: size,
+    ratio: ratio,
+    dark: dark,
+    steps: ['Tracker'],
+  ),
+  _Shot(
+    '$prefix-apps',
+    size: size,
+    ratio: ratio,
+    dark: dark,
+    steps: [ValueKey('more'), 'Applications'],
+  ),
   _Shot(
     '$prefix-apps-all',
     size: size,
     ratio: ratio,
+    dark: dark,
     steps: [ValueKey('more'), 'Applications', 'All applications'],
   ),
   _Shot(
     '$prefix-apps-table',
     size: size,
     ratio: ratio,
+    dark: dark,
     steps: [ValueKey('more'), 'Applications', 'Table'],
   ),
   _Shot(
     '$prefix-apps-details',
     size: size,
     ratio: ratio,
-    steps: [ValueKey('more'), 'Applications', 'All applications', 'Brian Sample'],
+    dark: dark,
+    steps: [
+      ValueKey('more'),
+      'Applications',
+      'All applications',
+      'Brian Sample',
+    ],
   ),
-  _Shot('$prefix-reports', size: size, ratio: ratio, steps: ['Reports']),
+  _Shot(
+    '$prefix-reports',
+    size: size,
+    ratio: ratio,
+    dark: dark,
+    steps: ['Reports'],
+  ),
   _Shot(
     '$prefix-reports-details',
     size: size,
     ratio: ratio,
+    dark: dark,
     steps: ['Reports', 'Details'],
   ),
   _Shot(
     '$prefix-reports-trends',
     size: size,
     ratio: ratio,
+    dark: dark,
     steps: ['Reports', 'Trends'],
   ),
   _Shot(
     '$prefix-revenue',
     size: size,
     ratio: ratio,
+    dark: dark,
     steps: ['Revenue'],
   ),
   _Shot(
     '$prefix-revenue-all',
     size: size,
     ratio: ratio,
-    steps: ['Revenue', 'All'],
+    dark: dark,
+    steps: ['Revenue', size.width < 600 ? 'All' : 'All transactions'],
   ),
   _Shot(
     '$prefix-revenue-insights',
     size: size,
     ratio: ratio,
+    dark: dark,
     steps: ['Revenue', 'Insights'],
   ),
   _Shot(
     '$prefix-history',
     size: size,
     ratio: ratio,
+    dark: dark,
     steps: [ValueKey('more'), 'History'],
   ),
   _Shot(
     '$prefix-staff',
     size: size,
     ratio: ratio,
+    dark: dark,
     steps: [ValueKey('more'), 'Staff'],
   ),
   _Shot(
     '$prefix-settings',
     size: size,
     ratio: ratio,
+    dark: dark,
     steps: [ValueKey('more'), 'Settings'],
   ),
-  _Shot('$prefix-more', size: size, ratio: ratio, steps: [ValueKey('more')]),
+  _Shot(
+    '$prefix-more',
+    size: size,
+    ratio: ratio,
+    dark: dark,
+    steps: [ValueKey('more')],
+  ),
   _Shot(
     '$prefix-menu',
     size: size,
     ratio: ratio,
+    dark: dark,
     steps: [ValueKey('phone-menu')],
+  ),
+  for (final p in ['Day', 'Month', 'Year'])
+    _Shot(
+      '$prefix-reports-details-${p.toLowerCase()}',
+      size: size,
+      ratio: ratio,
+      dark: dark,
+      steps: ['Reports', 'Details', p],
+    ),
+  for (final p in ['Week', 'Year'])
+    _Shot(
+      '$prefix-revenue-insights-${p.toLowerCase()}',
+      size: size,
+      ratio: ratio,
+      dark: dark,
+      steps: ['Revenue', 'Insights', p],
+    ),
+  _Shot(
+    '$prefix-whats-new',
+    size: size,
+    ratio: ratio,
+    dark: dark,
+    steps: [ValueKey('more'), 'Settings', 'What’s new'],
   ),
 ];
 
 final _shots = <_Shot>[
   if (Platform.environment['MOBILE_ONLY'] != null) ...[
+    ..._pages('s', const Size(360, 2400), 1),
     ..._pages('m', _tallPhone, 1),
+    ..._pages('d', _tallPhone, 1, dark: true),
     ..._pages('t', _tallTablet, 1),
     ..._pages('l', const Size(1024, 1500), 1),
   ] else ...[
@@ -316,7 +388,13 @@ void main() {
       final previous = FlutterError.onError;
       FlutterError.onError = (details) {
         final first = details.exceptionAsString().split('\n').first;
-        final where = details.context?.toDescription() ?? '';
+        final full = details.toString();
+        final m = RegExp(r'The relevant error-causing widget was:\s*\n\s*(.+)')
+            .firstMatch(full);
+        final where = [
+          details.context?.toDescription() ?? '',
+          if (m != null) m[1]!.trim(),
+        ].where((s) => s.isNotEmpty).join(' · ');
         problems.add('${shot.name}: $first ${where.isEmpty ? '' : '($where)'}');
       };
       addTearDown(() => FlutterError.onError = previous);
@@ -349,6 +427,22 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(f.last, warnIfMissed: false);
         await tester.pumpAndSettle();
+      }
+      // Every text cut short with "…" (or clipped) on this screen.
+      // (Not the hidden choices a dropdown keeps for its width.)
+      void visit(RenderObject r) {
+        if (r is RenderIndexedStack || r is RenderOffstage) return;
+        if (r is RenderParagraph && r.didExceedMaxLines) {
+          final text = r.text.toPlainText().replaceAll('\n', ' ');
+          problems.add(
+            '${shot.name}: cut "${text.length > 70 ? text.substring(0, 70) : text}"',
+          );
+        }
+        r.visitChildren(visit);
+      }
+
+      for (final view in tester.binding.renderViews) {
+        visit(view);
       }
       await expectLater(
         find.byType(MaterialApp),

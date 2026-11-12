@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.2.1';
+  static const version = '1.2.2';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,15 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.2.2', 'November 2026', [
+      'Phones and tablets: no more text cut short (Airtable sync time, '
+          'names, notes, card captions, search hints).',
+      'All applications: each group of applications is a whole card again.',
+      'Reports › Details: switching Day, Week, Month and Year no longer '
+          'moves the buttons beside them.',
+      'Reports › Month: the Staff by day table fits (it was a little too '
+          'narrow on every screen).',
+    ]),
     Release('1.2.1', 'November 2026', [
       'Tidier phone and tablet layouts: the weekly tracker is one clear '
           'table, cards are more compact, filters sit two to a row, and '

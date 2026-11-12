@@ -311,7 +311,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   DropdownMenuItem(
                     value: w.week.id,
                     child: Text(
-                      _weekLabel(w.week),
+                      MediaQuery.sizeOf(context).width < 600
+                          ? '${DateFormat('d MMM').format(w.week.startDate)} – '
+                                '${DateFormat('d MMM y').format(w.week.endDate)}'
+                          : _weekLabel(w.week),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),

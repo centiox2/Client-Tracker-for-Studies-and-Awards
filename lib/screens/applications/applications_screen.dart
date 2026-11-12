@@ -459,7 +459,8 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
                   child: Text(
                     warn ? 'Airtable sync isn’t working' : when!,
                     key: const ValueKey('applications-updated'),
-                    maxLines: 1,
+                    // Phones: wrap to a second line rather than cut it off.
+                    maxLines: phone ? 2 : 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: warn ? theme.colorScheme.error : muted,
@@ -938,11 +939,13 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
       // Rows are separate list items so a long list scrolls smoothly.
       if (_sort != _AppSort.stage) ...[
         const SizedBox(height: 10),
-        for (final a in flat)
+        for (final (i, a) in flat.indexed)
           ApplicationRow(
             app: a,
             phone: phone,
             showStatus: true,
+            first: i == 0,
+            last: i == flat.length - 1,
             onTap: () => showApplicationDetails(context, ref, a),
           ),
       ] else
@@ -960,10 +963,12 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
               ],
             ),
           ),
-          for (final a in groups[s]!)
+          for (final (i, a) in groups[s]!.indexed)
             ApplicationRow(
               app: a,
               phone: phone,
+              first: i == 0,
+              last: i == groups[s]!.length - 1,
               onTap: () => showApplicationDetails(context, ref, a),
             ),
         ],
@@ -991,11 +996,17 @@ class ApplicationRow extends StatelessWidget {
     required this.phone,
     required this.onTap,
     this.showStatus = false,
+    this.first = true,
+    this.last = true,
   });
 
   final Application app;
   final bool phone;
   final VoidCallback onTap;
+
+  /// First / last row of its card: the top / bottom edge and corners.
+  final bool first;
+  final bool last;
 
   /// Show the status too (in a flat, sorted list rather than grouped).
   final bool showStatus;
@@ -1006,6 +1017,8 @@ class ApplicationRow extends StatelessWidget {
     final muted = Dt.textMuted(theme);
     final scheme = theme.colorScheme;
     final milestone = applicationMilestone(app);
+    // Tablets too: the one-line desktop layout only fits a wide window.
+    final phone = this.phone || MediaQuery.sizeOf(context).width < 1100;
     final wait = app.offerOverdue(DateTime.now())
         ? app.offerWaitDays(DateTime.now())
         : null;
@@ -1036,23 +1049,41 @@ class ApplicationRow extends StatelessWidget {
         ? null
         : Text(
             app.todo.replaceAll(RegExp(r'\s+'), ' '),
-            maxLines: phone ? 2 : 1,
+            maxLines: phone ? 3 : 1,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodySmall?.copyWith(color: muted),
           );
+    final radius = BorderRadius.vertical(
+      top: first ? const Radius.circular(Dt.rMd) : Radius.zero,
+      bottom: last ? const Radius.circular(Dt.rMd) : Radius.zero,
+    );
+    final edge = BorderSide(color: scheme.outline);
     return Material(
       color: scheme.surfaceContainerLow,
+      borderRadius: radius,
       child: InkWell(
         onTap: onTap,
+        borderRadius: radius,
         child: Container(
-          // Card edges, so a group's rows read as one card (Clarity).
+          // Card edges, so a group's rows read as one card (Clarity): the
+          // first row has the top edge, the last the bottom one, and the
+          // rows between are split by a faint line.
           decoration: BoxDecoration(
+            borderRadius: radius,
             border: Border(
-              left: BorderSide(color: scheme.outline),
-              right: BorderSide(color: scheme.outline),
-              bottom: BorderSide(color: scheme.outlineVariant),
+              left: edge,
+              right: edge,
+              top: first ? edge : BorderSide.none,
+              bottom: last ? edge : BorderSide.none,
             ),
           ),
+          foregroundDecoration: last
+              ? null
+              : BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(color: scheme.outlineVariant),
+                  ),
+                ),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
           child: phone
               ? Column(
@@ -1427,7 +1458,7 @@ class _Stat extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 caption,
-                maxLines: 1,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: Dt.textMuted(theme),
