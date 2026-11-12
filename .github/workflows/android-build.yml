@@ -29,6 +29,9 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # Pinned: a new Flutter release can need newer Android/Gradle
+          # tools and break the build overnight. Upgrade on purpose.
+          flutter-version: 3.47.9
           cache: true
 
       - name: Get packages
