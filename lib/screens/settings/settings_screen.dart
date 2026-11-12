@@ -9,6 +9,7 @@ import '../../design/app_theme.dart';
 import '../../models/staff.dart';
 import '../../repositories/auth_repository.dart';
 import '../../services/auto_backup.dart';
+import '../../services/daily_reports_service.dart' show reportsChangedProvider;
 import '../../services/export_actions.dart';
 import '../../services/file_delivery.dart';
 import '../../state/app_state.dart';
@@ -251,9 +252,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: 'Backup & restore',
         icon: Icons.backup_outlined,
         description:
-            'A backup is one .json file with all staff, weeks, numbers, notes '
-            'and settings. Keep a copy off this device, and use Restore on '
-            'another computer to move the data there.',
+            'A backup is one .json file with everything: staff, weeks, '
+            'numbers, notes, revenue, applications and settings, plus — when '
+            'online — daily reports, comments, departments, accounts (no '
+            'passwords) and the activity log. Keep a copy off this device.',
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -600,9 +602,38 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     // so the dashboard/tracker fall back to the newest week instead of
     // pointing at an id that may no longer exist.
     ref.read(currentWeekIdProvider.notifier).set(null);
+
+    // A full backup also carries what lives only online: put back whatever
+    // is missing there (nothing online is overwritten or deleted).
+    var message = 'Data restored.';
+    final online = onlinePartOf(json);
+    if (online != null &&
+        ref.read(accountsEnabledProvider) &&
+        ref.read(isAdminProvider)) {
+      try {
+        final counts = await ref
+            .read(cloudSyncProvider.notifier)
+            .restoreOnline(online);
+        final back = counts.values
+            .whereType<num>()
+            .fold<num>(0, (a, b) => a + b);
+        message = back == 0
+            ? 'Data restored. Daily reports and departments online were '
+                  'already complete.'
+            : 'Data restored, and $back missing online records (daily '
+                  'reports, comments, departments) put back.';
+        ref.read(reportsChangedProvider.notifier).bump();
+      } catch (e) {
+        message =
+            'Data restored on this device. The daily reports in the backup '
+            'couldn’t be put back online (${describeAccountError(e)}). '
+            'Try Restore again when online.';
+      }
+    }
     if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Data restored.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 }
