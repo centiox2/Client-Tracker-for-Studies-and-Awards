@@ -1,7 +1,9 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pasteboard/pasteboard.dart';
 import 'package:intl/intl.dart';
 
 import '../../design/app_theme.dart';
@@ -38,6 +40,43 @@ Future<void> scanPaymentPhotos(
   final paths = await pickPhotos();
   if (paths.isEmpty || !context.mounted) return;
   await importPaymentPhotos(context, ref, day, paths);
+}
+
+/// Ctrl+V on Revenue, or Paste image: a screenshot of a payment message, or
+/// photos copied in File Explorer, read like dropped photos. Returns false
+/// when the clipboard holds no image (so the caller can say so).
+Future<bool> pastePaymentImage(
+  BuildContext context,
+  WidgetRef ref,
+  DateTime day,
+) async {
+  if (!photoPasteSupported) return false;
+  // Photo files copied in File Explorer first (read where they are)…
+  var files = const <String>[];
+  if (photoDropSupported) {
+    try {
+      files = (await Pasteboard.files()).where(isPhotoFile).toList();
+    } catch (_) {}
+  }
+  if (files.isNotEmpty) {
+    if (!context.mounted) return true;
+    await importPaymentPhotos(context, ref, day, files);
+    return true;
+  }
+  // …else image data (a screenshot, or Copy image).
+  Uint8List? bytes;
+  try {
+    bytes = await Pasteboard.image;
+  } catch (_) {}
+  if (bytes == null || bytes.isEmpty) return false;
+  final path = await savePastedPhoto(bytes);
+  if (path == null || !context.mounted) return path != null;
+  try {
+    await importPaymentPhotos(context, ref, day, [path]);
+  } finally {
+    await deletePastedPhoto(path);
+  }
+  return true;
 }
 
 /// Reads [paths] (picked or dragged onto the window) and offers every
@@ -149,6 +188,10 @@ Future<void> pastePaymentMessage(
   WidgetRef ref,
   DateTime day,
 ) async {
+  // A screenshot or copied photo on the clipboard is read straight away;
+  // otherwise the message text is pasted into the box below.
+  if (await pastePaymentImage(context, ref, day)) return;
+  if (!context.mounted) return;
   final text = await _textDialog(
     context,
     title: 'Paste payment message',

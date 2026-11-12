@@ -13,8 +13,7 @@ import '../../widgets/week_label.dart';
 import '../../widgets/card_board.dart';
 import '../../design/airtable_tags.dart';
 import '../../repositories/revenue_repository.dart' show formatMoney;
-import '../../services/daily_reports_service.dart';
-import '../../state/cloud_sync.dart';
+import '../../widgets/today_reports_panel.dart';
 import '../applications/applications_screen.dart' show showApplicationDetails;
 import '../reports/reports_screen.dart' show showStaffProfile;
 
@@ -56,10 +55,18 @@ class DashboardScreen extends ConsumerWidget {
     );
     final (totDelta, totTone) = delta(week?.total, previous?.total);
 
+    // Each card opens the page behind its number, when this account may.
+    final user = ref.watch(currentUserProvider);
+    VoidCallback? go(AppTab tab) => (user?.mayOpen(tab.name) ?? true)
+        ? () => ref
+              .read(appActionsProvider)
+              .selectTab(tab, weekId: tab == AppTab.week ? data?.week.id : null)
+        : null;
     final kpis = [
       KpiCard(
         label: 'New clients',
         value: '${week?.newClients ?? 0}',
+        onTap: go(AppTab.week),
         unit: unit,
         caption: newDelta,
         tone: newTone,
@@ -67,6 +74,7 @@ class DashboardScreen extends ConsumerWidget {
       KpiCard(
         label: 'Existing clients',
         value: '${week?.existingClients ?? 0}',
+        onTap: go(AppTab.week),
         unit: unit,
         caption: exDelta,
         tone: exTone,
@@ -74,6 +82,7 @@ class DashboardScreen extends ConsumerWidget {
       KpiCard(
         label: 'Total clients',
         value: '${week?.total ?? 0}',
+        onTap: go(AppTab.week),
         unit: week == null ? unit : _formatAverage(week.dailyAverage),
         caption: totDelta,
         tone: totTone,
@@ -81,12 +90,14 @@ class DashboardScreen extends ConsumerWidget {
       KpiCard(
         label: 'Clients this month',
         value: '${month.total}',
+        onTap: go(AppTab.reports),
         unit: _formatAverage(month.dailyAverage),
         caption: DateFormat('MMMM y').format(now),
       ),
       KpiCard(
         label: 'Active staff',
         value: '$staff',
+        onTap: go(AppTab.staff),
         unit: 'team',
         caption: data == null ? null : '$logged logged clients $unit',
       ),
@@ -111,7 +122,6 @@ class DashboardScreen extends ConsumerWidget {
     ];
 
     final width = MediaQuery.sizeOf(context).width;
-    final user = ref.watch(currentUserProvider);
     bool may(AppTab t) => user?.mayOpen(t.name) ?? true;
     final linked = ref.watch(linkedStaffProvider);
     final cards = <BoardCard>[
@@ -125,7 +135,7 @@ class DashboardScreen extends ConsumerWidget {
       if (may(AppTab.applications))
         const BoardCard('applications', _ApplicationsPanel(), column: 2),
       if (ref.watch(accountsEnabledProvider) && may(AppTab.dailyReports))
-        const BoardCard('daily', _DailyReportsPanel(), column: 2),
+        const BoardCard('daily', TodayReportsPanel(), column: 2),
       const BoardCard('month', _MonthPanel()),
       BoardCard(
         'recent',
@@ -137,7 +147,7 @@ class DashboardScreen extends ConsumerWidget {
       padding: clarityPagePadding(width),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1680),
+          constraints: const BoxConstraints(maxWidth: Dt.contentMaxWidth),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -543,6 +553,7 @@ class _MixPanel extends StatelessWidget {
                 child: total == 0
                     ? ColoredBox(color: c.track)
                     : Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           if (n > 0)
                             Expanded(
@@ -702,7 +713,7 @@ class _RevenuePanel extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: _Figure(
+                  child: FigureStat(
                     label: 'Today',
                     value: formatMoney(todayCents, currency),
                     caption:
@@ -712,7 +723,7 @@ class _RevenuePanel extends ConsumerWidget {
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: _Figure(
+                  child: FigureStat(
                     label: DateFormat('MMMM').format(now),
                     value: formatMoney(monthCents, currency),
                     caption: delta,
@@ -784,7 +795,7 @@ class _ApplicationsPanel extends ConsumerWidget {
     void open() => ref.read(appActionsProvider).selectTab(AppTab.applications);
     return AppPanel(
       key: const ValueKey('overview-applications'),
-      title: 'Applications',
+      title: 'Application pipeline',
       trailingWidget: TextButton(
         style: TextButton.styleFrom(
           padding: EdgeInsets.zero,
@@ -807,20 +818,20 @@ class _ApplicationsPanel extends ConsumerWidget {
                   Row(
                     children: [
                       Expanded(
-                        child: _Figure(
+                        child: FigureStat(
                           label: 'In progress',
                           value: '$inProgress',
                         ),
                       ),
                       Expanded(
-                        child: _Figure(
+                        child: FigureStat(
                           label: 'Offers',
                           value: '$offers',
                           caption: 'this month',
                         ),
                       ),
                       Expanded(
-                        child: _Figure(
+                        child: FigureStat(
                           label: 'COEs',
                           value: '$coes',
                           caption: 'this month',
@@ -872,110 +883,6 @@ class _ApplicationsPanel extends ConsumerWidget {
                           ),
                         ),
                       ),
-                  ],
-                ],
-              ),
-      ),
-    );
-  }
-}
-
-/// Who has recorded their daily report today (online).
-final _todayReportsProvider = FutureProvider.autoDispose<ReportSummary?>((
-  ref,
-) async {
-  ref.watch(reportsChangedProvider);
-  ref.watch(cloudSyncProvider.select((s) => s.phase == SyncPhase.live));
-  final now = DateTime.now();
-  final today = DateTime(now.year, now.month, now.day);
-  try {
-    return await ref.read(dailyReportsProvider).summary(today, today);
-  } catch (_) {
-    return null;
-  }
-});
-
-class _DailyReportsPanel extends ConsumerWidget {
-  const _DailyReportsPanel();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final c = context.clarity;
-    final summary = ref.watch(_todayReportsProvider);
-    void open() => ref.read(appActionsProvider).selectTab(AppTab.dailyReports);
-    final s = summary.value;
-    final people = s?.compliance ?? const <ComplianceRow>[];
-    final done = people.where((p) => p.submittedToday).length;
-    final missing = [
-      for (final p in people)
-        if (!p.submittedToday) p,
-    ];
-    return AppPanel(
-      key: const ValueKey('overview-daily'),
-      title: 'Today’s reports',
-      trailingWidget: TextButton(
-        style: TextButton.styleFrom(
-          padding: EdgeInsets.zero,
-          minimumSize: const Size(0, 28),
-        ),
-        onPressed: open,
-        child: const Text('Open'),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
-        child: summary.isLoading && s == null
-            ? const SizedBox(
-                height: 48,
-                child: Center(
-                  child: SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                ),
-              )
-            : s == null
-            ? Text(
-                'Daily reports show here when you’re online.',
-                style: theme.textTheme.bodyMedium?.copyWith(color: c.textMuted),
-              )
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _Figure(
-                          label: 'Reported today',
-                          value: people.isEmpty
-                              ? '${s.total}'
-                              : '$done of ${people.length}',
-                        ),
-                      ),
-                      Expanded(
-                        child: _Figure(label: 'Open items', value: '${s.open}'),
-                      ),
-                      Expanded(
-                        child: _Figure(
-                          label: 'Overdue',
-                          value: '${s.overdue.length}',
-                          tone: s.overdue.isEmpty
-                              ? DeltaTone.neutral
-                              : DeltaTone.down,
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (missing.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      'Not yet today: '
-                      '${missing.take(6).map((p) => p.fullName).join(', ')}'
-                      '${missing.length > 6 ? ' and ${missing.length - 6} more' : ''}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: c.textMuted,
-                      ),
-                    ),
                   ],
                 ],
               ),
@@ -1078,55 +985,6 @@ class _MonthPanel extends ConsumerWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-/// A figure with a small label over it and a caption under.
-class _Figure extends StatelessWidget {
-  const _Figure({
-    required this.label,
-    required this.value,
-    this.caption,
-    this.tone = DeltaTone.neutral,
-  });
-  final String label;
-  final String value;
-  final String? caption;
-  final DeltaTone tone;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final c = context.clarity;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.bodySmall?.copyWith(color: c.textMuted),
-        ),
-        const SizedBox(height: 2),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text(value, style: Dt.tab(theme.textTheme.titleLarge!)),
-        ),
-        if (caption != null)
-          Text(
-            caption!,
-            maxLines: 2,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: switch (tone) {
-                DeltaTone.up => c.positiveFg,
-                DeltaTone.down => c.negativeFg,
-                DeltaTone.neutral => c.textMuted,
-              },
-            ),
-          ),
-      ],
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show OverflowBoxFit;
 import 'package:intl/intl.dart';
 
 import '../design/app_theme.dart';
@@ -90,7 +91,24 @@ class AppPanel extends StatelessWidget {
                   ],
                   if (trailingWidget != null) ...[
                     const SizedBox(width: 12),
-                    trailingWidget!,
+                    // A link or legend never makes the header taller than
+                    // its title: every card's header lines up, and a
+                    // button keeps its full tap area (it reaches into the
+                    // header's padding).
+                    SizedBox(
+                      height: 22,
+                      child: OverflowBox(
+                        maxHeight: 48,
+                        fit: OverflowBoxFit.deferToChild,
+                        child: Theme(
+                          data: theme.copyWith(
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: trailingWidget!,
+                        ),
+                      ),
+                    ),
                   ],
                 ],
               ),

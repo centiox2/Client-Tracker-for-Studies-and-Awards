@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueKey;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -167,10 +168,49 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('More'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Change history for this week'));
+      await tester.tap(find.text('Change history (this and past weeks)'));
       await tester.pumpAndSettle();
       expect(find.text('Changes this week'), findsOneWidget);
       expect(find.text('Collins'), findsWidgets);
+      expect(find.textContaining('0 to 4', findRichText: true), findsOneWidget);
+    });
+
+    testWidgets('change history switches to all weeks', (tester) async {
+      final weeks = WeekRepository(db);
+      final counts = ClientCountRepository(db);
+      final old = weeks.createWeekFor(
+        DateTime.now().subtract(const Duration(days: 21)),
+      );
+      final week = weeks.createWeekFor(DateTime.now());
+      counts.saveCount(
+        dayId: weeks.getDays(old.id).first.id,
+        staffId: staffId('Joy'),
+        newClients: 7,
+        existingClients: 0,
+      );
+      counts.saveCount(
+        dayId: weeks.getDays(week.id).first.id,
+        staffId: staffId('Collins'),
+        newClients: 4,
+        existingClients: 0,
+      );
+      final container = await pumpApp(tester);
+      container
+          .read(appActionsProvider)
+          .selectTab(AppTab.week, weekId: week.id);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('More'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Change history (this and past weeks)'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('0 to 7', findRichText: true), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('change-history-week')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('All weeks').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Change history · all weeks'), findsOneWidget);
+      expect(find.textContaining('0 to 7', findRichText: true), findsOneWidget);
       expect(find.textContaining('0 to 4', findRichText: true), findsOneWidget);
     });
   });
@@ -207,6 +247,46 @@ void main() {
     final monday = WeekRepository(db).getDays(next.id).first;
     final saved = ClientCountRepository(db).getDayWithCounts(monday.id);
     expect(saved.rows.first.newClients, 3);
+  });
+
+  testWidgets('a finished week asks once before its numbers change', (
+    tester,
+  ) async {
+    final old = WeekRepository(db)
+        .createWeekFor(DateTime.now().subtract(const Duration(days: 14)));
+    final container = await pumpApp(tester);
+    container.read(appActionsProvider).selectTab(AppTab.week, weekId: old.id);
+    await tester.pumpAndSettle();
+
+    final firstCell = find.byType(NumericField).first;
+    await tester.tap(firstCell);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('past-week-warning')), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(container.read(unlockedWeeksProvider), isEmpty);
+
+    await tester.tap(firstCell);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('past-week-confirm')));
+    await tester.pumpAndSettle();
+    expect(container.read(unlockedWeeksProvider), hasLength(1));
+    await tester.enterText(firstCell, '5');
+    await tester.pumpAndSettle();
+    final monday = WeekRepository(db).getDays(old.id).first;
+    expect(
+      ClientCountRepository(db)
+          .getDayWithCounts(monday.id)
+          .rows
+          .first
+          .newClients,
+      5,
+    );
+
+    // The rest of that week no longer asks.
+    await tester.tap(find.byType(NumericField).at(2));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('past-week-warning')), findsNothing);
   });
 
   // -------------------------------------------------------------- reports ---

@@ -4,6 +4,27 @@ import '../state/app_state.dart';
 import '../state/cloud_sync.dart';
 import 'cloud/cloud_api.dart';
 
+/// What Daily reports opens with (see [DailyReportsService.start]).
+class ReportsStart {
+  const ReportsStart({
+    required this.meta,
+    required this.day,
+    required this.open,
+    required this.week,
+  });
+
+  final ReportsMeta meta;
+
+  /// Your reports for today.
+  final List<ActivityReport> day;
+
+  /// Your reports not completed yet.
+  final List<ActivityReport> open;
+
+  /// Your reports this week, Monday to today.
+  final List<ActivityReport> week;
+}
+
 /// Daily activity reports, read and written online as the signed-in person.
 /// The online database decides what each person may see and change.
 class DailyReportsService {
@@ -20,6 +41,22 @@ class DailyReportsService {
 
   Future<ReportsMeta> meta() async =>
       ReportsMeta.fromJson(_map(await _call('reports_meta')));
+
+  /// Everything the page opens with, in one call: [meta] and your own
+  /// day — today's reports, everything still open, and this week so far.
+  Future<ReportsStart> start() async {
+    final json = _map(await _call('report_start'));
+    List<ActivityReport> reports(Object? rows) => [
+      for (final r in (rows as List? ?? const []))
+        ActivityReport.fromJson(_map(r)),
+    ];
+    return ReportsStart(
+      meta: ReportsMeta.fromJson(_map(json['meta'])),
+      day: reports(json['day']),
+      open: reports(json['open']),
+      week: reports(json['week']),
+    );
+  }
 
   Future<List<ActivityReport>> list(ReportFilter filter) async {
     final rows = await _call('report_list', {'p_filter': filter.toJson()});

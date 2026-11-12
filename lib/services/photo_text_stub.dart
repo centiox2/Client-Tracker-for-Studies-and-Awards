@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/widgets.dart';
 
 import 'photo_text_types.dart';
@@ -27,3 +29,12 @@ Widget photoView(String path, {BoxFit fit = BoxFit.contain}) =>
 
 /// Deletes any temporary copies of picked photos (none here).
 Future<void> discardPickedPhotos() async {}
+
+/// Images can be pasted from the clipboard (none here).
+bool get photoPasteSupported => false;
+
+/// Saves pasted image [bytes] where they can be read; its path.
+Future<String?> savePastedPhoto(Uint8List bytes) async => null;
+
+/// Deletes a photo saved by [savePastedPhoto].
+Future<void> deletePastedPhoto(String path) async {}

@@ -7,7 +7,8 @@ import '../../repositories/client_count_repository.dart';
 import '../../state/app_state.dart';
 
 /// Every edit to a client number — which staff member's day, from what to
-/// what, and when — newest first. [weekId] limits it to one week.
+/// what, and when — newest first. [weekId] opens it on one week; the week
+/// can be switched to any earlier week, or to all weeks, from the dialog.
 Future<void> showChangeHistory(
   BuildContext context, {
   int? weekId,
@@ -30,6 +31,9 @@ class _ChangeHistoryDialog extends ConsumerStatefulWidget {
 
 class _ChangeHistoryDialogState extends ConsumerState<_ChangeHistoryDialog> {
   String? _staff;
+
+  /// The week shown; null for every week.
+  late int? _week = widget.weekId;
   final _scroll = ScrollController();
 
   @override
@@ -43,7 +47,8 @@ class _ChangeHistoryDialogState extends ConsumerState<_ChangeHistoryDialog> {
     ref.watch(dataVersionProvider);
     final all = ref
         .read(clientCountRepositoryProvider)
-        .changes(weekId: widget.weekId);
+        .changes(weekId: _week, limit: _week == null ? 2000 : 500);
+    final weeks = ref.watch(historyProvider);
     final names = {for (final c in all) c.staffName}.toList()..sort();
     final shown = _staff == null
         ? all
@@ -74,7 +79,11 @@ class _ChangeHistoryDialogState extends ConsumerState<_ChangeHistoryDialog> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      widget.title ?? 'Change history',
+                      _week == null
+                          ? 'Change history · all weeks'
+                          : _week == widget.weekId && widget.title != null
+                          ? widget.title!
+                          : 'Change history',
                       style: theme.textTheme.titleMedium,
                     ),
                   ),
@@ -100,8 +109,40 @@ class _ChangeHistoryDialogState extends ConsumerState<_ChangeHistoryDialog> {
                       color: Dt.textMuted(theme),
                     ),
                   ),
+                  SizedBox(
+                    width: 240,
+                    child: DropdownButtonFormField<int?>(
+                      key: const ValueKey('change-history-week'),
+                      initialValue: _week,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Week',
+                        isDense: true,
+                      ),
+                      items: [
+                        const DropdownMenuItem(
+                          value: null,
+                          child: Text('All weeks'),
+                        ),
+                        for (final w in weeks)
+                          DropdownMenuItem(
+                            value: w.week.id,
+                            child: Text(
+                              '${DateFormat('d MMM').format(w.week.startDate)}'
+                              ' – '
+                              '${DateFormat('d MMM y').format(w.week.endDate)}',
+                            ),
+                          ),
+                      ],
+                      onChanged: (v) => setState(() {
+                        _week = v;
+                        _staff = null;
+                      }),
+                    ),
+                  ),
                   if (names.length > 1)
                     SizedBox(
+                      key: ValueKey('staff-filter-$_week'),
                       width: 220,
                       child: DropdownButtonFormField<String?>(
                         initialValue: _staff,
@@ -130,7 +171,10 @@ class _ChangeHistoryDialogState extends ConsumerState<_ChangeHistoryDialog> {
                   ? Padding(
                       padding: const EdgeInsets.symmetric(vertical: 40),
                       child: Text(
-                        'No changes recorded yet.',
+                        _week == null
+                            ? 'No changes recorded yet.'
+                            : 'No changes in this week. Pick “All weeks” '
+                                  'to see every change.',
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: Dt.textMuted(theme),
@@ -236,7 +280,8 @@ class _ChangeRow extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      'Numbers for ${DateFormat('EEE d MMM').format(c.day)}',
+                      'Numbers for '
+                      '${DateFormat(c.day.year == DateTime.now().year ? 'EEE d MMM' : 'EEE d MMM y').format(c.day)}',
                       style: small,
                     ),
                   ],

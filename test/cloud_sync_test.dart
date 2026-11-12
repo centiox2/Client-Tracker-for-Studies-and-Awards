@@ -508,6 +508,20 @@ class FakeCloud implements CloudApi {
         if (_canSee(uid, r['user_id'] as int, r['department_id'] as int?)) r,
     ];
     switch (name) {
+      case 'report_start':
+        // As the server: the page's meta and your own day in one call.
+        final t = _day(today);
+        final monday = _day(today.subtract(Duration(days: today.weekday - 1)));
+        Future<Object?> list(Map<String, Object?> f) => callFunction(
+          'report_list',
+          {'p_token': p['p_token'], 'p_filter': f},
+        );
+        return {
+          'meta': await callFunction('reports_meta', {'p_token': p['p_token']}),
+          'day': await list({'from': t, 'to': t, 'user_id': uid}),
+          'open': await list({'user_id': uid, 'open_only': true}),
+          'week': await list({'from': monday, 'to': t, 'user_id': uid}),
+        };
       case 'reports_meta':
         final scope = _scope(uid);
         return {
@@ -1630,6 +1644,9 @@ void main() {
     await settle(tester);
     expect(container.read(navTabProvider), AppTab.dailyReports);
     expect(find.text('What I did today'), findsOneWidget);
+    // The page and the day's lists arrive in one call (the fake records
+    // what it does inside report_start too, so only count that).
+    expect(cloud.calls.where((c) => c == 'report_start'), hasLength(1));
     // Employees see only their own: no Overview.
     expect(find.byKey(const ValueKey('reports-tab')), findsNothing);
 

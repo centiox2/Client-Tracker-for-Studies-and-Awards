@@ -246,6 +246,20 @@ class UnlockedDaysNotifier extends Notifier<Set<int>> {
   void unlock(int dayId) => state = {...state, dayId};
 }
 
+/// Finished weeks (by their Monday) the user said yes to changing, this
+/// session.
+final unlockedWeeksProvider =
+    NotifierProvider<UnlockedWeeksNotifier, Set<DateTime>>(
+      UnlockedWeeksNotifier.new,
+    );
+
+class UnlockedWeeksNotifier extends Notifier<Set<DateTime>> {
+  @override
+  Set<DateTime> build() => const {};
+
+  void unlock(DateTime monday) => state = {...state, monday};
+}
+
 /// The week the user is currently working with (dashboard + tracker).
 final currentWeekIdProvider = NotifierProvider<CurrentWeekIdNotifier, int?>(
   CurrentWeekIdNotifier.new,

@@ -36,6 +36,7 @@ class NumericField extends StatefulWidget {
     this.onClear,
     this.plusOne = PlusOne.hidden,
     this.confirmEdit,
+    this.dimGuarded = true,
   });
 
   final int value;
@@ -75,6 +76,10 @@ class NumericField extends StatefulWidget {
   /// returns true the caller unlocks the cell (rebuilding without it) and a
   /// digit that was typed is kept.
   final Future<bool> Function()? confirmEdit;
+
+  /// Whether a guarded cell is shown faded (a day to come). A finished
+  /// week's numbers stay at full strength: they're real, just settled.
+  final bool dimGuarded;
 
   @override
   State<NumericField> createState() => _NumericFieldState();
@@ -340,7 +345,9 @@ class _NumericFieldState extends State<NumericField> {
         ),
       ),
     );
-    return _guarded ? Opacity(opacity: 0.45, child: field) : field;
+    return _guarded && widget.dimGuarded
+        ? Opacity(opacity: 0.45, child: field)
+        : field;
   }
 
   static final _digits = {

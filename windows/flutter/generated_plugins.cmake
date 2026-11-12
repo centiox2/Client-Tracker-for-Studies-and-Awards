@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   desktop_drop
+  pasteboard
   sqlite3_flutter_libs
 )
 

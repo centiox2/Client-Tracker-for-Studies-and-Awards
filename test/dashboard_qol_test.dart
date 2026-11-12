@@ -184,6 +184,28 @@ void main() {
     expect(find.text('Off'), findsOneWidget);
   });
 
+  testWidgets('client mix and staff bars actually draw', (tester) async {
+    final week = WeekRepository(db).createWeekFor(DateTime.now());
+    saveMonday(week.id, newClients: 6);
+    await pumpApp(tester);
+    // Every coloured segment has height: a childless box in a row that
+    // doesn't stretch collapses to nothing, leaving an empty bar.
+    for (final key in ['client-mix', 'staff-meter-${joyId()}']) {
+      final boxes = find.descendant(
+        of: find.byKey(ValueKey(key)),
+        matching: find.byType(ColoredBox),
+      );
+      expect(boxes, findsWidgets, reason: key);
+      for (final e in boxes.evaluate()) {
+        expect(
+          e.size!.height,
+          greaterThan(0),
+          reason: '$key: a bar segment has no height',
+        );
+      }
+    }
+  });
+
   testWidgets('total and month cards show the daily average', (tester) async {
     final week = WeekRepository(db).createWeekFor(DateTime.now());
     saveMonday(week.id, newClients: 12);

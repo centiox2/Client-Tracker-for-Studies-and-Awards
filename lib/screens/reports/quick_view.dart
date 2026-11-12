@@ -84,6 +84,14 @@ class _QuickView extends ConsumerWidget {
       ),
     );
 
+    // Daily reports (online accounts only), so Reports covers every page.
+    final user = ref.watch(currentUserProvider);
+    final Widget? reportsPanel =
+        ref.watch(accountsEnabledProvider) &&
+            (user?.mayOpen(AppTab.dailyReports.name) ?? false)
+        ? const TodayReportsPanel()
+        : null;
+
     final target = ref.watch(dailyTargetProvider);
     // A tile footer: the comparison line and/or progress toward the target.
     Widget? footer(Widget? delta, double? goal, int value) {
@@ -327,29 +335,52 @@ class _QuickView extends ConsumerWidget {
         ],
         const SizedBox(height: 20),
         // Clients beside revenue: today first, then the week and month.
-        Text('TODAY', style: microLabel(theme)),
-        const SizedBox(height: 10),
-        KpiGrid(
-          orderKey: 'reports.today',
-          minWidth: compact ? 150 : 190,
-          children: tiles.take(todayCount).toList(),
-        ),
-        const SizedBox(height: 20),
-        Text(
-          'THIS WEEK & ${DateFormat('MMMM').format(day).toUpperCase()}',
-          style: microLabel(theme),
-        ),
-        const SizedBox(height: 10),
-        KpiGrid(
-          orderKey: 'reports.period',
-          minWidth: compact ? 150 : 190,
-          children: tiles.skip(todayCount).toList(),
+        // Both rows share one column count, so a card for today is the
+        // same size as one for the week or month.
+        LayoutBuilder(
+          builder: (context, box) {
+            final minWidth = compact ? 150.0 : 190.0;
+            final most = [
+              todayCount,
+              tiles.length - todayCount,
+            ].reduce((a, b) => a > b ? a : b);
+            final cols = ((box.maxWidth + Dt.gap) / (minWidth + Dt.gap))
+                .floor()
+                .clamp(1, most);
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('TODAY', style: microLabel(theme)),
+                const SizedBox(height: 10),
+                KpiGrid(
+                  orderKey: 'reports.today',
+                  columns: cols,
+                  children: tiles.take(todayCount).toList(),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'THIS WEEK & ${DateFormat('MMMM').format(day).toUpperCase()}',
+                  style: microLabel(theme),
+                ),
+                const SizedBox(height: 10),
+                KpiGrid(
+                  orderKey: 'reports.period',
+                  columns: cols,
+                  children: tiles.skip(todayCount).toList(),
+                ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: 24),
         if (compact) ...[
           whoPanel,
           const SizedBox(height: 12),
           weekPanel,
+          if (reportsPanel != null) ...[
+            const SizedBox(height: 12),
+            reportsPanel,
+          ],
           const SizedBox(height: 12),
           activityPanel,
           if (applicationsPanel != null) ...[
@@ -378,6 +409,10 @@ class _QuickView extends ConsumerWidget {
                 child: Column(
                   children: [
                     weekPanel,
+                    if (reportsPanel != null) ...[
+                      const SizedBox(height: Dt.gap),
+                      reportsPanel,
+                    ],
                     const SizedBox(height: Dt.gap),
                     activityPanel,
                   ],

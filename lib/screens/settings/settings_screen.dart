@@ -470,7 +470,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             controller: _scroll,
             padding: EdgeInsets.fromLTRB(pad, 18, pad, 28),
             children: [
-              Center(
+              Align(
+                alignment: Alignment.topLeft,
+
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 1080),
                   child: side

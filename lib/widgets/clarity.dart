@@ -243,7 +243,8 @@ class KpiGrid extends ConsumerStatefulWidget {
   final double minWidth;
   final String? orderKey;
 
-  /// A fixed number per row (else as many as [minWidth] allows).
+  /// A fixed number per row, even when there are fewer cards (else as
+  /// many as [minWidth] allows, stretched to fill the row).
   final int? columns;
 
   /// Names for the cards, in order (else their labels or keys).
@@ -316,10 +317,14 @@ class _KpiGridState extends ConsumerState<KpiGrid> {
       builder: (context, box) {
         const gap = Dt.gap;
         final n = order.length;
-        var cols =
-            widget.columns ??
-            ((box.maxWidth + gap) / (widget.minWidth + gap)).floor();
-        cols = cols.clamp(1, n == 0 ? 1 : n);
+        // A fixed column count is kept even with fewer cards, so grids
+        // stacked on one page give every card the same width.
+        final cols = widget.columns != null
+            ? widget.columns!.clamp(1, 12)
+            : ((box.maxWidth + gap) / (widget.minWidth + gap)).floor().clamp(
+                1,
+                n == 0 ? 1 : n,
+              );
         final w = (box.maxWidth - gap * (cols - 1)) / cols;
 
         Widget cell(String id, double width) {
@@ -624,6 +629,9 @@ class SplitMeter extends StatelessWidget {
                     child: total == 0
                         ? const SizedBox.shrink()
                         : Row(
+                            // Childless boxes take no height unless
+                            // stretched: without this the bar is empty.
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               if (newCount > 0)
                                 Expanded(
@@ -1000,6 +1008,56 @@ class YouTag extends StatelessWidget {
         style: Theme.of(context).textTheme.labelSmall
             ?.copyWith(color: c.accent, fontWeight: FontWeight.w600),
       ),
+    );
+  }
+}
+
+/// A figure with a small label over it and a caption under.
+class FigureStat extends StatelessWidget {
+  const FigureStat({
+    super.key,
+    required this.label,
+    required this.value,
+    this.caption,
+    this.tone = DeltaTone.neutral,
+  });
+  final String label;
+  final String value;
+  final String? caption;
+  final DeltaTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = context.clarity;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodySmall?.copyWith(color: c.textMuted),
+        ),
+        const SizedBox(height: 2),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(value, style: Dt.tab(theme.textTheme.titleLarge!)),
+        ),
+        if (caption != null)
+          Text(
+            caption!,
+            maxLines: 2,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: switch (tone) {
+                DeltaTone.up => c.positiveFg,
+                DeltaTone.down => c.negativeFg,
+                DeltaTone.neutral => c.textMuted,
+              },
+            ),
+          ),
+      ],
     );
   }
 }

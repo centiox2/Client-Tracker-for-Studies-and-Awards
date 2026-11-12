@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +16,28 @@ bool get photoTextSupported =>
 
 /// Photos can be dragged onto the window (Windows desktop).
 bool get photoDropSupported => Platform.isWindows;
+
+/// A screenshot or copied photo can be pasted (Ctrl+V, or Paste image).
+bool get photoPasteSupported => photoTextSupported;
+
+/// Saves pasted image [bytes] to a temporary file to be read; its path.
+Future<String?> savePastedPhoto(Uint8List bytes) async {
+  try {
+    final dir = await Directory.systemTemp.createTemp('sa_paste_');
+    final file = File('${dir.path}${Platform.pathSeparator}pasted.png');
+    await file.writeAsBytes(bytes, flush: true);
+    return file.path;
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Deletes a photo saved by [savePastedPhoto] (it's never kept).
+Future<void> deletePastedPhoto(String path) async {
+  try {
+    await File(path).parent.delete(recursive: true);
+  } catch (_) {}
+}
 
 /// Lets the user choose one or more photos; their paths (empty if cancelled).
 Future<List<String>> pickPhotos() async {

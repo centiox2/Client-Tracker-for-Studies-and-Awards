@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../design/app_theme.dart';
+import '../../services/cloud/cloud_api.dart' show CloudException;
 import '../../services/daily_report_export.dart';
 import '../../services/daily_reports_service.dart';
 import '../../services/export_actions.dart';
@@ -28,8 +29,16 @@ class DailyReportsScreen extends ConsumerStatefulWidget {
 
 enum _Tab { mine, overview }
 
+/// The page as it was last opened on this device (for the account in
+/// [ReportsStart.meta]): shown straight away next time while it reloads.
+ReportsStart? _lastStart;
+
 class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
   ReportsMeta? _meta;
+
+  /// What the page opened with: your day's lists, so My reports needn't
+  /// ask again. Null when only [_meta] could be read.
+  ReportsStart? _start;
   Object? _error;
   _Tab? _tab;
 
@@ -47,22 +56,45 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
   @override
   void initState() {
     super.initState();
+    final cached = _lastStart;
+    final me = ref.read(currentUserProvider)?.id;
+    if (cached != null && me != null && cached.meta.myId == me) {
+      _start = cached;
+      _meta = cached.meta;
+      _tab = _firstTab(cached.meta);
+    }
     _load();
   }
 
+  /// People without a department (the Operations Manager, say) start on
+  /// the Overview; everyone else on their own day.
+  static _Tab _firstTab(ReportsMeta meta) =>
+      meta.seesOthers && meta.myDepartmentId == null
+      ? _Tab.overview
+      : _Tab.mine;
+
   Future<void> _load() async {
     setState(() => _error = null);
+    final service = ref.read(dailyReportsProvider);
     try {
-      final meta = await ref.read(dailyReportsProvider).meta();
+      ReportsStart? start;
+      ReportsMeta meta;
+      try {
+        // One round trip for the page and your day.
+        start = await service.start();
+        meta = start.meta;
+      } on CloudException catch (e) {
+        // An older online database without it: the page, then the lists.
+        if (e.code != 'needs_update') rethrow;
+        meta = await service.meta();
+      }
       if (!mounted) return;
+      if (start != null) _lastStart = start;
       setState(() {
         _meta = meta;
+        _start = start;
         _refresh++;
-        // People without a department (the Operations Manager, say) start
-        // on the Overview; everyone else on their own day.
-        _tab ??= meta.seesOthers && meta.myDepartmentId == null
-            ? _Tab.overview
-            : _Tab.mine;
+        _tab ??= _firstTab(meta);
       });
     } catch (e) {
       if (mounted) setState(() => _error = e);
@@ -146,7 +178,12 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
                   ),
                   const SizedBox(height: 14),
                   if (tab == _Tab.mine)
-                    _MyReports(meta: meta, phone: phone, refresh: _refresh)
+                    _MyReports(
+                      meta: meta,
+                      phone: phone,
+                      refresh: _refresh,
+                      start: _start,
+                    )
                   else
                     _Overview(meta: meta, phone: phone, refresh: _refresh),
                 ],
@@ -166,11 +203,15 @@ class _MyReports extends ConsumerStatefulWidget {
     required this.meta,
     required this.phone,
     required this.refresh,
+    this.start,
   });
 
   final ReportsMeta meta;
   final bool phone;
   final int refresh;
+
+  /// Today's lists, already read with the page (null: read them here).
+  final ReportsStart? start;
 
   @override
   ConsumerState<_MyReports> createState() => _MyReportsState();
@@ -196,8 +237,28 @@ class _MyReportsState extends ConsumerState<_MyReports> {
   @override
   void initState() {
     super.initState();
-    _load();
+    if (!_takeStart()) _load();
   }
+
+  /// Uses the lists the page opened with, when they are for the day shown.
+  bool _takeStart() {
+    final start = widget.start;
+    if (start == null || _day != start.meta.today) return false;
+    _loadSeq++; // anything still loading is older
+    _entries = start.day;
+    _open = _soonestFirst(start.open);
+    _week = start.week;
+    _error = null;
+    return true;
+  }
+
+  static List<ActivityReport> _soonestFirst(List<ActivityReport> open) =>
+      [...open]..sort((a, b) {
+        // Soonest due first; anything without a date last.
+        final x = a.dueDate, y = b.dueDate;
+        if (x == null || y == null) return x == null ? 1 : -1;
+        return x.compareTo(y);
+      });
 
   @override
   void didUpdateWidget(_MyReports old) {
@@ -206,6 +267,10 @@ class _MyReportsState extends ConsumerState<_MyReports> {
     // A new day while the app was open: "today" moves on with it.
     if (old.meta.today != widget.meta.today && _day == old.meta.today) {
       _day = widget.meta.today;
+    }
+    if (!identical(old.start, widget.start) && _takeStart()) {
+      setState(() {});
+      return;
     }
     _load();
   }
@@ -224,13 +289,7 @@ class _MyReportsState extends ConsumerState<_MyReports> {
       if (!mounted || seq != _loadSeq) return;
       setState(() {
         _entries = results[0];
-        // Soonest due first; anything without a date last.
-        _open = [...results[1]]
-          ..sort((a, b) {
-            final x = a.dueDate, y = b.dueDate;
-            if (x == null || y == null) return x == null ? 1 : -1;
-            return x.compareTo(y);
-          });
+        _open = _soonestFirst(results[1]);
         _week = results[2];
         _error = null;
       });

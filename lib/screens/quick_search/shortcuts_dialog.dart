@@ -9,12 +9,13 @@ Future<void> showShortcutsDialog(BuildContext context) => showDialog<void>(
 );
 
 const _shortcuts = <(String, String)>[
-  ('Ctrl K', 'Quick search: pages, weeks and staff'),
-  ('Ctrl 1 – 6', 'Overview, Weekly tracker, History, Staff, Reports, Settings'),
+  ('Ctrl K', 'Search: clients, staff, weeks, payments and pages'),
+  ('Ctrl 1 – 7', 'Open the pages in the menu, top to bottom'),
   ('/', 'Quick search'),
   ('N', 'Revenue: new payment · Weekly tracker, History: new week'),
   ('Ctrl N', 'New week'),
   ('Ctrl Z', 'Undo the last number you changed'),
+  ('Ctrl V', 'Revenue: read a pasted screenshot or payment message'),
   ('?', 'This list of shortcuts'),
   ('Enter', 'Weekly tracker: move to the next field'),
   ('Esc', 'Close a dialog'),

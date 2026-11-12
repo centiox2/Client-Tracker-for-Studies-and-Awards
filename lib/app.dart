@@ -389,6 +389,16 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       return KeyEventResult.handled;
     }
     if (_isViewer) return KeyEventResult.ignored;
+    // Ctrl+V on Revenue (not in a text box): a screenshot or copied photo
+    // of a payment message is read; text opens the paste box.
+    if (event.logicalKey == LogicalKeyboardKey.keyV &&
+        !_typingInTextField &&
+        ref.read(navTabProvider) == AppTab.revenue &&
+        ref.read(isAdminProvider) &&
+        ModalRoute.of(context)?.isCurrent != false) {
+      pastePaymentMessage(context, ref, ref.read(revenueDateProvider));
+      return KeyEventResult.handled;
+    }
     if (event.logicalKey == LogicalKeyboardKey.keyN) {
       // Instead of the browser's "new window".
       showNewWeekDialog(context, ref);

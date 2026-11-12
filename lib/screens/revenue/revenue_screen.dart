@@ -739,10 +739,12 @@ class _AddPanel extends StatelessWidget {
           key: const ValueKey('paste-payment'),
           onPressed: onPaste,
           icon: const Icon(Icons.content_paste, size: 16),
-          label: const Text('Paste message'),
+          label: Text(
+            photoPasteSupported ? 'Paste message or image' : 'Paste message',
+          ),
         ),
         if (photoDropSupported && onScan != null)
-          Text('or drag photos onto this page', style: hint),
+          Text('or drag photos onto this page, or press Ctrl+V', style: hint),
       ],
     );
     return AppPanel(

@@ -99,6 +99,7 @@ class _Shot {
 
 const _phone = Size(390, 844);
 const _tablet = Size(1024, 768);
+const _hd = Size(1920, 1080);
 
 // Tall screens show a whole page in one picture (for the mobile review).
 const _tallPhone = Size(390, 2200);
@@ -249,7 +250,7 @@ List<_Shot> _pages(
     size: size,
     ratio: ratio,
     dark: dark,
-    steps: [ValueKey('more'), 'Settings', 'What’s new'],
+    steps: [ValueKey('more'), 'Settings', ValueKey('settings-cat-about'), 'What’s new'],
   ),
 ];
 
@@ -298,6 +299,13 @@ final _shots = <_Shot>[
       dark: true,
       steps: [ValueKey('sidebar-collapse'), ValueKey('strip-week')],
     ),
+    // A 1080p desktop: the size the office screens run at.
+    const _Shot('hd-overview', size: _hd),
+    const _Shot('hd-apps', size: _hd, steps: ['Applications']),
+    const _Shot('hd-reports', size: _hd, steps: ['Reports']),
+    const _Shot('hd-tracker', size: _hd, steps: ['Weekly tracker']),
+    const _Shot('hd-settings', size: _hd, steps: ['Settings']),
+    const _Shot('hd-revenue', size: _hd, steps: ['Revenue']),
     const _Shot('tablet-overview', size: _tablet),
     const _Shot('tablet-tracker', size: _tablet, steps: ['Tracker']),
     const _Shot(
@@ -352,7 +360,7 @@ final _shots = <_Shot>[
     ),
     const _Shot(
       'settings-about',
-      steps: ['Settings', ValueKey('about-section')],
+      steps: ['Settings', ValueKey('settings-cat-about')],
     ),
   ],
 ];

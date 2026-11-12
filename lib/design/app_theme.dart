@@ -39,8 +39,10 @@ abstract final class Dt {
   /// Gap between cards.
   static const double gap = 16;
 
-  /// Max width for centered reading content.
-  static const double contentMaxWidth = 1240;
+  /// Max width of a page's content. Every page uses it (Overview included),
+  /// so on a 1080p screen each fills the space beside the menu and lines
+  /// up under its title; only wider screens leave margins.
+  static const double contentMaxWidth = 1680;
 
   /// The company behind the app, shown beside the logo.
   static const String companyName = 'Studies and Awards Limited';

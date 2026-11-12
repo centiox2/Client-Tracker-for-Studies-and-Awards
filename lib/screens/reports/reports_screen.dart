@@ -14,6 +14,7 @@ import '../../services/print_views.dart';
 import '../../services/report_export.dart';
 import '../../state/app_state.dart';
 import '../../widgets/clarity.dart';
+import '../../widgets/today_reports_panel.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/motion.dart';
 import '../../widgets/panels.dart';

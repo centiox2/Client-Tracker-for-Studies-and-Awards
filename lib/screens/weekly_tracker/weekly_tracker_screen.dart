@@ -15,6 +15,7 @@ import '../../widgets/motion.dart';
 import '../../widgets/numeric_field.dart';
 import '../../widgets/panels.dart';
 import '../history/change_history_dialog.dart';
+import '../reports/reports_screen.dart' show showStaffProfile;
 import 'day_off_dialog.dart';
 import 'future_day_guard.dart';
 import 'new_week_dialog.dart';
@@ -606,7 +607,7 @@ class _WeekMenu extends ConsumerWidget {
             dense: true,
             contentPadding: EdgeInsets.zero,
             leading: Icon(Icons.manage_history, size: 18),
-            title: Text('Change history for this week'),
+            title: Text('Change history (this and past weeks)'),
           ),
         ),
       ],
@@ -763,7 +764,9 @@ class _BoardTable extends ConsumerWidget {
     // ---- pinned day header ---------------------------------------------
     Widget dayHeaderCell(DayWithCounts d) {
       final isToday = _sameDay(d.day.date, now);
-      final locked = isDayGuarded(ref, d.day.id, d.day.date);
+      // Dimmed only for days to come; a finished week just asks first.
+      final locked =
+          isFutureDay(d.day.date) && isDayGuarded(ref, d.day.id, d.day.date);
       Widget sub(String label, Color dot) => Expanded(
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1220,6 +1223,7 @@ class _BoardStaffRow extends ConsumerWidget {
                                     : Dt.existingBlueBright(theme.brightness),
                                 showZero: ref.watch(showZerosProvider),
                                 placeholder: '–',
+                                dimGuarded: isFutureDay(data.days[i].day.date),
                                 confirmEdit:
                                     isDayGuarded(
                                       ref,
@@ -1299,9 +1303,9 @@ class _AnalyticsRail extends ConsumerWidget {
       0,
       (a, d) => a + (d.isOff(row.staffId) ? 0 : d.countFor(row.staffId).total),
     );
-    final leaders = <({String name, int total})>[
+    final leaders = <({int id, String name, int total})>[
       for (final row in staffRows)
-        (name: row.staffName, total: effectiveTotal(row)),
+        (id: row.staffId, name: row.staffName, total: effectiveTotal(row)),
     ]..sort((a, b) => b.total.compareTo(a.total));
     final top5 = leaders.where((l) => l.total > 0).take(5).toList();
     final topTotal = top5.isEmpty ? 0 : top5.first.total;
@@ -1392,6 +1396,8 @@ class _AnalyticsRail extends ConsumerWidget {
               children: [
                 for (var i = 0; i < top5.length; i++)
                   _LeaderRow(
+                    key: ValueKey('leader-${top5[i].id}'),
+                    onTap: () => showStaffProfile(context, top5[i].id),
                     rank: i + 1,
                     name: top5[i].name,
                     total: top5[i].total,
@@ -1485,6 +1491,8 @@ class _FactRow extends StatelessWidget {
 /// Rank, name, a bar scaled to the top performer, and the total.
 class _LeaderRow extends StatelessWidget {
   const _LeaderRow({
+    super.key,
+    required this.onTap,
     required this.rank,
     required this.name,
     required this.total,
@@ -1498,72 +1506,78 @@ class _LeaderRow extends StatelessWidget {
   final double fraction;
   final bool last;
 
+  /// Opens this person's record.
+  final VoidCallback onTap;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 9),
-      decoration: last
-          ? null
-          : BoxDecoration(
-              border: Border(
-                bottom: BorderSide(
-                  color: scheme.outline.withValues(alpha: 0.6),
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 9),
+        decoration: last
+            ? null
+            : BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
+                    color: scheme.outline.withValues(alpha: 0.6),
+                  ),
+                ),
+              ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              child: Text(
+                '$rank',
+                style: Dt.tab(theme.textTheme.labelSmall!)
+                    .copyWith(color: Dt.textFaint(theme)),
+              ),
+            ),
+            SizedBox(
+              width: 96,
+              child: Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 20,
-            child: Text(
-              '$rank',
-              style: Dt.tab(theme.textTheme.labelSmall!)
-                  .copyWith(color: Dt.textFaint(theme)),
-            ),
-          ),
-          SizedBox(
-            width: 96,
-            child: Text(
-              name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: SizedBox(
-                height: 6,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(3),
-                  child: Stack(
-                    children: [
-                      Container(
-                        color: scheme.onSurface.withValues(alpha: 0.08),
-                      ),
-                      FractionallySizedBox(
-                        widthFactor: fraction.clamp(0.0, 1.0),
-                        child: Container(
-                          color: scheme.onSurface.withValues(alpha: 0.55),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: SizedBox(
+                  height: 6,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: Stack(
+                      children: [
+                        Container(
+                          color: scheme.onSurface.withValues(alpha: 0.08),
                         ),
-                      ),
-                    ],
+                        FractionallySizedBox(
+                          widthFactor: fraction.clamp(0.0, 1.0),
+                          child: Container(
+                            color: scheme.onSurface.withValues(alpha: 0.55),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          Text(
-            '$total',
-            style: Dt.tab(theme.textTheme.bodyMedium!)
-                .copyWith(fontWeight: FontWeight.w700),
-          ),
-        ],
+            Text(
+              '$total',
+              style: Dt.tab(theme.textTheme.bodyMedium!)
+                  .copyWith(fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1936,6 +1950,7 @@ class InlineCountPair extends StatelessWidget {
       valueColor: bright,
       placeholder: '–',
       confirmEdit: confirmEdit,
+      dimGuarded: isFutureDay(day.day.date),
       onClear: () => actions.undoCount(day.day.id, row.staffId, isNew),
       onChanged: (nv) => actions.saveCount(
         dayId: day.day.id,
