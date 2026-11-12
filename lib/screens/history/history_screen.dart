@@ -9,6 +9,7 @@ import '../../widgets/empty_state.dart';
 import '../../widgets/undo_snack.dart';
 import '../../widgets/week_label.dart';
 import '../weekly_tracker/new_week_dialog.dart';
+import '../../services/search_text.dart';
 
 /// Every recorded week, grouped by month, searchable, with Open and Delete.
 /// Same panel style as the dashboard and Reports.
@@ -232,7 +233,9 @@ bool weekMatchesQuery(WeekSummary summary, String rawQuery) {
     summary.week.startDate,
     summary.week.endDate,
   ).toLowerCase();
-  if (label.contains(query)) return true;
+  if (label.contains(query) || TextSearch(rawQuery).matches(label)) {
+    return true;
+  }
 
   // Date search: accept DD/MM/YYYY, D/M/YYYY or DD/MM (current year).
   final datePart = query.split(RegExp(r'\s+')).last;

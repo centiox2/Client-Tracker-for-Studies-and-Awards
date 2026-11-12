@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../design/airtable_tags.dart';
 import '../../design/app_theme.dart';
 import '../../repositories/application_repository.dart';
+import '../../services/search_text.dart';
 
 /// Every application with every column, like the Airtable grid: sortable by
 /// any column (tap its heading), searchable, filterable by status, scrolling
@@ -176,16 +177,20 @@ class _ApplicationsTableState extends State<ApplicationsTable> {
     final width = numberWidth + columns.fold<double>(0, (s, c) => s + c.width);
 
     // Airtable's order: by status (its groups), then the file's order.
-    final q = _search.text.trim().toLowerCase();
+    final q = TextSearch(_search.text);
     final rows =
         [
           for (final a in widget.apps)
             if ((_status == null || a.status == _status) &&
-                (q.isEmpty ||
-                    '${a.student} ${a.rto} ${a.country} ${a.status} ${a.assignee} '
-                            '${a.todo} ${a.followUp}'
-                        .toLowerCase()
-                        .contains(q)))
+                q.matchesAny([
+                  a.student,
+                  a.rto,
+                  a.country,
+                  a.status,
+                  a.assignee,
+                  a.todo,
+                  a.followUp,
+                ]))
               a,
         ]..sort((x, y) {
           final r = ApplicationRepository.statusRank(x.status)

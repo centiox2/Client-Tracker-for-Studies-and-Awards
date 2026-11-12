@@ -17,6 +17,7 @@ import '../../widgets/clarity.dart';
 import '../../widgets/panels.dart';
 import 'applications_quick_view.dart';
 import 'applications_table.dart';
+import '../../services/search_text.dart';
 
 /// Applications: the Airtable "Applications Tracker", uploaded as its CSV
 /// export. Shows where every application stands, grouped by status as in
@@ -145,21 +146,27 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
         final phone = viewport.maxWidth < 600;
         final pad = clarityHPad(context);
         if (apps.isNotEmpty && _view == _View.table) {
-          // The table scrolls by itself, both ways.
+          // The table scrolls by itself, both ways. Same width and place as
+          // the other views, so the tabs don't jump when switching.
           return Padding(
             padding: EdgeInsets.fromLTRB(pad, 16, pad, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _header(context, imports, phone),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: ApplicationsTable(
-                    apps: apps,
-                    onOpen: (a) => showApplicationDetails(context, ref, a),
-                  ),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: Dt.contentMaxWidth),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _header(context, imports, phone),
+                    const SizedBox(height: 14),
+                    Expanded(
+                      child: ApplicationsTable(
+                        apps: apps,
+                        onOpen: (a) => showApplicationDetails(context, ref, a),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           );
         }
@@ -394,7 +401,7 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
 
     return [
       header,
-      const SizedBox(height: 12),
+      const SizedBox(height: 14),
       KpiGrid(
         orderKey: 'applications.all',
         columns: phone ? 2 : 4,
@@ -703,7 +710,7 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
   ) {
     final theme = Theme.of(context);
     final muted = Dt.textMuted(theme);
-    final q = _search.text.trim().toLowerCase();
+    final q = TextSearch(_search.text);
     final now = DateTime.now();
     final shown = [
       for (final a in apps)
@@ -717,11 +724,14 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
             (_rto == null || a.rto == _rto) &&
             (!_inProgressOnly || a.inProgress) &&
             (!_offerOverdueOnly || a.offerOverdue(now)) &&
-            (q.isEmpty ||
-                '${a.student} ${a.rto} ${a.country} ${a.status} ${a.assignee} '
-                        '${a.todo}'
-                    .toLowerCase()
-                    .contains(q)))
+            q.matchesAny([
+              a.student,
+              a.rto,
+              a.country,
+              a.status,
+              a.assignee,
+              a.todo,
+            ]))
           a,
     ];
     final groups = <String, List<Application>>{};
@@ -890,7 +900,7 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
         _rto != null ||
         _inProgressOnly ||
         _offerOverdueOnly ||
-        q.isNotEmpty;
+        !q.isEmpty;
 
     return [
       AppPanel(

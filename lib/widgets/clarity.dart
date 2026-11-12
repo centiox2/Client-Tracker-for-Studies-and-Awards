@@ -540,6 +540,124 @@ class StatusChip extends StatelessWidget {
 }
 
 /// A label and number with a 6px bar under it (width = value ÷ highest).
+/// One person's new (green) and existing (blue) clients as a single bar,
+/// scaled to [max]; a tap opens their record.
+class SplitMeter extends StatelessWidget {
+  const SplitMeter({
+    super.key,
+    required this.label,
+    required this.newCount,
+    required this.existingCount,
+    required this.max,
+    this.onTap,
+  });
+
+  final String label;
+  final int newCount;
+  final int existingCount;
+  final int max;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = context.clarity;
+    final total = newCount + existingCount;
+    final share = max <= 0 ? 0.0 : (total / max).clamp(0, 1).toDouble();
+    final body = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: onTap == null ? null : c.text,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '$newCount',
+                style: Dt.tab(theme.textTheme.bodySmall!)
+                    .copyWith(color: c.seriesNew, fontWeight: FontWeight.w600),
+              ),
+              Text(
+                ' · ',
+                style: theme.textTheme.bodySmall?.copyWith(color: c.textMuted),
+              ),
+              Text(
+                '$existingCount',
+                style: Dt.tab(theme.textTheme.bodySmall!).copyWith(
+                  color: c.seriesExisting,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              SizedBox(
+                width: 36,
+                child: Text(
+                  '$total',
+                  textAlign: TextAlign.right,
+                  style: Dt.tab(theme.textTheme.bodyMedium!)
+                      .copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: SizedBox(
+              height: 6,
+              child: Stack(
+                children: [
+                  Positioned.fill(child: ColoredBox(color: c.track)),
+                  FractionallySizedBox(
+                    widthFactor: share,
+                    heightFactor: 1,
+                    child: total == 0
+                        ? const SizedBox.shrink()
+                        : Row(
+                            children: [
+                              if (newCount > 0)
+                                Expanded(
+                                  flex: newCount,
+                                  child: ColoredBox(color: c.seriesNew),
+                                ),
+                              if (existingCount > 0)
+                                Expanded(
+                                  flex: existingCount,
+                                  child: ColoredBox(color: c.seriesExisting),
+                                ),
+                            ],
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (onTap == null) return body;
+    return Semantics(
+      button: true,
+      label: '$label: $newCount new, $existingCount existing',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(Dt.rSm),
+        child: body,
+      ),
+    );
+  }
+}
+
 class Meter extends StatelessWidget {
   const Meter({
     super.key,
@@ -861,4 +979,27 @@ String initialsOf(String name) {
     return (w.length >= 2 ? w.substring(0, 2) : w).toUpperCase();
   }
   return (words[0][0] + words[1][0]).toUpperCase();
+}
+
+/// A small "You" tag beside the signed-in person's own name.
+class YouTag extends StatelessWidget {
+  const YouTag({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.clarity;
+    return Container(
+      key: const ValueKey('you-tag'),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: c.accentSoft,
+        borderRadius: BorderRadius.circular(Dt.rSm),
+      ),
+      child: Text(
+        'You',
+        style: Theme.of(context).textTheme.labelSmall
+            ?.copyWith(color: c.accent, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
 }

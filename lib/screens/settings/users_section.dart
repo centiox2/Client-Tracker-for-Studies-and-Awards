@@ -12,6 +12,7 @@ import '../../services/daily_reports_service.dart';
 import '../../state/app_state.dart';
 import '../../state/cloud_sync.dart';
 import '../../widgets/panels.dart';
+import '../../services/search_text.dart';
 
 /// Settings › Users (admins only): everyone's account. The admin adds
 /// people with a temporary password, gives out roles, resets forgotten
@@ -42,15 +43,15 @@ class _UsersSectionState extends ConsumerState<UsersSection> {
   }
 
   bool _matches(AppUser u) {
-    final q = _search.text.trim().toLowerCase();
+    final q = TextSearch(_search.text);
     if (q.isEmpty) return true;
     final dept = _departments.where((d) => d.id == u.departmentId).firstOrNull;
-    return [
+    return q.matchesAny([
       u.fullName,
       u.username,
       u.role.label,
       dept?.name ?? '',
-    ].any((t) => t.toLowerCase().contains(q));
+    ]);
   }
 
   @override
@@ -433,6 +434,8 @@ class _UserRow extends StatelessWidget {
       if (department != null) department!.name,
       if (user.reportAccess != ReportAccess.employee) user.reportAccess.label,
       if (staff != null) 'Staff: ${staff!.name}',
+      if (user.pages != null)
+        '${user.pages!.length} page${user.pages!.length == 1 ? '' : 's'} only',
       last == null
           ? 'Never signed in'
           : 'Last signed in ${DateFormat('dd/MM/yyyy HH:mm').format(last)}',
@@ -559,6 +562,9 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
   late ReportAccess _access =
       widget.user?.reportAccess ?? ReportAccess.employee;
   late bool _usernameEdited = widget.user != null;
+
+  /// The pages this account opens (null: every page its role allows).
+  late Set<String>? _pages = widget.user?.pages;
   bool _busy = false;
   String? _error;
 
@@ -581,12 +587,26 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
     _username.text = AppUser.suggestUsername(name, taken: _taken);
   }
 
+  /// Linking a staff member fills in their name (and a username from it).
+  /// Switching to someone else replaces a name that came from the previous
+  /// staff member; a name typed by hand is kept.
   void _pickStaff(int? id, List<Staff> staff) {
+    final previous = staff.where((s) => s.id == _staffId).firstOrNull;
     setState(() => _staffId = id);
-    if (id == null || _name.text.trim().isNotEmpty) return;
     final person = staff.where((s) => s.id == id).firstOrNull;
     if (person == null) return;
+    final typed = _name.text.trim();
+    final fromStaff = typed.isEmpty || typed == previous?.name.trim();
+    if (!fromStaff) return;
     _name.text = person.name;
+    // A username suggested from the old name follows the new one.
+    if (_usernameEdited &&
+        _isNew &&
+        previous != null &&
+        _username.text ==
+            AppUser.suggestUsername(previous.name, taken: _taken)) {
+      _usernameEdited = false;
+    }
     _nameChanged(person.name);
   }
 
@@ -625,9 +645,16 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
             active: widget.user?.active ?? true,
             password: _isNew ? _password.text : null,
           );
+      final pages = _effectivePages;
+      var result = saved;
+      if (!_samePages(pages, saved.pages)) {
+        result = await ref
+            .read(cloudSyncProvider.notifier)
+            .setUserPages(saved.id, pages);
+      }
       if (!mounted) return;
       Navigator.of(context)
-          .pop((user: saved, password: _isNew ? _password.text : null));
+          .pop((user: result, password: _isNew ? _password.text : null));
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -635,6 +662,60 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
         _error = describeAccountError(e);
       });
     }
+  }
+
+  /// The page list to save: null when every page the role allows is on.
+  Set<String>? get _effectivePages {
+    final pages = _pages;
+    if (pages == null) return null;
+    final allowed = {for (final p in pagesForRole(_role)) p.$1};
+    final kept = pages.intersection(allowed);
+    return kept.isEmpty || kept.length == allowed.length ? null : kept;
+  }
+
+  static bool _samePages(Set<String>? a, Set<String>? b) =>
+      (a == null && b == null) ||
+      (a != null && b != null && a.length == b.length && a.containsAll(b));
+
+  Widget _pageAccess(ThemeData theme, TextStyle? muted) {
+    final options = pagesForRole(_role);
+    final on = _pages ?? {for (final p in options) p.$1};
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 14),
+        Text('PAGE ACCESS', style: microLabel(theme)),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final (name, label) in options)
+              FilterChip(
+                key: ValueKey('page-$name'),
+                label: Text(label),
+                selected: on.contains(name),
+                onSelected: _busy
+                    ? null
+                    : (v) => setState(() {
+                        final next = {...on};
+                        v ? next.add(name) : next.remove(name);
+                        // At least one page stays open.
+                        if (next.isNotEmpty) _pages = next;
+                      }),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          _effectivePages == null
+              ? 'Every page the ${_role.label} role allows.'
+              : 'Only the pages ticked. The role still decides what can be '
+                    'changed.',
+          style: muted,
+        ),
+      ],
+    );
   }
 
   @override
@@ -721,6 +802,7 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
               ),
               const SizedBox(height: 4),
               Text('${_role.summary}.$roleNote', style: muted),
+              _pageAccess(theme, muted),
               if (widget.departments.isNotEmpty) ...[
                 const SizedBox(height: 14),
                 Text('DAILY REPORTS', style: microLabel(theme)),
@@ -821,6 +903,20 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
     );
   }
 }
+
+/// The pages an account with [role] can be given, as (AppTab name, label),
+/// in menu order.
+List<(String, String)> pagesForRole(UserRole role) => [
+  if (role.canEdit) ('home', 'Overview'),
+  ('dailyReports', 'Daily reports'),
+  if (role.canEdit) ('week', 'Weekly tracker'),
+  if (role.seesRevenue) ('revenue', 'Revenue'),
+  ('applications', 'Applications'),
+  ('history', 'History'),
+  ('staff', 'Staff'),
+  ('reports', 'Reports'),
+  // Settings is always open: everyone has their own part of it.
+];
 
 /// Shows a username and temporary password once, to pass on in person.
 Future<void> _showCredentials(

@@ -237,6 +237,17 @@ class AirtableTags {
   /// The status colour on its own (charts).
   static Color statusColor(String v) => _color(_name(_status, v));
 
+  /// An assignee's tag colour, strong enough to read as a bar in a chart
+  /// (the palest tags step up one shade, as Airtable's own charts do).
+  static Color assigneeBar(String v) => _bar(_name(_assignee, v));
+
+  /// A status's tag colour for a chart bar.
+  static Color statusBar(String v) => _bar(_name(_status, v));
+
+  static Color _bar(String name) => _color(
+    name.endsWith('Light2') ? name.replaceAll('Light2', 'Light1') : name,
+  );
+
   static (Color, Color) _pair(String name) =>
       (_color(name), _darkText(name) ? const Color(0xFF1D1F25) : Colors.white);
 }

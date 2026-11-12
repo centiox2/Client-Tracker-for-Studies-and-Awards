@@ -101,10 +101,11 @@ void main() {
     for (final hidden in [
       'Weekly tracker',
       'Overview',
-      'Settings',
       'New week',
       'Edit in tracker',
-      'Quick search…',
+      // Settings is open to everyone, but only with their own part.
+      'Workspace',
+      'Team',
     ]) {
       expect(find.text(hidden), findsNothing, reason: hidden);
     }
@@ -137,7 +138,13 @@ void main() {
     expect(find.text('Weekly tracker'), findsOneWidget);
     expect(find.text('Overview'), findsWidgets);
     expect(find.text('Revenue'), findsNothing);
-    expect(find.text('Settings'), findsNothing);
+    // Settings holds only their own part (theme, password…), no workspace.
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('settings-cat-you')), findsOneWidget);
+    expect(find.byKey(const ValueKey('settings-cat-workspace')), findsNothing);
+    expect(find.byKey(const ValueKey('settings-cat-team')), findsNothing);
+    expect(find.text('Daily target'), findsNothing);
     await tester.tap(find.text('Reports'));
     await tester.pumpAndSettle();
     expect(find.text('Revenue today'), findsNothing);
@@ -250,6 +257,8 @@ void main() {
   ) async {
     await pumpApp(tester, admin: true);
     await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-cat-team')));
     await tester.pumpAndSettle();
     final set = find.byKey(const ValueKey('profile-set-director'));
     await tester.ensureVisible(set);

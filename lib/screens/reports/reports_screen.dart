@@ -10,7 +10,6 @@ import '../../repositories/application_repository.dart';
 import '../../repositories/report_repository.dart';
 import '../../repositories/revenue_repository.dart';
 import '../../services/export_actions.dart';
-import '../../services/fullscreen.dart';
 import '../../services/print_views.dart';
 import '../../services/report_export.dart';
 import '../../state/app_state.dart';
@@ -24,7 +23,6 @@ part 'quick_view.dart';
 part 'report_charts.dart';
 part 'report_trends.dart';
 part 'staff_profile.dart';
-part 'tv_view.dart';
 part 'daily_summary.dart';
 
 enum ReportPeriod { day, week, month, year }
@@ -233,11 +231,6 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                                             showDailySummary(context),
                                         icon: const Icon(Icons.ios_share),
                                       ),
-                                      IconButton(
-                                        tooltip: 'TV mode',
-                                        onPressed: () => openTvView(context),
-                                        icon: const Icon(Icons.tv),
-                                      ),
                                     ]
                                   : [
                                       OutlinedButton.icon(
@@ -245,12 +238,6 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                                             showDailySummary(context),
                                         icon: const Icon(Icons.ios_share),
                                         label: const Text('Share summary'),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      OutlinedButton.icon(
-                                        onPressed: () => openTvView(context),
-                                        icon: const Icon(Icons.tv),
-                                        label: const Text('TV mode'),
                                       ),
                                     ],
                             ),

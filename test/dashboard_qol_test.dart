@@ -221,7 +221,7 @@ void main() {
     await pumpApp(tester);
     await tester.tap(find.byKey(const ValueKey('sidebar-search')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Search pages, weeks'), findsOneWidget);
+    expect(find.textContaining('staff, weeks (28/09)'), findsOneWidget);
   });
 
   testWidgets('Ctrl+K opens quick search and Enter jumps to a page', (
@@ -235,14 +235,14 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pumpAndSettle();
-    expect(find.textContaining('Search pages, weeks'), findsOneWidget);
+    expect(find.textContaining('staff, weeks (28/09)'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField).last, 'hist');
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Search pages, weeks'), findsNothing);
+    expect(find.textContaining('staff, weeks (28/09)'), findsNothing);
     expect(find.textContaining('Search by month or date'), findsOneWidget);
   });
 }

@@ -47,7 +47,7 @@ void main() {
   ) async {
     await pumpApp(tester);
 
-    expect(find.text('New clients'), findsOneWidget);
+    expect(find.text('New clients'), findsWidgets);
     expect(find.text('Total clients'), findsOneWidget);
     expect(find.text('Clients this month'), findsOneWidget);
     expect(find.text('Active staff'), findsOneWidget);
@@ -67,7 +67,7 @@ void main() {
       'Active staff',
     ];
     final labelTops = metricLabels
-        .map((label) => tester.getTopLeft(find.text(label)).dy)
+        .map((label) => tester.getTopLeft(find.text(label).first).dy)
         .toList();
     expect(
       labelTops.every((top) => (top - labelTops.first).abs() < 1),

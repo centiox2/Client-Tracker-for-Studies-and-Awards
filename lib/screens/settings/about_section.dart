@@ -8,6 +8,7 @@ import '../../services/app_info.dart';
 import '../../state/app_state.dart';
 import '../../widgets/clarity.dart';
 import '../../widgets/panels.dart';
+import '../quick_search/shortcuts_dialog.dart';
 
 String _when(DateTime? t) {
   if (t == null) return '—';
@@ -464,7 +465,10 @@ class _ActivityLogDialogState extends ConsumerState<_ActivityLogDialog> {
 /// Settings › About: the version, what's new, and (admins) recent problems
 /// the app reported.
 class AboutSection extends ConsumerStatefulWidget {
-  const AboutSection({super.key, required this.online});
+  const AboutSection({super.key, required this.online, this.admin = true});
+
+  /// The admin also sees the activity log and the problems reported.
+  final bool admin;
 
   /// Personal accounts with the online database: problems and the activity
   /// log can be shown.
@@ -481,7 +485,7 @@ class _AboutSectionState extends ConsumerState<AboutSection> {
   @override
   void initState() {
     super.initState();
-    if (widget.online) _load();
+    if (widget.online && widget.admin) _load();
   }
 
   Future<void> _load() async {
@@ -519,22 +523,21 @@ class _AboutSectionState extends ConsumerState<AboutSection> {
                   icon: const Icon(Icons.auto_awesome_outlined),
                   label: const Text('What’s new'),
                 ),
-                if (widget.online) ...[
+                OutlinedButton.icon(
+                  onPressed: () => showShortcutsDialog(context),
+                  icon: const Icon(Icons.keyboard_outlined),
+                  label: const Text('Keyboard shortcuts'),
+                ),
+                if (widget.online && widget.admin)
                   OutlinedButton.icon(
                     key: const ValueKey('open-activity-log'),
                     onPressed: () => showActivityLog(context),
                     icon: const Icon(Icons.manage_search),
                     label: const Text('Activity log'),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: () => showSessions(context),
-                    icon: const Icon(Icons.devices_outlined),
-                    label: const Text('Your sessions'),
-                  ),
-                ],
               ],
             ),
-            if (widget.online) ...[
+            if (widget.online && widget.admin) ...[
               const SizedBox(height: 18),
               Row(
                 children: [

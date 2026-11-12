@@ -17,6 +17,7 @@ class AppUser {
     this.locked = false,
     this.departmentId,
     this.reportAccess = ReportAccess.employee,
+    this.pages,
   });
 
   final int id;
@@ -41,6 +42,13 @@ class AppUser {
   /// What they see in daily reports: own, their department, or all.
   final ReportAccess reportAccess;
 
+  /// The pages (AppTab names) this account may open, set by an admin; null
+  /// means every page the role allows.
+  final Set<String>? pages;
+
+  /// Whether the admin's page list (if any) lets this account open [page].
+  bool mayOpen(String page) => pages == null || pages!.contains(page);
+
   factory AppUser.fromJson(Map<String, Object?> json) => AppUser(
     id: (json['id'] as num).toInt(),
     username: json['username'] as String,
@@ -53,6 +61,12 @@ class AppUser {
     locked: json['locked'] as bool? ?? false,
     departmentId: (json['department_id'] as num?)?.toInt(),
     reportAccess: ReportAccess.fromCode(json['report_access'] as String?),
+    pages: switch (json['pages']) {
+      final List<dynamic> list when list.isNotEmpty => {
+        for (final p in list) '$p',
+      },
+      _ => null,
+    },
   );
 
   Map<String, Object?> toJson() => {
@@ -67,6 +81,7 @@ class AppUser {
     'locked': locked,
     'department_id': departmentId,
     'report_access': reportAccess.code,
+    'pages': pages?.toList(),
   };
 
   AppUser copyWith({bool? mustChange}) => AppUser(
@@ -81,6 +96,7 @@ class AppUser {
     locked: locked,
     departmentId: departmentId,
     reportAccess: reportAccess,
+    pages: pages,
   );
 
   /// The rules the online database enforces: 3 to 32 characters, lower case

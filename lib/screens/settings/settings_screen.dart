@@ -13,10 +13,14 @@ import '../../services/export_actions.dart';
 import '../../services/file_delivery.dart';
 import '../../state/app_state.dart';
 import '../../state/cloud_sync.dart';
+import '../../widgets/card_board.dart';
 import '../../widgets/clarity.dart';
 import '../../widgets/panels.dart';
 import '../../widgets/sync_status.dart';
+import '../../widgets/motion.dart';
+import '../auth/login_screen.dart' show showChangeOwnPassword;
 import '../history/change_history_dialog.dart';
+import '../reports/reports_screen.dart' show showStaffProfile;
 import 'about_section.dart';
 import 'airtable_section.dart';
 import 'import_dialog.dart';
@@ -33,6 +37,10 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   int? _exportWeekId;
   bool _busy = false;
+
+  /// Which part of Settings is open (remembered on this device).
+  late String _category =
+      ref.read(uiPrefProvider).get('settings.category') ?? 'you';
 
   final _target = TextEditingController();
   final _currency = TextEditingController();
@@ -112,45 +120,49 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         : Icon(icon, size: 16);
 
     final accounts = ref.watch(accountsEnabledProvider);
-    final sections = <Widget>[
-      _Section(
-        title: 'Appearance',
-        icon: Icons.palette_outlined,
-        description:
-            'Choose a theme, or follow your computer’s setting, and the text '
-            'size on this device. Summary cards can be dragged into any order '
-            '(press and hold on a phone or tablet).',
-        child: Wrap(
-          spacing: 16,
-          runSpacing: 12,
-          children: [
-            SegmentedButton<ThemeMode>(
-              segments: const [
-                ButtonSegment(value: ThemeMode.light, label: Text('Light')),
-                ButtonSegment(value: ThemeMode.system, label: Text('System')),
-                ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
-              ],
-              selected: {themeMode},
-              showSelectedIcon: false,
-              onSelectionChanged: (s) =>
-                  ref.read(themeModeProvider.notifier).set(s.first),
-            ),
-            const TextSizePicker(),
-            OutlinedButton.icon(
-              key: const ValueKey('reset-card-order'),
-              onPressed: () {
-                ref.read(uiPrefProvider).clearPrefix('cards.');
-                ref.read(cardOrderVersionProvider.notifier).bump();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Cards are back in order.')),
-                );
-              },
-              icon: const Icon(Icons.dashboard_customize_outlined, size: 16),
-              label: const Text('Reset card order'),
-            ),
-          ],
-        ),
+    final admin = ref.watch(isAdminProvider);
+    final user = ref.watch(currentUserProvider);
+    final appearance = _Section(
+      title: 'Appearance',
+      icon: Icons.palette_outlined,
+      description:
+          'Theme and text size on this device. Cards on Overview and '
+          'Applications can be dragged anywhere (press and hold on a phone '
+          'or tablet); reset puts them back.',
+      child: Wrap(
+        spacing: 16,
+        runSpacing: 12,
+        children: [
+          SegmentedButton<ThemeMode>(
+            segments: const [
+              ButtonSegment(value: ThemeMode.light, label: Text('Light')),
+              ButtonSegment(value: ThemeMode.system, label: Text('System')),
+              ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
+            ],
+            selected: {themeMode},
+            showSelectedIcon: false,
+            onSelectionChanged: (s) =>
+                ref.read(themeModeProvider.notifier).set(s.first),
+          ),
+          const TextSizePicker(),
+          OutlinedButton.icon(
+            key: const ValueKey('reset-card-order'),
+            onPressed: () {
+              ref.read(uiPrefProvider)
+                ..clearPrefix('cards.')
+                ..clearPrefix(CardBoard.prefPrefix);
+              ref.read(cardOrderVersionProvider.notifier).bump();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Cards are back in order.')),
+              );
+            },
+            icon: const Icon(Icons.dashboard_customize_outlined, size: 16),
+            label: const Text('Reset card order'),
+          ),
+        ],
       ),
+    );
+    final workspace = <Widget>[
       _Section(
         title: 'Daily target',
         icon: Icons.flag_outlined,
@@ -233,6 +245,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ],
         ),
       ),
+    ];
+    final data = <Widget>[
       _Section(
         title: 'Backup & restore',
         icon: Icons.backup_outlined,
@@ -350,11 +364,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ),
       ),
+    ];
+    final team = <Widget>[
       // Personal accounts replace the shared profiles and their passwords.
-      if (accounts) const AirtableSection(),
       if (accounts) ...[
         const UsersSection(),
         const DepartmentsSection(),
+        const AirtableSection(),
       ] else ...[
         const _ProfilesSection(),
         _Section(
@@ -373,13 +389,80 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ),
       ],
-      AboutSection(online: accounts),
     ];
+    final categories = <_Category>[
+      _Category('you', 'You', Icons.person_outline, [
+        if (user != null) const _YouSection(),
+        appearance,
+      ]),
+      if (admin) ...[
+        _Category('workspace', 'Workspace', Icons.tune, workspace),
+        _Category('team', 'Team', Icons.groups_2_outlined, team),
+        _Category('data', 'Data', Icons.storage_outlined, data),
+      ],
+      _Category('about', 'About', Icons.info_outline, [
+        AboutSection(online: accounts, admin: admin),
+      ]),
+    ];
+    final current = categories.firstWhere(
+      (cat) => cat.id == _category,
+      orElse: () => categories.first,
+    );
+
+    final body = FadeThroughSwitcher(
+      child: Column(
+        key: ValueKey('settings-${current.id}'),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final section in current.sections) ...[
+            section,
+            const SizedBox(height: 12),
+          ],
+        ],
+      ),
+    );
 
     return LayoutBuilder(
       builder: (context, viewport) {
         final pad = clarityHPad(context);
-        final twoColumns = viewport.maxWidth >= 900;
+        final side = viewport.maxWidth >= 900;
+        void pick(_Category cat) => setState(() {
+          _category = cat.id;
+          ref.read(uiPrefProvider).set('settings.category', cat.id);
+          if (_scroll.hasClients) _scroll.jumpTo(0);
+        });
+
+        final nav = side
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final cat in categories)
+                    _CategoryTile(
+                      cat: cat,
+                      selected: cat.id == current.id,
+                      onTap: () => pick(cat),
+                    ),
+                ],
+              )
+            : SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (final cat in categories) ...[
+                      ChoiceChip(
+                        key: ValueKey('settings-cat-${cat.id}'),
+                        avatar: Icon(cat.icon, size: 16),
+                        label: Text(cat.label),
+                        selected: cat.id == current.id,
+                        showCheckmark: false,
+                        onSelected: (_) => pick(cat),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                  ],
+                ),
+              );
+
         return Scrollbar(
           controller: _scroll,
           thumbVisibility: true,
@@ -389,26 +472,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             children: [
               Center(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: Dt.contentMaxWidth,
-                  ),
-                  child: twoColumns
+                  constraints: const BoxConstraints(maxWidth: 1080),
+                  child: side
                       ? Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Expanded(child: _column(sections, even: true)),
-                            const SizedBox(width: 12),
-                            Expanded(child: _column(sections, even: false)),
+                            SizedBox(width: 210, child: nav),
+                            const SizedBox(width: 20),
+                            Expanded(child: body),
                           ],
                         )
                       : Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            for (final section in sections) ...[
-                              section,
-                              const SizedBox(height: 12),
-                            ],
-                          ],
+                          children: [nav, const SizedBox(height: 14), body],
                         ),
                 ),
               ),
@@ -418,17 +494,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       },
     );
   }
-
-  /// Every other section, for the two-column layout.
-  Widget _column(List<Widget> sections, {required bool even}) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      for (var i = even ? 0 : 1; i < sections.length; i += 2) ...[
-        sections[i],
-        const SizedBox(height: 12),
-      ],
-    ],
-  );
 
   /// "October 5 – 9, 2026 (05/10 – 09/10)" — the mockup's dropdown label.
   String _weekLabel(Week w) =>
@@ -862,6 +927,156 @@ class _AutoBackupSection extends ConsumerWidget {
                 ],
               ],
             ),
+    );
+  }
+}
+
+/// One part of Settings: You, Workspace, Team, Data or About.
+class _Category {
+  const _Category(this.id, this.label, this.icon, this.sections);
+  final String id;
+  final String label;
+  final IconData icon;
+  final List<Widget> sections;
+}
+
+class _CategoryTile extends StatelessWidget {
+  const _CategoryTile({
+    required this.cat,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final _Category cat;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.clarity;
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Material(
+        color: selected ? c.accentSoft : Colors.transparent,
+        borderRadius: BorderRadius.circular(Dt.rSm),
+        child: InkWell(
+          key: ValueKey('settings-cat-${cat.id}'),
+          borderRadius: BorderRadius.circular(Dt.rSm),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                Icon(
+                  cat.icon,
+                  size: 18,
+                  color: selected ? c.accent : c.textMuted,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  cat.label,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                    color: selected ? c.accent : null,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Your account: who you're signed in as, your staff record, password and
+/// where you're signed in.
+class _YouSection extends ConsumerWidget {
+  const _YouSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final user = ref.watch(currentUserProvider);
+    final me = ref.watch(linkedStaffProvider);
+    if (user == null) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    final c = context.clarity;
+    return AppPanel(
+      key: const ValueKey('you-section'),
+      title: 'Your account',
+      icon: Icons.person_outline,
+      subtitle: 'Signed in as ${user.username} · ${user.role.label}',
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 20,
+                  backgroundColor: c.accentSoft,
+                  child: Text(
+                    initialsOf(user.fullName),
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: c.accent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(user.fullName, style: theme.textTheme.titleSmall),
+                      Text(
+                        me == null
+                            ? 'Not linked to a staff member'
+                            : 'Staff record: ${me.name}'
+                                  '${me.active ? '' : ' (inactive)'}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: c.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (me != null)
+                  FilledButton.tonalIcon(
+                    key: const ValueKey('you-open-record'),
+                    onPressed: () => showStaffProfile(context, me.id),
+                    icon: const Icon(Icons.badge_outlined, size: 16),
+                    label: const Text('Your record'),
+                  ),
+                OutlinedButton.icon(
+                  onPressed: () => showChangeOwnPassword(context),
+                  icon: const Icon(Icons.key_outlined, size: 16),
+                  label: const Text('Change password'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => showSessions(context),
+                  icon: const Icon(Icons.devices_outlined, size: 16),
+                  label: const Text('Your sessions'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => ref.read(sessionProvider.notifier).signOut(),
+                  icon: const Icon(Icons.logout, size: 16),
+                  label: const Text('Sign out'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

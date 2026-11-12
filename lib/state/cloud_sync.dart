@@ -683,6 +683,34 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     {'p_user_id': userId, 'p_with_reports': withReports},
   );
 
+  /// Admin: limits which pages account [userId] opens ([pages] are AppTab
+  /// names; null or empty means every page its role allows).
+  Future<AppUser> setUserPages(int userId, Set<String>? pages) async {
+    final saved = AppUser.fromJson(
+      Map<String, Object?>.from(
+        await callAsUser('admin_set_user_pages', {
+          'p_user_id': userId,
+          'p_pages': pages?.toList(),
+        }) as Map,
+      ),
+    );
+    ref.read(currentUserProvider.notifier).update(saved);
+    return saved;
+  }
+
+  /// Admin: everything that lives only online (daily reports, their
+  /// history and comments, departments, accounts without passwords, the
+  /// audit log), for the full backup.
+  Future<Map<String, Object?>> backupOnline() async =>
+      Map<String, Object?>.from(await callAsUser('admin_backup') as Map);
+
+  /// Admin: puts back departments and daily reports from a full backup
+  /// (only the ones that are missing). Returns how many came back.
+  Future<Map<String, Object?>> restoreOnline(Map<String, Object?> data) async =>
+      Map<String, Object?>.from(
+        await callAsUser('admin_restore_online', {'p_data': data}) as Map,
+      );
+
   /// Admin: a temporary password for someone who forgot theirs.
   Future<void> resetUserPassword(int userId, String password) =>
       _needApi().adminResetPassword(_needToken(), userId, password);

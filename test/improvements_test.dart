@@ -306,6 +306,8 @@ void main() {
     await pumpApp(tester);
     await tester.tap(find.text('Settings').first);
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-cat-workspace')));
+    await tester.pumpAndSettle();
     await tester.enterText(
       find.widgetWithText(TextField, 'Clients per day'),
       '35',

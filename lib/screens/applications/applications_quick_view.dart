@@ -6,6 +6,7 @@ import '../../design/airtable_tags.dart';
 import '../../design/app_theme.dart';
 import '../../repositories/application_repository.dart';
 import '../../state/app_state.dart';
+import '../../widgets/card_board.dart';
 import '../../widgets/clarity.dart';
 import '../../widgets/panels.dart';
 import 'applications_screen.dart'
@@ -569,7 +570,9 @@ class ApplicationsQuickView extends ConsumerWidget {
                                     byAssignee[p]!.length /
                                     maxLoad,
                                 decoration: BoxDecoration(
-                                  color: Dt.brand(theme.brightness),
+                                  color: p == 'No assignee'
+                                      ? context.clarity.textMuted
+                                      : AirtableTags.assigneeBar(p),
                                   borderRadius: BorderRadius.circular(3),
                                 ),
                               ),
@@ -685,86 +688,44 @@ class ApplicationsQuickView extends ConsumerWidget {
       ),
     );
 
-    // ---- COEs by month, last six ----
+    // ---- COEs and offer letters by month, last six, by who handled them ----
     final months = [
       for (var i = 5; i >= 0; i--) DateTime(today.year, today.month - i),
     ];
-    final coeCounts = [
-      for (final m in months)
-        apps
-            .where(
-              (a) =>
-                  a.coeDate != null &&
-                  a.coeDate!.year == m.year &&
-                  a.coeDate!.month == m.month,
-            )
-            .length,
-    ];
-    final offerCounts = [
-      for (final m in months)
-        apps
-            .where(
-              (a) =>
-                  a.offerDate != null &&
-                  a.offerDate!.year == m.year &&
-                  a.offerDate!.month == m.month,
-            )
-            .length,
-    ];
-    final maxCoe = coeCounts.fold<int>(1, (m, v) => v > m ? v : m);
-    final coePanel = AppPanel(
+    final coePanel = MonthlyByAssignee(
+      key: const ValueKey('coe-by-month'),
       title: 'COEs by month',
-      icon: Icons.bar_chart,
-      trailing: '${coeCounts.fold<int>(0, (s, v) => s + v)} in 6 months',
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
-        child: SizedBox(
-          height: 150,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              for (var i = 0; i < months.length; i++)
-                Expanded(
-                  child: Tooltip(
-                    message:
-                        '${DateFormat('MMMM y').format(months[i])}: '
-                        '${coeCounts[i]} COEs, ${offerCounts[i]} offer letters',
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        Text(
-                          '${coeCounts[i]}',
-                          style: Dt.tab(theme.textTheme.labelMedium!),
-                        ),
-                        const SizedBox(height: 3),
-                        Container(
-                          height: 100 * coeCounts[i] / maxCoe + 2,
-                          margin: const EdgeInsets.symmetric(horizontal: 8),
-                          decoration: BoxDecoration(
-                            color: context.clarity.accent,
-                            borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(3),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          DateFormat('MMM').format(months[i]),
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: i == months.length - 1 ? null : muted,
-                            fontWeight: i == months.length - 1
-                                ? FontWeight.w700
-                                : null,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
+      what: 'COEs',
+      months: months,
+      apps: apps,
+      dateOf: (a) => a.coeDate,
+      onOpen: (a) => showApplicationDetails(context, ref, a),
+    );
+    final appliedToOffer = [
+      for (final a in apps)
+        if (a.appDate != null &&
+            a.offerDate != null &&
+            !a.offerDate!.isBefore(a.appDate!) &&
+            !_day(a.offerDate!).isBefore(months.first))
+          _day(a.offerDate!).difference(_day(a.appDate!)).inDays,
+    ];
+    final avgWait = appliedToOffer.isEmpty
+        ? null
+        : appliedToOffer.reduce((x, y) => x + y) / appliedToOffer.length;
+    final offerChart = MonthlyByAssignee(
+      key: const ValueKey('offers-by-month'),
+      title: 'Offer letters by month',
+      what: 'offer letters',
+      months: months,
+      apps: apps,
+      dateOf: (a) => a.offerDate,
+      onOpen: (a) => showApplicationDetails(context, ref, a),
+      footer: [
+        if (avgWait != null)
+          'Application to offer: ${avgWait.round()} days on average',
+        '${offerWaits.length} waiting over '
+            '${ApplicationRepository.offerReminderDays} days',
+      ].join(' · '),
     );
 
     // ---- Where things stand (tap a stage to list it) ----
@@ -805,25 +766,6 @@ class ApplicationsQuickView extends ConsumerWidget {
       ),
     );
 
-    Widget gap() => const SizedBox(height: 12);
-    final left = [
-      offerPanel,
-      gap(),
-      activityPanel,
-      gap(),
-      attentionPanel,
-      gap(),
-      standPanel,
-    ];
-    final right = [
-      weekPanel,
-      gap(),
-      monthPanel,
-      gap(),
-      coePanel,
-      gap(),
-      whoPanel,
-    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -834,32 +776,21 @@ class ApplicationsQuickView extends ConsumerWidget {
           minWidth: phone ? 150 : 190,
           children: tiles,
         ),
-        gap(),
-        if (phone) ...[
-          ...left,
-          gap(),
-          ...right,
-        ] else
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                flex: 5,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: left,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                flex: 4,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: right,
-                ),
-              ),
-            ],
-          ),
+        const SizedBox(height: Dt.gap),
+        CardBoard(
+          boardKey: 'applications.quick',
+          cards: [
+            BoardCard('offers', offerPanel),
+            BoardCard('today', activityPanel),
+            BoardCard('attention', attentionPanel),
+            BoardCard('stages', standPanel),
+            BoardCard('week', weekPanel, column: 1),
+            BoardCard('month', monthPanel, column: 1),
+            BoardCard('who', whoPanel, column: 1),
+            BoardCard('coe', coePanel, column: 2),
+            BoardCard('offer-chart', offerChart, column: 2),
+          ],
+        ),
       ],
     );
   }
@@ -1110,3 +1041,241 @@ Future<void> showHandling(
     );
   },
 );
+
+/// A month-by-month bar chart of one milestone (COEs, offer letters), each
+/// bar split by who handled them in their tag colours. A month opens its
+/// list; a student there opens their card.
+class MonthlyByAssignee extends StatelessWidget {
+  const MonthlyByAssignee({
+    super.key,
+    required this.title,
+    required this.what,
+    required this.months,
+    required this.apps,
+    required this.dateOf,
+    required this.onOpen,
+    this.footer,
+  });
+
+  final String title;
+
+  /// What is counted, in a sentence ("COEs").
+  final String what;
+  final List<DateTime> months;
+  final List<Application> apps;
+  final DateTime? Function(Application) dateOf;
+  final void Function(Application) onOpen;
+  final String? footer;
+
+  static const _none = 'No assignee';
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = context.clarity;
+    final perMonth = [
+      for (final m in months)
+        [
+          for (final a in apps)
+            if (dateOf(a) case final d?
+                when d.year == m.year && d.month == m.month)
+              a,
+        ],
+    ];
+    String who(Application a) => a.assignee.isEmpty ? _none : a.assignee;
+    Color colorOf(String p) =>
+        p == _none ? c.textMuted : AirtableTags.assigneeBar(p);
+    final people = <String, int>{};
+    for (final list in perMonth) {
+      for (final a in list) {
+        people[who(a)] = (people[who(a)] ?? 0) + 1;
+      }
+    }
+    final order = people.keys.toList()
+      ..sort((x, y) => people[y]!.compareTo(people[x]!));
+    final total = perMonth.fold<int>(0, (s, l) => s + l.length);
+    final top = perMonth.fold<int>(1, (m, l) => l.length > m ? l.length : m);
+
+    void showMonth(int i) => showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          '${DateFormat('MMMM y').format(months[i])} · '
+          '${perMonth[i].length} $what',
+        ),
+        scrollable: true,
+        content: SizedBox(
+          width: 460,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (perMonth[i].isEmpty) Text('No $what this month.'),
+              for (final a in [
+                ...perMonth[i],
+              ]..sort((x, y) => dateOf(x)!.compareTo(dateOf(y)!)))
+                ListTile(
+                  dense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                  title: Text(
+                    a.student,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(
+                    [
+                      DateFormat('d MMM').format(dateOf(a)!),
+                      if (a.rto.isNotEmpty) a.rto,
+                    ].join(' · '),
+                  ),
+                  trailing: a.assignee.isEmpty
+                      ? null
+                      : TagChip(
+                          a.assignee,
+                          AirtableTags.assignee(a.assignee),
+                          dense: true,
+                        ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    onOpen(a);
+                  },
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+
+    return AppPanel(
+      title: title,
+      trailing: '$total in 6 months',
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              height: 150,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  for (var i = 0; i < months.length; i++)
+                    Expanded(
+                      child: Tooltip(
+                        message: [
+                          '${DateFormat('MMMM y').format(months[i])}: '
+                              '${perMonth[i].length} $what',
+                          for (final p in order)
+                            if (perMonth[i].where((a) => who(a) == p).length
+                                case final n when n > 0)
+                              '$p: $n',
+                        ].join('\n'),
+                        child: InkWell(
+                          key: ValueKey('$what-month-$i'),
+                          onTap: () => showMonth(i),
+                          borderRadius: BorderRadius.circular(Dt.rSm),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              Text(
+                                '${perMonth[i].length}',
+                                style: Dt.tab(theme.textTheme.labelMedium!),
+                              ),
+                              const SizedBox(height: 3),
+                              Container(
+                                height: 100 * perMonth[i].length / top + 2,
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                decoration: BoxDecoration(
+                                  color: c.track,
+                                  borderRadius: const BorderRadius.vertical(
+                                    top: Radius.circular(3),
+                                  ),
+                                ),
+                                child: Column(
+                                  children: [
+                                    for (final p in order.reversed)
+                                      if (perMonth[i]
+                                              .where((a) => who(a) == p)
+                                              .length
+                                          case final n when n > 0)
+                                        Expanded(
+                                          flex: n,
+                                          child: ColoredBox(
+                                            color: colorOf(p),
+                                            child: const SizedBox.expand(),
+                                          ),
+                                        ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                DateFormat('MMM').format(months[i]),
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: i == months.length - 1
+                                      ? null
+                                      : c.textMuted,
+                                  fontWeight: i == months.length - 1
+                                      ? FontWeight.w700
+                                      : null,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (order.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 12,
+                runSpacing: 4,
+                children: [
+                  for (final p in order)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: colorOf(p),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          '$p ${people[p]}',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: c.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ],
+            if (footer != null && footer!.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                footer!,
+                style: theme.textTheme.bodySmall?.copyWith(color: c.textMuted),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -88,6 +88,14 @@ class CurrentUserNotifier extends Notifier<AppUser?> {
   }
 }
 
+/// The staff member the signed-in account is linked to (Settings › Users),
+/// for "your numbers" across the app; null when not linked.
+final linkedStaffProvider = Provider<Staff?>((ref) {
+  final id = ref.watch(currentUserProvider)?.staffId;
+  if (id == null) return null;
+  return ref.watch(staffListProvider).where((s) => s.id == id).firstOrNull;
+});
+
 /// A message for the sign-in screen: why someone was signed out.
 final signInNoticeProvider = NotifierProvider<SignInNoticeNotifier, String?>(
   SignInNoticeNotifier.new,

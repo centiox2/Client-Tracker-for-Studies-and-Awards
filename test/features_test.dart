@@ -23,7 +23,7 @@ import 'package:client_tracker/widgets/numeric_field.dart';
 import 'test_helpers.dart';
 
 /// Future-day guard, daily summary, comparisons, staff profiles, Trends,
-/// year reports, change history, automatic backups, Excel import, TV mode
+/// year reports, change history, automatic backups, Excel import
 /// and the brand colours.
 void main() {
   late AppDatabase db;
@@ -347,7 +347,7 @@ void main() {
     expect(find.text('7'), findsWidgets);
   });
 
-  testWidgets('summary copies and TV mode opens and closes', (tester) async {
+  testWidgets('summary copies', (tester) async {
     WeekRepository(db).createWeekFor(DateTime.now());
     String? copied;
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
@@ -373,14 +373,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Summary copied — paste it anywhere'), findsOneWidget);
     expect(copied, contains('client update'));
-
-    await tester.tap(find.text('TV mode'));
-    await tester.pumpAndSettle();
-    expect(find.text('Who’s seeing clients'), findsWidgets);
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    expect(find.text('Who’s seeing clients'), findsNothing);
-    expect(find.text('Quick view'), findsOneWidget);
+    // TV mode was removed.
+    expect(find.text('TV mode'), findsNothing);
   });
 
   // --------------------------------------------------------- excel import ---

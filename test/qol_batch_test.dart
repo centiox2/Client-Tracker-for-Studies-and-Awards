@@ -208,7 +208,7 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.slash);
     await tester.pumpAndSettle();
-    expect(find.textContaining('Search pages, weeks'), findsOneWidget);
+    expect(find.textContaining('staff, weeks (28/09)'), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
 
@@ -235,7 +235,7 @@ void main() {
     // Typing "n" in the box is just typing, not another shortcut.
     await tester.sendKeyEvent(LogicalKeyboardKey.slash);
     await tester.pumpAndSettle();
-    expect(find.textContaining('Search pages, weeks'), findsNothing);
+    expect(find.textContaining('staff, weeks (28/09)'), findsNothing);
   });
 
   testWidgets('empty Revenue day guides to yesterday; month arrows sit by the '

@@ -1521,6 +1521,8 @@ void main() {
     await signIn(tester, 'admin', 'admin-pass-1');
     container.read(navTabProvider.notifier).set(AppTab.settings);
     await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('settings-cat-team')));
+    await settle(tester);
     expect(find.text('Users'), findsWidgets);
     expect(find.text('Profiles'), findsNothing);
     expect(find.byKey(const ValueKey('user-admin')), findsOneWidget);
@@ -1761,6 +1763,8 @@ void main() {
     );
     await signIn(tester, 'admin', 'admin-pass-1');
     container.read(navTabProvider.notifier).set(AppTab.settings);
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('settings-cat-team')));
     await settle(tester);
     expect(find.byKey(const ValueKey('department-1')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('add-department')));
@@ -2120,6 +2124,8 @@ void main() {
     );
     await signIn(tester, 'admin', 'admin-pass-1');
     container.read(navTabProvider.notifier).set(AppTab.settings);
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('settings-cat-team')));
     await settle(tester);
 
     // No reports: deleted after one confirmation.

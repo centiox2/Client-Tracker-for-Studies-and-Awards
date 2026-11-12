@@ -1,4 +1,5 @@
 import '../database/database.dart';
+import '../services/search_text.dart';
 
 /// One transaction (e.g. read off a WhatsApp payment photo).
 class RevenueEntry {
@@ -362,41 +363,49 @@ class RevenueRepository {
   /// Transactions on any date whose note, purpose or amount matches
   /// [query] (all words must match), newest first. A number also matches
   /// the amount ("45740" or "45,740").
+  /// Payments whose note or purpose holds every word of [query] (in any
+  /// order; case, accents and punctuation ignored: "Mary," finds "MARY
+  /// WANJIKU"), or whose amount is a number typed. An M-Pesa "O" typed for
+  /// a zero still matches a code. Newest first.
   List<RevenueEntry> search(String query, {int limit = 200}) {
-    final words = query
-        .trim()
-        .toLowerCase()
-        .split(RegExp(r'\s+'))
-        .where((w) => w.isNotEmpty)
-        .toList();
+    final raw = query.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
+    final words = <(String, int?)>[
+      for (final w in raw)
+        for (final part
+            in RegExp(r'^[\d,.]+$').hasMatch(w) ? [w] : searchWords(w))
+          (
+            RegExp(r'^[\d,.]+$').hasMatch(part) ? part : searchKey(part),
+            RegExp(r'^[\d,.]+$').hasMatch(part) ? parseAmount(part) : null,
+          ),
+    ];
     if (words.isEmpty) return const [];
-    final where = <String>[];
-    final args = <Object?>[];
-    for (final w in words) {
-      final cents = parseAmount(w);
-      final digitsOnly = RegExp(r'^[\d,.]+$').hasMatch(w);
-      if (digitsOnly && cents != null) {
-        where.add(
-          '(lower(note) LIKE ? OR lower(purpose) LIKE ? '
-          'OR abs(amount_cents) = ?)',
-        );
-        args.addAll(['%$w%', '%$w%', cents]);
-      } else {
-        where.add(
-          "(replace(lower(note), 'o', '0') LIKE ? OR lower(note) LIKE ? "
-          'OR lower(purpose) LIKE ?)',
-        );
-        args.addAll(['%${w.replaceAll('o', '0')}%', '%$w%', '%$w%']);
+    final out = <RevenueEntry>[];
+    for (final r in _db.raw.select(
+      'SELECT * FROM revenue_entries ORDER BY date DESC, created_at DESC;',
+    )) {
+      final e = RevenueEntry.fromRow(r);
+      final key = searchKey('${e.note} ${e.purpose}');
+      final joined = key.replaceAll(' ', '');
+      final zeroed = joined.replaceAll('o', '0');
+      var all = true;
+      for (final (w, cents) in words) {
+        final plain = w.replaceAll(RegExp('[,.]'), '');
+        final hit =
+            (cents != null && e.amountCents.abs() == cents) ||
+            key.contains(w) ||
+            joined.contains(plain) ||
+            zeroed.contains(plain.replaceAll('o', '0'));
+        if (!hit) {
+          all = false;
+          break;
+        }
+      }
+      if (all) {
+        out.add(e);
+        if (out.length >= limit) break;
       }
     }
-    return [
-      for (final r in _db.raw.select(
-        'SELECT * FROM revenue_entries WHERE ${where.join(' AND ')} '
-        'ORDER BY date DESC, created_at DESC LIMIT ?;',
-        [...args, limit],
-      ))
-        RevenueEntry.fromRow(r),
-    ];
+    return out;
   }
 
   static void _check(int cents) {

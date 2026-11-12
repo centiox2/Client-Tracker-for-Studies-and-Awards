@@ -8,7 +8,15 @@ import '../../widgets/week_label.dart';
 import '../history/history_screen.dart' show weekMatchesQuery;
 import '../weekly_tracker/new_week_dialog.dart';
 
-/// Opens the Ctrl+K quick search: jump to a page, a week or a staff member.
+import 'package:intl/intl.dart';
+
+import '../../repositories/revenue_repository.dart' show formatMoney;
+import '../../services/search_text.dart';
+import '../applications/applications_screen.dart' show showApplicationDetails;
+import '../reports/reports_screen.dart' show showStaffProfile;
+
+/// Opens the Ctrl+K quick search: find a client (and open their card), a
+/// staff member's record, a week, a payment or a page.
 Future<void> showQuickSearch(BuildContext context) => showDialog<void>(
   context: context,
   barrierColor: Colors.black54,
@@ -35,6 +43,7 @@ class _Result {
 
 const _pages = <(AppTab, String, IconData)>[
   (AppTab.home, 'Overview', Icons.space_dashboard_outlined),
+  (AppTab.dailyReports, 'Daily reports', Icons.description_outlined),
   (AppTab.week, 'Weekly tracker', Icons.calendar_view_week_outlined),
   (AppTab.revenue, 'Revenue', Icons.payments_outlined),
   (AppTab.applications, 'Applications', Icons.school_outlined),
@@ -65,13 +74,79 @@ class _QuickSearchDialogState extends ConsumerState<_QuickSearchDialog> {
 
   List<_Result> _results(String rawQuery) {
     final query = rawQuery.trim().toLowerCase();
+    final search = TextSearch(rawQuery);
     final results = <_Result>[];
 
     final role = ref.read(sessionProvider);
+    final user = ref.read(currentUserProvider);
+    bool may(AppTab tab) =>
+        (tab == AppTab.settings || (user?.mayOpen(tab.name) ?? true)) &&
+        (tab != AppTab.revenue || (role?.seesRevenue ?? false)) &&
+        (tab != AppTab.dailyReports || ref.read(accountsEnabledProvider)) &&
+        ((role?.canEdit ?? false) ||
+            !const {AppTab.home, AppTab.week}.contains(tab));
+
+    // Clients first: the most common thing to look for.
+    if (!search.isEmpty && may(AppTab.applications)) {
+      final apps =
+          ref
+              .read(applicationRepositoryProvider)
+              .all()
+              .where(
+                (a) => search.matchesAny([
+                  a.student,
+                  a.rto,
+                  a.country,
+                  a.assignee,
+                  a.status,
+                ]),
+              )
+              .toList()
+            // Names that start with the search first, then the rest.
+            ..sort((x, y) {
+              final w = search.words.first;
+              final xs = searchKey(x.student).startsWith(w) ? 0 : 1;
+              final ys = searchKey(y.student).startsWith(w) ? 0 : 1;
+              return xs != ys ? xs - ys : x.student.compareTo(y.student);
+            });
+      for (final a in apps.take(8)) {
+        results.add(
+          _Result(
+            group: 'Clients',
+            icon: Icons.school_outlined,
+            title: a.student,
+            subtitle: [
+              if (a.status.isNotEmpty) a.status,
+              if (a.rto.isNotEmpty) a.rto,
+              if (a.assignee.isNotEmpty) a.assignee,
+            ].join(' · '),
+            run: (context, ref) => showApplicationDetails(context, ref, a),
+          ),
+        );
+      }
+    }
+
+    if (!search.isEmpty) {
+      final staff = ref
+          .read(staffListProvider)
+          .where((s) => search.matches(s.name))
+          .take(6);
+      for (final s in staff) {
+        results.add(
+          _Result(
+            group: 'Staff',
+            icon: Icons.person_outline,
+            title: s.name,
+            subtitle: s.active ? 'Their record' : 'Inactive · their record',
+            run: (context, _) => showStaffProfile(context, s.id),
+          ),
+        );
+      }
+    }
+
     for (final (tab, label, icon) in _pages) {
-      if (tab == AppTab.revenue && !(role?.seesRevenue ?? false)) continue;
-      if (tab == AppTab.settings && !(role?.isAdmin ?? false)) continue;
-      if (query.isEmpty || label.toLowerCase().contains(query)) {
+      if (!may(tab)) continue;
+      if (query.isEmpty || search.matches(label)) {
         results.add(
           _Result(
             group: 'Pages',
@@ -83,7 +158,8 @@ class _QuickSearchDialogState extends ConsumerState<_QuickSearchDialog> {
       }
     }
 
-    if (query.isEmpty || 'new week'.contains(query)) {
+    if ((role?.canEdit ?? false) &&
+        (query.isEmpty || 'new week'.contains(query))) {
       results.add(
         _Result(
           group: 'Actions',
@@ -98,40 +174,49 @@ class _QuickSearchDialogState extends ConsumerState<_QuickSearchDialog> {
       );
     }
 
-    final weeks = ref
-        .read(historyProvider)
-        .where((w) => weekMatchesQuery(w, query))
-        .take(query.isEmpty ? 4 : 8);
-    for (final w in weeks) {
-      results.add(
-        _Result(
-          group: query.isEmpty ? 'Recent weeks' : 'Weeks',
-          icon: Icons.calendar_month_outlined,
-          title: weekRangeLabel(w.week.startDate, w.week.endDate),
-          subtitle: '${w.totals.total} clients · open in tracker',
-          run: (_, ref) => ref
-              .read(appActionsProvider)
-              .selectTab(AppTab.week, weekId: w.week.id),
-        ),
-      );
-    }
-
-    if (query.isNotEmpty) {
-      final staff = ref
-          .read(staffListProvider)
-          .where((s) => s.name.toLowerCase().contains(query))
-          .take(8);
-      for (final s in staff) {
+    final openWeekIn = may(AppTab.week)
+        ? AppTab.week
+        : may(AppTab.history)
+        ? AppTab.history
+        : null;
+    if (openWeekIn != null) {
+      final weeks = ref
+          .read(historyProvider)
+          .where((w) => weekMatchesQuery(w, query))
+          .take(query.isEmpty ? 4 : 6);
+      for (final w in weeks) {
         results.add(
           _Result(
-            group: 'Staff',
-            icon: Icons.person_outline,
-            title: s.name,
-            subtitle: s.active
-                ? 'Active · open Staff'
-                : 'Inactive · open Staff',
-            run: (_, ref) =>
-                ref.read(appActionsProvider).selectTab(AppTab.staff),
+            group: query.isEmpty ? 'Recent weeks' : 'Weeks',
+            icon: Icons.calendar_month_outlined,
+            title: weekRangeLabel(w.week.startDate, w.week.endDate),
+            subtitle:
+                '${w.totals.total} clients · open in '
+                '${openWeekIn == AppTab.week ? 'tracker' : 'History'}',
+            run: (_, ref) => ref
+                .read(appActionsProvider)
+                .selectTab(openWeekIn, weekId: w.week.id),
+          ),
+        );
+      }
+    }
+
+    if (!search.isEmpty && may(AppTab.revenue) && query.length >= 2) {
+      final currency = ref.read(currencyProvider);
+      for (final e
+          in ref.read(revenueRepositoryProvider).search(rawQuery, limit: 5)) {
+        results.add(
+          _Result(
+            group: 'Payments',
+            icon: Icons.payments_outlined,
+            title:
+                '${formatMoney(e.amountCents, currency)} · '
+                '${DateFormat('d MMM y').format(e.date)}',
+            subtitle: e.note.isEmpty ? e.purpose : e.note,
+            run: (_, ref) {
+              ref.read(revenueDateProvider.notifier).set(e.date);
+              ref.read(appActionsProvider).selectTab(AppTab.revenue);
+            },
           ),
         );
       }
@@ -227,7 +312,7 @@ class _QuickSearchDialogState extends ConsumerState<_QuickSearchDialog> {
                   autofocus: true,
                   onChanged: (_) => setState(() => _highlight = 0),
                   decoration: const InputDecoration(
-                    hintText: 'Search pages, weeks (e.g. 28/09) or staff…',
+                    hintText: 'Search clients, staff, weeks (28/09), payments…',
                     prefixIcon: Icon(Icons.search, size: 18),
                     isDense: true,
                   ),

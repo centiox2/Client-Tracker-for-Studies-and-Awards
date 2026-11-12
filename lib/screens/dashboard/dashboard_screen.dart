@@ -10,6 +10,13 @@ import '../../widgets/app_page_header.dart';
 import '../../widgets/clarity.dart';
 import '../../widgets/panels.dart';
 import '../../widgets/week_label.dart';
+import '../../widgets/card_board.dart';
+import '../../design/airtable_tags.dart';
+import '../../repositories/revenue_repository.dart' show formatMoney;
+import '../../services/daily_reports_service.dart';
+import '../../state/cloud_sync.dart';
+import '../applications/applications_screen.dart' show showApplicationDetails;
+import '../reports/reports_screen.dart' show showStaffProfile;
 
 /// Overview: this week's numbers at a glance — headline figures, the week
 /// day by day (chart and table), who's logged the most, recent weeks.
@@ -104,11 +111,33 @@ class DashboardScreen extends ConsumerWidget {
     ];
 
     final width = MediaQuery.sizeOf(context).width;
+    final user = ref.watch(currentUserProvider);
+    bool may(AppTab t) => user?.mayOpen(t.name) ?? true;
+    final linked = ref.watch(linkedStaffProvider);
+    final cards = <BoardCard>[
+      BoardCard('week', _ThisWeek(data: data, isCurrent: isCurrent)),
+      if (linked != null)
+        BoardCard('you', _YouPanel(data: data, staffId: linked.id), column: 1),
+      BoardCard('mix', _MixPanel(data: data, unit: unit), column: 1),
+      BoardCard('staff', _StaffPanel(data: data, staffCount: staff), column: 1),
+      if (ref.watch(seesRevenueProvider) && may(AppTab.revenue))
+        const BoardCard('revenue', _RevenuePanel(), column: 2),
+      if (may(AppTab.applications))
+        const BoardCard('applications', _ApplicationsPanel(), column: 2),
+      if (ref.watch(accountsEnabledProvider) && may(AppTab.dailyReports))
+        const BoardCard('daily', _DailyReportsPanel(), column: 2),
+      const BoardCard('month', _MonthPanel()),
+      BoardCard(
+        'recent',
+        _RecentWeeks(history: history, currentId: data?.week.id),
+        column: 1,
+      ),
+    ];
     return SingleChildScrollView(
       padding: clarityPagePadding(width),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1480),
+          constraints: const BoxConstraints(maxWidth: 1680),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -123,14 +152,8 @@ class DashboardScreen extends ConsumerWidget {
                 minWidth: width < 640 ? 150 : 190,
                 children: kpis,
               ),
-              const SizedBox(height: 24),
-              MainAndSide(
-                main: _ThisWeek(data: data, isCurrent: isCurrent),
-                side: [
-                  _StaffPanel(data: data, staffCount: staff),
-                  _RecentWeeks(history: history, currentId: data?.week.id),
-                ],
-              ),
+              const SizedBox(height: Dt.gap),
+              CardBoard(boardKey: 'overview', cards: cards),
             ],
           ),
         ),
@@ -390,7 +413,8 @@ class _ThisWeek extends StatelessWidget {
   }
 }
 
-/// Who's logged the most this week, as meters.
+/// Who's logged the most this week: each person's new (green) and existing
+/// (blue) clients as one bar. A name opens that person's record.
 class _StaffPanel extends ConsumerWidget {
   const _StaffPanel({required this.data, required this.staffCount});
   final CurrentWeekData? data;
@@ -404,13 +428,14 @@ class _StaffPanel extends ConsumerWidget {
       ..sort((a, b) => b.total.compareTo(a.total));
     final active = rows.where((r) => r.total > 0).toList();
     final top = active.isEmpty ? 1 : active.first.total;
+    final me = ref.watch(linkedStaffProvider)?.id;
     return AppPanel(
       title: 'Staff performance',
       trailing: data == null
           ? null
-          : '${active.length} of ${rows.length} active',
+          : '${active.length} of ${rows.length} with clients',
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -418,12 +443,24 @@ class _StaffPanel extends ConsumerWidget {
               Text(
                 'Staff totals appear here once numbers are entered.',
                 style: theme.textTheme.bodyMedium?.copyWith(color: c.textMuted),
+              )
+            else ...[
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: NewExistingLegend(),
               ),
-            for (final (i, r) in active.take(6).indexed) ...[
-              if (i > 0) const SizedBox(height: 14),
-              Meter(label: r.name, value: r.total, max: top),
+              const SizedBox(height: 10),
             ],
-            const SizedBox(height: 16),
+            for (final r in active.take(8))
+              SplitMeter(
+                key: ValueKey('staff-meter-${r.staffId}'),
+                label: r.staffId == me ? '${r.name} (you)' : r.name,
+                newCount: r.newClients,
+                existingCount: r.existingClients,
+                max: top,
+                onTap: () => showStaffProfile(context, r.staffId),
+              ),
+            const SizedBox(height: 8),
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton(
@@ -434,12 +471,662 @@ class _StaffPanel extends ConsumerWidget {
                 ),
                 onPressed: () =>
                     ref.read(appActionsProvider).selectTab(AppTab.staff),
-                child: Text('View all $staffCount staff →'),
+                child: Text('All $staffCount staff →'),
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// New against existing clients for the week shown, as a split bar with
+/// the shares.
+class _MixPanel extends StatelessWidget {
+  const _MixPanel({required this.data, required this.unit});
+  final CurrentWeekData? data;
+  final String unit;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = context.clarity;
+    final n = data?.totals.newClients ?? 0;
+    final e = data?.totals.existingClients ?? 0;
+    final total = n + e;
+    String share(int v) => total == 0 ? '–' : '${(v * 100 / total).round()}%';
+    Widget side(String label, int v, Color color) => Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: c.textMuted,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(share(v), style: Dt.tab(theme.textTheme.headlineSmall!)),
+          Text(
+            '$v clients',
+            style: theme.textTheme.bodySmall?.copyWith(color: c.textMuted),
+          ),
+        ],
+      ),
+    );
+    return AppPanel(
+      key: const ValueKey('client-mix'),
+      title: 'Client mix',
+      trailing: unit,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: SizedBox(
+                height: 12,
+                child: total == 0
+                    ? ColoredBox(color: c.track)
+                    : Row(
+                        children: [
+                          if (n > 0)
+                            Expanded(
+                              flex: n,
+                              child: ColoredBox(color: c.seriesNew),
+                            ),
+                          if (n > 0 && e > 0) const SizedBox(width: 2),
+                          if (e > 0)
+                            Expanded(
+                              flex: e,
+                              child: ColoredBox(color: c.seriesExisting),
+                            ),
+                        ],
+                      ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                side('New', n, c.seriesNew),
+                side('Existing', e, c.seriesExisting),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The signed-in person's own numbers (their account is linked to a staff
+/// member in Settings › Users): this week, today, and their place.
+class _YouPanel extends ConsumerWidget {
+  const _YouPanel({required this.data, required this.staffId});
+  final CurrentWeekData? data;
+  final int staffId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final c = context.clarity;
+    final rows = (data?.staffTotals ?? const <StaffWeekTotals>[]).toList()
+      ..sort((a, b) => b.total.compareTo(a.total));
+    final mine = rows.where((r) => r.staffId == staffId).firstOrNull;
+    final rank = mine == null || mine.total == 0
+        ? null
+        : rows.indexWhere((r) => r.staffId == staffId) + 1;
+    final today = data?.dayFor(DateTime.now());
+    final todayRow = today?.rows.where((r) => r.staffId == staffId).firstOrNull;
+    final offToday = today?.offStaffIds.contains(staffId) ?? false;
+    final name = ref.watch(linkedStaffProvider)?.name ?? '';
+    Widget fact(String label, String value) => Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(color: c.textMuted),
+          ),
+          const SizedBox(height: 2),
+          Text(value, style: Dt.tab(theme.textTheme.titleLarge!)),
+        ],
+      ),
+    );
+    return AppPanel(
+      key: const ValueKey('your-numbers'),
+      title: 'Your numbers',
+      subtitle: name,
+      trailingWidget: TextButton(
+        key: const ValueKey('your-record'),
+        style: TextButton.styleFrom(
+          padding: EdgeInsets.zero,
+          minimumSize: const Size(0, 28),
+        ),
+        onPressed: () => showStaffProfile(context, staffId),
+        child: const Text('Your record'),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                fact('This week', '${mine?.total ?? 0}'),
+                fact(
+                  'Today',
+                  offToday
+                      ? 'Off'
+                      : today == null
+                      ? '–'
+                      : '${todayRow?.total ?? 0}',
+                ),
+                fact('Place', rank == null ? '–' : '#$rank of ${rows.length}'),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              mine == null
+                  ? 'You’re not on this week’s board.'
+                  : '${mine.newClients} new · ${mine.existingClients} existing '
+                        'this week',
+              style: theme.textTheme.bodySmall?.copyWith(color: c.textMuted),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Today's and this month's money, and the latest payments (Revenue).
+class _RevenuePanel extends ConsumerWidget {
+  const _RevenuePanel();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final c = context.clarity;
+    final currency = ref.watch(currencyProvider);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final first = DateTime(now.year, now.month);
+    final lastFirst = DateTime(now.year, now.month - 1);
+    final lastSame = DateTime(
+      lastFirst.year,
+      lastFirst.month,
+      now.day.clamp(1, DateTime(now.year, now.month, 0).day),
+    );
+    final month = ref.watch(revenueDaysProvider((first, today)));
+    final last = ref.watch(revenueDaysProvider((lastFirst, lastSame)));
+    final entries = ref.watch(revenueEntriesProvider(today));
+    final monthCents = month.fold(0, (a, d) => a + d.totalCents);
+    final lastCents = last.fold(0, (a, d) => a + d.totalCents);
+    final todayCents = entries.fold(0, (a, e) => a + e.amountCents);
+    final (delta, tone) = lastCents == 0
+        ? (null, DeltaTone.neutral)
+        : deltaVsLast(monthCents, lastCents, vs: 'same days last month');
+    void open() => ref.read(appActionsProvider).selectTab(AppTab.revenue);
+    return AppPanel(
+      key: const ValueKey('overview-revenue'),
+      title: 'Money in',
+      trailingWidget: TextButton(
+        style: TextButton.styleFrom(
+          padding: EdgeInsets.zero,
+          minimumSize: const Size(0, 28),
+        ),
+        onPressed: open,
+        child: const Text('Open'),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: _Figure(
+                    label: 'Today',
+                    value: formatMoney(todayCents, currency),
+                    caption:
+                        '${entries.where((e) => e.amountCents > 0).length} '
+                        'payments',
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _Figure(
+                    label: DateFormat('MMMM').format(now),
+                    value: formatMoney(monthCents, currency),
+                    caption: delta,
+                    tone: tone,
+                  ),
+                ),
+              ],
+            ),
+            if (entries.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Divider(height: 1, color: c.borderSubtle),
+              for (final e in entries.take(4))
+                InkWell(
+                  onTap: open,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 7),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            e.note.isEmpty
+                                ? (e.purpose.isEmpty ? 'Payment' : e.purpose)
+                                : e.note,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          formatMoney(e.amountCents, currency),
+                          style: Dt.tab(theme.textTheme.bodyMedium!)
+                              .copyWith(fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Where applications stand (from the latest Airtable upload), with the
+/// ones that need a nudge. A student opens their card.
+class _ApplicationsPanel extends ConsumerWidget {
+  const _ApplicationsPanel();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final c = context.clarity;
+    ref.watch(dataVersionProvider);
+    final apps = ref.read(applicationRepositoryProvider).all();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final first = DateTime(now.year, now.month);
+    bool thisMonth(DateTime? d) => d != null && !d.isBefore(first);
+    final inProgress = apps.where((a) => a.inProgress).length;
+    final offers = apps.where((a) => thisMonth(a.offerDate)).length;
+    final coes = apps.where((a) => thisMonth(a.coeDate)).length;
+    final waiting = [
+      for (final a in apps)
+        if (a.offerOverdue(today)) (a, a.offerWaitDays(today)!),
+    ]..sort((x, y) => y.$2.compareTo(x.$2));
+    void open() => ref.read(appActionsProvider).selectTab(AppTab.applications);
+    return AppPanel(
+      key: const ValueKey('overview-applications'),
+      title: 'Applications',
+      trailingWidget: TextButton(
+        style: TextButton.styleFrom(
+          padding: EdgeInsets.zero,
+          minimumSize: const Size(0, 28),
+        ),
+        onPressed: open,
+        child: const Text('Open'),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
+        child: apps.isEmpty
+            ? Text(
+                'No applications yet. They come from the Airtable tracker '
+                '(Applications page).',
+                style: theme.textTheme.bodyMedium?.copyWith(color: c.textMuted),
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _Figure(
+                          label: 'In progress',
+                          value: '$inProgress',
+                        ),
+                      ),
+                      Expanded(
+                        child: _Figure(
+                          label: 'Offers',
+                          value: '$offers',
+                          caption: 'this month',
+                        ),
+                      ),
+                      Expanded(
+                        child: _Figure(
+                          label: 'COEs',
+                          value: '$coes',
+                          caption: 'this month',
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (waiting.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'WAITING FOR AN OFFER LETTER · ${waiting.length}',
+                      style: microLabel(theme),
+                    ),
+                    for (final (a, days) in waiting.take(4))
+                      InkWell(
+                        key: ValueKey('overview-offer-${a.key}'),
+                        onTap: () => showApplicationDetails(context, ref, a),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  a.student,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodyMedium,
+                                ),
+                              ),
+                              if (a.assignee.isNotEmpty) ...[
+                                TagChip(
+                                  a.assignee,
+                                  AirtableTags.assignee(a.assignee),
+                                  dense: true,
+                                ),
+                                const SizedBox(width: 8),
+                              ],
+                              Text(
+                                '$days d',
+                                style: Dt.tab(theme.textTheme.bodySmall!)
+                                    .copyWith(
+                                      color: days > 21
+                                          ? c.negativeFg
+                                          : c.warningFg,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+/// Who has recorded their daily report today (online).
+final _todayReportsProvider = FutureProvider.autoDispose<ReportSummary?>((
+  ref,
+) async {
+  ref.watch(reportsChangedProvider);
+  ref.watch(cloudSyncProvider.select((s) => s.phase == SyncPhase.live));
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  try {
+    return await ref.read(dailyReportsProvider).summary(today, today);
+  } catch (_) {
+    return null;
+  }
+});
+
+class _DailyReportsPanel extends ConsumerWidget {
+  const _DailyReportsPanel();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final c = context.clarity;
+    final summary = ref.watch(_todayReportsProvider);
+    void open() => ref.read(appActionsProvider).selectTab(AppTab.dailyReports);
+    final s = summary.value;
+    final people = s?.compliance ?? const <ComplianceRow>[];
+    final done = people.where((p) => p.submittedToday).length;
+    final missing = [
+      for (final p in people)
+        if (!p.submittedToday) p,
+    ];
+    return AppPanel(
+      key: const ValueKey('overview-daily'),
+      title: 'Today’s reports',
+      trailingWidget: TextButton(
+        style: TextButton.styleFrom(
+          padding: EdgeInsets.zero,
+          minimumSize: const Size(0, 28),
+        ),
+        onPressed: open,
+        child: const Text('Open'),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
+        child: summary.isLoading && s == null
+            ? const SizedBox(
+                height: 48,
+                child: Center(
+                  child: SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              )
+            : s == null
+            ? Text(
+                'Daily reports show here when you’re online.',
+                style: theme.textTheme.bodyMedium?.copyWith(color: c.textMuted),
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _Figure(
+                          label: 'Reported today',
+                          value: people.isEmpty
+                              ? '${s.total}'
+                              : '$done of ${people.length}',
+                        ),
+                      ),
+                      Expanded(
+                        child: _Figure(label: 'Open items', value: '${s.open}'),
+                      ),
+                      Expanded(
+                        child: _Figure(
+                          label: 'Overdue',
+                          value: '${s.overdue.length}',
+                          tone: s.overdue.isEmpty
+                              ? DeltaTone.neutral
+                              : DeltaTone.down,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (missing.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      'Not yet today: '
+                      '${missing.take(6).map((p) => p.fullName).join(', ')}'
+                      '${missing.length > 6 ? ' and ${missing.length - 6} more' : ''}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: c.textMuted,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+/// This month so far against the same days of last month (Reports).
+class _MonthPanel extends ConsumerWidget {
+  const _MonthPanel();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final c = context.clarity;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final first = DateTime(now.year, now.month);
+    final lastFirst = DateTime(now.year, now.month - 1);
+    final lastSame = DateTime(
+      lastFirst.year,
+      lastFirst.month,
+      now.day.clamp(1, DateTime(now.year, now.month, 0).day),
+    );
+    final cur = ref.watch(reportProvider((first, today)));
+    final prev = ref.watch(reportProvider((lastFirst, lastSame)));
+    final rows = [
+      ('New clients', cur.newClients, prev.newClients),
+      ('Existing clients', cur.existingClients, prev.existingClients),
+      ('Total', cur.total, prev.total),
+    ];
+    return AppPanel(
+      key: const ValueKey('overview-month'),
+      title: '${DateFormat('MMMM').format(now)} so far',
+      subtitle:
+          'Against ${DateFormat('MMMM').format(lastFirst)} 1–${lastSame.day}',
+      trailingWidget: TextButton(
+        style: TextButton.styleFrom(
+          padding: EdgeInsets.zero,
+          minimumSize: const Size(0, 28),
+        ),
+        onPressed: () => ref.read(appActionsProvider).selectTab(AppTab.reports),
+        child: const Text('Reports'),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+        child: Column(
+          children: [
+            for (final (label, n, before) in rows)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        label,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: label == 'Total' ? FontWeight.w600 : null,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '$n',
+                      style: Dt.tab(theme.textTheme.titleSmall!)
+                          .copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    SizedBox(
+                      width: 72,
+                      child: Text(
+                        n == before
+                            ? 'same'
+                            : n > before
+                            ? '+${n - before}'
+                            : '−${before - n}',
+                        textAlign: TextAlign.right,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: n > before
+                              ? c.positiveFg
+                              : n < before
+                              ? c.negativeFg
+                              : c.textMuted,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              // The daily average is on the Month card above; not again here.
+              child: Text(
+                '${cur.staffedDaysSoFar} working '
+                '${cur.staffedDaysSoFar == 1 ? 'day' : 'days'} so far',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(color: c.textMuted),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A figure with a small label over it and a caption under.
+class _Figure extends StatelessWidget {
+  const _Figure({
+    required this.label,
+    required this.value,
+    this.caption,
+    this.tone = DeltaTone.neutral,
+  });
+  final String label;
+  final String value;
+  final String? caption;
+  final DeltaTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = context.clarity;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodySmall?.copyWith(color: c.textMuted),
+        ),
+        const SizedBox(height: 2),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(value, style: Dt.tab(theme.textTheme.titleLarge!)),
+        ),
+        if (caption != null)
+          Text(
+            caption!,
+            maxLines: 2,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: switch (tone) {
+                DeltaTone.up => c.positiveFg,
+                DeltaTone.down => c.negativeFg,
+                DeltaTone.neutral => c.textMuted,
+              },
+            ),
+          ),
+      ],
     );
   }
 }

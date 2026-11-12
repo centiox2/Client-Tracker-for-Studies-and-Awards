@@ -151,24 +151,35 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     _applicationsTab,
     _AppTabInfo(AppTab.history, 'History', Icons.history),
     _AppTabInfo(AppTab.staff, 'Staff', Icons.people_outline),
+    _AppTabInfo(AppTab.settings, 'Settings', Icons.settings_outlined),
   ];
 
   /// View-only profiles (Director, Team): nothing that changes data.
   bool get _isViewer => !ref.read(canEditProvider);
 
   /// The pages this profile may open: revenue only for the admin and the
-  /// director, Settings only for the admin.
+  /// director; Settings for everyone (their own part of it).
   List<_AppTabInfo> get _tabs {
     final role = ref.read(sessionProvider);
     final base = _isViewer ? _viewerTabs : _adminTabs;
-    return [
+    final byRole = [
       for (final t in base)
         if ((t.tab != AppTab.revenue || (role?.seesRevenue ?? false)) &&
-            (t.tab != AppTab.settings || (role?.isAdmin ?? false)) &&
             // Daily reports live with personal accounts (online only).
             (t.tab != AppTab.dailyReports || ref.read(accountsEnabledProvider)))
           t,
     ];
+    // The admin may have limited this account to some pages (Settings ›
+    // Users › Page access). Never none: a list that leaves nothing open is
+    // ignored rather than locking the person out.
+    final user = ref.read(currentUserProvider);
+    // Settings always stays: everyone has their own (theme, text size,
+    // password, sessions); the workspace parts in it are admin only.
+    final limited = [
+      for (final t in byRole)
+        if (t.tab == AppTab.settings || (user?.mayOpen(t.tab.name) ?? true)) t,
+    ];
+    return limited.any((t) => t.tab != AppTab.settings) ? limited : byRole;
   }
 
   /// Notices when the date changes so "today" (Quick view, the tracker's
@@ -334,7 +345,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   /// Single keys (no Ctrl): "/" search, "N" new payment or week, "?" help.
   /// Never while typing, and never with a dialog open.
   KeyEventResult _plainKey(KeyEvent event) {
-    if (_inAnyTextField || _isViewer) return KeyEventResult.ignored;
+    if (_inAnyTextField) return KeyEventResult.ignored;
     if (ModalRoute.of(context)?.isCurrent == false) {
       return KeyEventResult.ignored;
     }
@@ -349,6 +360,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.keyN &&
+        !_isViewer &&
         !HardwareKeyboard.instance.isAltPressed) {
       final tab = ref.read(navTabProvider);
       if (tab == AppTab.revenue && ref.read(isAdminProvider)) {
@@ -369,16 +381,17 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed;
     if (!modifier) return _plainKey(event);
-    // Search, undo and tab shortcuts are workspace tools — admin only.
+    // Search is for everyone; new week, undo and the tab keys are for
+    // people who can edit.
+    if (event.logicalKey == LogicalKeyboardKey.keyK) {
+      // Handled, so the browser doesn't also open its own Ctrl+K search.
+      showQuickSearch(context);
+      return KeyEventResult.handled;
+    }
     if (_isViewer) return KeyEventResult.ignored;
     if (event.logicalKey == LogicalKeyboardKey.keyN) {
       // Instead of the browser's "new window".
       showNewWeekDialog(context, ref);
-      return KeyEventResult.handled;
-    }
-    if (event.logicalKey == LogicalKeyboardKey.keyK) {
-      // Handled, so the browser doesn't also open its own Ctrl+K search.
-      showQuickSearch(context);
       return KeyEventResult.handled;
     }
     // In a text box, Ctrl+Z undoes the typing and Ctrl+1–6 must not throw
@@ -509,6 +522,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final isViewer = !ref.watch(canEditProvider);
+    // A new page list from the admin takes effect at once.
+    ref.watch(currentUserProvider);
     final requested = ref.watch(navTabProvider);
     final allowed = _tabs;
     // Nothing recorded today yet: a dot on Daily reports.
@@ -516,7 +531,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // Never render a page this profile may not see, whatever the nav state.
     final tab = allowed.any((t) => t.tab == requested)
         ? requested
-        : (isViewer ? AppTab.reports : allowed.first.tab);
+        : (allowed.any((t) => t.tab == AppTab.reports) && isViewer
+              ? AppTab.reports
+              : allowed.first.tab);
     final width = MediaQuery.sizeOf(context).width;
     final desktop = width >= 1050;
 
@@ -619,7 +636,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             tabs: _tabs,
             selected: tab,
             onSelect: (value) => ref.read(navTabProvider.notifier).set(value),
-            onSearch: isViewer ? null : () => showQuickSearch(context),
+            onSearch: () => showQuickSearch(context),
           ),
           Expanded(child: content),
         ],
@@ -1037,7 +1054,6 @@ class _UserRow extends ConsumerWidget {
     final c = context.clarity;
     final role = ref.watch(sessionProvider);
     final user = ref.watch(currentUserProvider);
-    final canEdit = ref.watch(canEditProvider);
     final name = user?.fullName ?? role?.label ?? '';
     final initials = initialsOf(name);
     final dark = theme.brightness == Brightness.dark;
@@ -1055,6 +1071,13 @@ class _UserRow extends ConsumerWidget {
     final account = MenuAnchor(
       alignmentOffset: const Offset(0, -4),
       menuChildren: [
+        if (ref.watch(linkedStaffProvider) case final me?)
+          MenuItemButton(
+            key: const ValueKey('menu-your-record'),
+            leadingIcon: const Icon(Icons.badge_outlined, size: 16),
+            onPressed: () => showStaffProfile(context, me.id),
+            child: Text('Your record · ${me.name}'),
+          ),
         if (user != null) ...[
           MenuItemButton(
             leadingIcon: const Icon(Icons.key_outlined, size: 16),
@@ -1074,12 +1097,11 @@ class _UserRow extends ConsumerWidget {
           onPressed: () => showTextSize(context),
           child: const Text('Text size'),
         ),
-        if (canEdit)
-          MenuItemButton(
-            leadingIcon: const Icon(Icons.keyboard_outlined, size: 16),
-            onPressed: () => showShortcutsDialog(context),
-            child: const Text('Keyboard shortcuts'),
-          ),
+        MenuItemButton(
+          leadingIcon: const Icon(Icons.keyboard_outlined, size: 16),
+          onPressed: () => showShortcutsDialog(context),
+          child: const Text('Keyboard shortcuts'),
+        ),
         MenuItemButton(
           leadingIcon: const Icon(Icons.refresh, size: 16),
           onPressed: () => ref.read(dataVersionProvider.notifier).bump(),
@@ -1198,6 +1220,9 @@ class _MobileTopBar extends ConsumerWidget {
             onSelected: (action) {
               if (action == 'search') {
                 showQuickSearch(context);
+              } else if (action == 'record') {
+                final me = ref.read(linkedStaffProvider);
+                if (me != null) showStaffProfile(context, me.id);
               } else if (action == 'settings') {
                 ref.read(appActionsProvider).selectTab(AppTab.settings);
               } else if (action == 'refresh') {
@@ -1221,13 +1246,13 @@ class _MobileTopBar extends ConsumerWidget {
                     enabled: false,
                     child: Text('${user.fullName} · ${user.role.label}'),
                   ),
-                if (role?.canEdit ?? false)
-                  const PopupMenuItem(value: 'search', child: Text('Search')),
-                if (role?.isAdmin ?? false)
+                const PopupMenuItem(value: 'search', child: Text('Search')),
+                if (ref.read(linkedStaffProvider) != null)
                   const PopupMenuItem(
-                    value: 'settings',
-                    child: Text('Settings'),
+                    value: 'record',
+                    child: Text('Your record'),
                   ),
+                const PopupMenuItem(value: 'settings', child: Text('Settings')),
                 const PopupMenuItem(
                   value: 'refresh',
                   child: Text('Refresh data'),

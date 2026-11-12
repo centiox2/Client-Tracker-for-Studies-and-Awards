@@ -1116,6 +1116,11 @@ class _BoardStaffRow extends ConsumerWidget {
                           ),
                         ),
                       ),
+                      if (ref.watch(linkedStaffProvider)?.id ==
+                          staff.staffId) ...[
+                        const SizedBox(width: 6),
+                        const YouTag(),
+                      ],
                       if (isOffSomewhere) ...[
                         const SizedBox(width: 6),
                         Tooltip(
@@ -2036,16 +2041,26 @@ class _MobileStaffRow extends ConsumerWidget {
                 staffId: row.staffId,
                 staffName: row.staffName,
               ),
-              child: Text(
-                row.staffName,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  fontWeight: FontWeight.w500,
-                  color: isOff
-                      ? Dt.textMuted(theme)
-                      : theme.colorScheme.onSurface,
-                ),
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      row.staffName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w500,
+                        color: isOff
+                            ? Dt.textMuted(theme)
+                            : theme.colorScheme.onSurface,
+                      ),
+                    ),
+                  ),
+                  if (ref.watch(linkedStaffProvider)?.id == row.staffId) ...[
+                    const SizedBox(width: 6),
+                    const YouTag(),
+                  ],
+                ],
               ),
             ),
           ),
