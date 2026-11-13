@@ -17,6 +17,7 @@ import 'dart:io';
 
 import 'package:client_tracker/state/app_state.dart';
 
+import 'flutter_test_config.dart' show EmptyClipboard;
 import 'test_helpers.dart';
 
 void main() {
@@ -208,6 +209,20 @@ void main() {
     expect(find.byKey(const ValueKey('revenue-amount')), findsNothing);
     expect(find.byIcon(Icons.delete_outline), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('where photos can be pasted (Windows, phones), an empty '
+      'clipboard still opens the message box', (tester) async {
+    // The 1.3.0 Windows build failed here: the clipboard was asked for a
+    // photo and the box for the message never opened.
+    clipboardPhotos = const EmptyClipboard(supported: true);
+    addTearDown(() => clipboardPhotos = const EmptyClipboard());
+    await pumpApp(tester, admin: true);
+    await tester.tap(find.text('Revenue').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('paste-payment')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('paste-message')), findsOneWidget);
   });
 
   testWidgets('a pasted M-Pesa message is read, checked and added once', (

@@ -50,14 +50,13 @@ Future<bool> pastePaymentImage(
   WidgetRef ref,
   DateTime day,
 ) async {
-  if (!photoPasteSupported) return false;
+  final clipboard = clipboardPhotos;
+  if (!clipboard.supported) return false;
   // Photo files copied in File Explorer first (read where they are)…
   var files = const <String>[];
-  if (photoDropSupported) {
-    try {
-      files = (await Pasteboard.files()).where(isPhotoFile).toList();
-    } catch (_) {}
-  }
+  try {
+    files = (await clipboard.files()).where(isPhotoFile).toList();
+  } catch (_) {}
   if (files.isNotEmpty) {
     if (!context.mounted) return true;
     await importPaymentPhotos(context, ref, day, files);
@@ -66,7 +65,7 @@ Future<bool> pastePaymentImage(
   // …else image data (a screenshot, or Copy image).
   Uint8List? bytes;
   try {
-    bytes = await Pasteboard.image;
+    bytes = await clipboard.image();
   } catch (_) {}
   if (bytes == null || bytes.isEmpty) return false;
   final path = await savePastedPhoto(bytes);
@@ -78,6 +77,27 @@ Future<bool> pastePaymentImage(
   }
   return true;
 }
+
+/// Photos on the clipboard, read through the clipboard plugin.
+class ClipboardPhotos {
+  const ClipboardPhotos();
+
+  /// Whether this device can paste a photo at all (Windows and phones).
+  bool get supported => photoPasteSupported;
+
+  /// Photo files copied in File Explorer (Windows only).
+  Future<List<String>> files() async =>
+      photoDropSupported ? await Pasteboard.files() : const <String>[];
+
+  /// Image data: a screenshot, or Copy image.
+  Future<Uint8List?> image() => Pasteboard.image;
+}
+
+/// The clipboard [pastePaymentImage] reads. Tests replace it: the clipboard
+/// plugin isn't there to answer in a test, and a call to it would wait for
+/// ever on Windows (where pasting photos is turned on).
+@visibleForTesting
+ClipboardPhotos clipboardPhotos = const ClipboardPhotos();
 
 /// Reads [paths] (picked or dragged onto the window) and offers every
 /// payment found, each timed by its message (or, without a date in the
