@@ -144,22 +144,29 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
                     crossAxisAlignment: WrapCrossAlignment.center,
                     alignment: WrapAlignment.spaceBetween,
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      // The page header already says "Daily reports": this
+                      // line only says whose reports these are.
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            'Daily reports',
-                            style: theme.textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
+                          Icon(
+                            Icons.apartment_outlined,
+                            size: 16,
+                            color: Dt.textMuted(theme),
                           ),
-                          Text(
-                            meta.myDepartment?.name ??
-                                (meta.seesOthers
-                                    ? 'Every department'
-                                    : 'No department yet'),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: Dt.textMuted(theme),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              meta.myDepartment?.name ??
+                                  (meta.seesOthers
+                                      ? 'Every department'
+                                      : 'No department yet'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: Dt.textMuted(theme),
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           ),
                         ],
@@ -610,13 +617,16 @@ class _MyWeek extends StatelessWidget {
 // -------------------------------------------------------------- Overview ---
 
 enum _Period {
-  today('Today'),
-  week('This week'),
-  month('This month'),
-  custom('Dates…');
+  today('Today', 'Today'),
+  week('This week', 'Week'),
+  month('This month', 'Month'),
+  custom('Dates…', 'Dates…');
 
-  const _Period(this.label);
+  const _Period(this.label, this.short);
   final String label;
+
+  /// On a phone, where four long labels don't fit one line.
+  final String short;
 }
 
 enum _EntryFilter {
@@ -920,20 +930,27 @@ class _OverviewState extends ConsumerState<_Overview> {
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        SegmentedButton<_Period>(
-          key: const ValueKey('report-period'),
-          style: widget.phone ? Dt.phoneSegments : null,
-          segments: [
-            for (final p in _Period.values)
-              ButtonSegment(value: p, label: Text(p.label)),
-          ],
-          selected: {_period},
-          showSelectedIcon: false,
-          onSelectionChanged: (v) => _setPeriod(v.first),
+        SizedBox(
+          width: widget.phone ? double.infinity : null,
+          child: SegmentedButton<_Period>(
+            key: const ValueKey('report-period'),
+            style: widget.phone ? Dt.phoneSegments : null,
+            segments: [
+              for (final p in _Period.values)
+                ButtonSegment(
+                  value: p,
+                  label: Text(widget.phone ? p.short : p.label),
+                ),
+            ],
+            selected: {_period},
+            showSelectedIcon: false,
+            onSelectionChanged: (v) => _setPeriod(v.first),
+          ),
         ),
         if (meta.scope == ReportScope.all)
           _Dropdown<int?>(
             key: const ValueKey('report-department'),
+            fill: widget.phone,
             value: _departmentId,
             items: {
               null: 'All departments',
@@ -954,6 +971,7 @@ class _OverviewState extends ConsumerState<_Overview> {
           ),
         _Dropdown<int?>(
           key: const ValueKey('report-person'),
+          fill: widget.phone,
           value: _userId,
           items: {null: 'Everyone', for (final p in people) p.id: p.fullName},
           onChanged: (v) {
@@ -1049,28 +1067,45 @@ class _OverviewState extends ConsumerState<_Overview> {
           Text(describeReportError(_error!), style: muted),
         ],
         const SizedBox(height: 12),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            _Stat('Activities', s.total, key: const ValueKey('stat-total')),
-            _Stat('Completed', s.count(ReportStatus.completed)),
-            _Stat(
-              'In progress / pending',
-              s.count(ReportStatus.inProgress) + s.count(ReportStatus.pending),
-            ),
-            _Stat(
-              'Blocked / escalated',
-              s.count(ReportStatus.blocked) + s.count(ReportStatus.escalated),
-              alert: true,
-            ),
-            _Stat(
-              'Overdue',
-              s.overdue.length,
-              alert: true,
-              key: const ValueKey('stat-overdue'),
-            ),
-          ],
+        // The five figures share the row evenly (two or three a row on
+        // smaller screens), so no tile is wider or narrower than another.
+        LayoutBuilder(
+          builder: (context, box) {
+            final stats = [
+              _Stat('Activities', s.total, key: const ValueKey('stat-total')),
+              _Stat('Completed', s.count(ReportStatus.completed)),
+              _Stat(
+                'In progress',
+                s.count(ReportStatus.inProgress) +
+                    s.count(ReportStatus.pending),
+                hint: 'In progress or pending',
+              ),
+              _Stat(
+                'Blocked',
+                s.count(ReportStatus.blocked) + s.count(ReportStatus.escalated),
+                alert: true,
+                hint: 'Blocked or escalated',
+              ),
+              _Stat(
+                'Overdue',
+                s.overdue.length,
+                alert: true,
+                key: const ValueKey('stat-overdue'),
+              ),
+            ];
+            const gap = 10.0;
+            final cols = box.maxWidth >= 760
+                ? 5
+                : box.maxWidth >= 460
+                ? 3
+                : 2;
+            final w = (box.maxWidth - gap * (cols - 1)) / cols;
+            return Wrap(
+              spacing: gap,
+              runSpacing: gap,
+              children: [for (final st in stats) SizedBox(width: w, child: st)],
+            );
+          },
         ),
         const SizedBox(height: 12),
         AppPanel(
@@ -1098,19 +1133,25 @@ class _OverviewState extends ConsumerState<_Overview> {
                       Row(
                         children: [
                           Text('Not yet', style: microLabel(theme)),
-                          const Spacer(),
-                          if (notYet.isNotEmpty)
-                            Flexible(
-                              child: TextButton.icon(
-                                key: const ValueKey('copy-reminder'),
-                                onPressed: () => _copyReminder(notYet),
-                                icon: const Icon(Icons.copy, size: 14),
-                                label: const Text(
-                                  'Copy reminder',
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
+                          // Right-aligned at its own width; it shortens
+                          // only when the line is too narrow for it.
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: notYet.isEmpty
+                                  ? null
+                                  : TextButton.icon(
+                                      key: const ValueKey('copy-reminder'),
+                                      onPressed: () => _copyReminder(notYet),
+                                      icon: const Icon(Icons.copy, size: 14),
+                                      label: const Text(
+                                        'Copy reminder',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
                             ),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 6),
@@ -1327,15 +1368,21 @@ class _Dropdown<T> extends StatelessWidget {
     required this.value,
     required this.items,
     required this.onChanged,
+    this.fill = false,
   });
 
   final T value;
   final Map<T, String> items;
   final ValueChanged<T> onChanged;
 
+  /// Takes the whole line (on a phone).
+  final bool fill;
+
   @override
   Widget build(BuildContext context) => ConstrainedBox(
-    constraints: const BoxConstraints(maxWidth: 260),
+    constraints: fill
+        ? const BoxConstraints(minWidth: double.infinity)
+        : const BoxConstraints(maxWidth: 260),
     child: DropdownButtonFormField<T>(
       // A form field reads its initial value once: keyed by the value, it
       // follows changes made in code (a department row tapped, the person
@@ -1358,20 +1405,28 @@ class _Dropdown<T> extends StatelessWidget {
 }
 
 class _Stat extends StatelessWidget {
-  const _Stat(this.label, this.value, {super.key, this.alert = false});
+  const _Stat(
+    this.label,
+    this.value, {
+    super.key,
+    this.alert = false,
+    this.hint,
+  });
 
   final String label;
   final int value;
   final bool alert;
+
+  /// What the figure counts, when the short label leaves it out.
+  final String? hint;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final color = alert && value > 0 ? scheme.error : scheme.onSurface;
-    return Container(
-      width: 170,
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
+    final tile = Container(
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLow,
         border: Border.all(color: scheme.outline),
@@ -1380,7 +1435,12 @@ class _Stat extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label.toUpperCase(), style: microLabel(theme)),
+          Text(
+            label.toUpperCase(),
+            style: microLabel(theme),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
           const SizedBox(height: 4),
           Text(
             '$value',
@@ -1393,6 +1453,7 @@ class _Stat extends StatelessWidget {
         ],
       ),
     );
+    return hint == null ? tile : Tooltip(message: hint, child: tile);
   }
 }
 

@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.2.2';
+  static const version = '1.3.0';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,27 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.3.0', 'November 2026', [
+      'Search everything from any page (Ctrl K or /): clients, staff, weeks '
+          'and payments. Commas, full stops and apostrophes don’t matter, '
+          'and a client opens straight to their card.',
+      'Settings is for everyone, grouped into You, Workspace, Team, Data and '
+          'About, and your choices follow you to every device.',
+      'Admins choose which pages each account can open, and see which staff '
+          'record an account is linked to.',
+      'Overview: tap any figure to open its page; the Client mix card is '
+          'back; cards can be dragged anywhere.',
+      'Weekly tracker: a warning before changing a past week; Change history '
+          'covers every week.',
+      'Daily reports open in one step and are tidier; today’s reports also '
+          'show on Overview and Reports.',
+      'Revenue: paste a payment screenshot or message with Ctrl V.',
+      'Backups now also save what lives only online (accounts without '
+          'their passwords, departments, daily reports). Restoring puts '
+          'back any departments and daily reports that are missing.',
+      'Smoother page changes, sharper layouts on 1080p screens and phones. '
+          'TV mode has been removed.',
+    ]),
     Release('1.2.2', 'November 2026', [
       'Phones and tablets: no more text cut short (Airtable sync time, '
           'names, notes, card captions, search hints).',

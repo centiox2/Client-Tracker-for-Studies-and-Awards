@@ -23,9 +23,11 @@ class FadeThroughSwitcher extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AnimatedSwitcher(
-    duration: Motion.of(context, Motion.medium),
-    switchInCurve: Motion.curve,
-    switchOutCurve: Curves.easeIn,
+    duration: Motion.of(context, const Duration(milliseconds: 300)),
+    // A true fade-through: the old page is gone within the first third,
+    // then the new one comes in. The two never show over each other.
+    switchInCurve: const Interval(0.3, 1, curve: Motion.curve),
+    switchOutCurve: const Interval(0.7, 1, curve: Curves.easeIn),
     // Only the incoming page lays out; the old one just fades on top.
     layoutBuilder: (current, previous) => Stack(
       alignment: Alignment.topCenter,
@@ -36,12 +38,10 @@ class FadeThroughSwitcher extends StatelessWidget {
     ),
     transitionBuilder: (child, animation) => FadeTransition(
       opacity: animation,
-      child: SlideTransition(
-        position: Tween(
-          begin: const Offset(0, 0.012),
-          end: Offset.zero,
-        ).animate(animation),
-        child: child,
+      child: ScaleTransition(
+        scale: Tween(begin: 0.985, end: 1.0).animate(animation),
+        alignment: Alignment.topCenter,
+        child: RepaintBoundary(child: child),
       ),
     ),
     child: child,
