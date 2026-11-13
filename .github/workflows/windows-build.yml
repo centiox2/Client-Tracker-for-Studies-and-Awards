@@ -1,8 +1,17 @@
 name: S&A Hub – Windows build
 
+# Only main makes a release. (It used to run on every branch too, which
+# built each change twice and used up the free monthly build minutes.)
 on:
   push:
+    branches: [main]
   workflow_dispatch:
+
+# A newer push replaces a build still running for the same branch, so
+# minutes aren't spent on a version that's already out of date.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 # Online database (Supabase). The publishable key is designed to ship inside
 # the app; keep this repository PRIVATE because the key allows reading the data.

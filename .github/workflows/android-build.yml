@@ -5,6 +5,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# A newer push replaces a build still running for the same branch, so
+# minutes aren't spent on a version that's already out of date.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 # Same online database as the Windows build. Repository secrets with the
 # same names, if set, take priority. Keep this repository private.
 env:
