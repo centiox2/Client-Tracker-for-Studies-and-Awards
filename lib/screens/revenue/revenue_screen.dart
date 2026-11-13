@@ -1108,8 +1108,9 @@ class _WeekBars extends StatelessWidget {
                             alpha: 0.35,
                           ),
                           color: d.date == selected
-                              ? scheme.primary
-                              : scheme.primary.withValues(alpha: 0.55),
+                              ? Dt.money(theme.brightness)
+                              : Dt.money(theme.brightness)
+                                    .withValues(alpha: 0.55),
                         ),
                       ),
                     ),

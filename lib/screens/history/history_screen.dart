@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../design/app_theme.dart';
 import '../../state/app_state.dart';
+import '../../widgets/motion.dart';
 import '../../widgets/clarity.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/undo_snack.dart';
@@ -137,15 +138,18 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                           ),
                         )
                       else
-                        for (final g in groups) ...[
-                          _MonthPanel(
-                            month: g.month,
-                            weeks: g.weeks,
-                            compact: compact,
-                            now: now,
-                            openLabel: widget.readOnly ? 'View' : 'Open',
-                            onOpen: _openWeek,
-                            onDelete: widget.readOnly ? null : _confirmDelete,
+                        for (final (i, g) in groups.indexed) ...[
+                          FadeSlideIn(
+                            index: i,
+                            child: _MonthPanel(
+                              month: g.month,
+                              weeks: g.weeks,
+                              compact: compact,
+                              now: now,
+                              openLabel: widget.readOnly ? 'View' : 'Open',
+                              onOpen: _openWeek,
+                              onDelete: widget.readOnly ? null : _confirmDelete,
+                            ),
                           ),
                           const SizedBox(height: 12),
                         ],

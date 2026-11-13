@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.3.0';
+  static const version = '1.3.1';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,18 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.3.1', 'November 2026', [
+      'Moving cards: press and hold, then drag. A click just opens the card, '
+          'and a lifted card has a white outline.',
+      'Revenue charts are green, like money.',
+      'Two smaller text sizes (Settings › Text size).',
+      'Faster page changes, sidebar and light/dark switching.',
+      'Pages arrive more smoothly: figures count up and cards come in one '
+          'after another.',
+      'Fixed a crash in the weekly tracker when leaving a cell.',
+      'Settings › About: copy a reported problem, or all of them, to paste '
+          'into a message.',
+    ]),
     Release('1.3.0', 'November 2026', [
       'Search everything from any page (Ctrl K or /): clients, staff, weeks '
           'and payments. Commas, full stops and apostrophes don’t matter, '

@@ -1,9 +1,10 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../design/app_theme.dart';
 import '../state/app_state.dart';
+import 'card_board.dart';
+import 'motion.dart';
 
 /// Clarity building blocks (see the design kit): page header, KPI cards,
 /// status pills, meters, notices and list rows. Colours always come from
@@ -169,7 +170,7 @@ class KpiCard extends StatelessWidget {
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
-                  child: Text(
+                  child: AnimatedValueText(
                     value,
                     style: Dt.tab(
                       phone
@@ -308,10 +309,7 @@ class _KpiGridState extends ConsumerState<KpiGrid> {
     final order = widget.orderKey == null
         ? byId.keys.toList()
         : _ordered(byId.keys.toList());
-    final touch =
-        MediaQuery.sizeOf(context).width < 1050 ||
-        defaultTargetPlatform == TargetPlatform.android ||
-        defaultTargetPlatform == TargetPlatform.iOS;
+    final touch = touchLayout(context);
 
     return LayoutBuilder(
       builder: (context, box) {
@@ -328,32 +326,15 @@ class _KpiGridState extends ConsumerState<KpiGrid> {
         final w = (box.maxWidth - gap * (cols - 1)) / cols;
 
         Widget cell(String id, double width) {
-          final child = byId[id]!;
+          // The cards arrive one after another, in reading order.
+          final child = FadeSlideIn(index: order.indexOf(id), child: byId[id]!);
           if (widget.orderKey == null) return child;
-          final feedback = Material(
-            color: Colors.transparent,
-            elevation: 8,
-            borderRadius: BorderRadius.circular(Dt.rMd),
-            child: SizedBox(width: width, child: child),
+          final drag = holdToMove(
+            id: id,
+            width: width,
+            touch: touch,
+            child: child,
           );
-          final ghost = Opacity(opacity: 0.35, child: child);
-          final drag = touch
-              ? LongPressDraggable<String>(
-                  data: id,
-                  feedback: feedback,
-                  childWhenDragging: ghost,
-                  hapticFeedbackOnStart: true,
-                  child: child,
-                )
-              : Draggable<String>(
-                  data: id,
-                  feedback: feedback,
-                  childWhenDragging: ghost,
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.grab,
-                    child: child,
-                  ),
-                );
           return DragTarget<String>(
             onWillAcceptWithDetails: (d) {
               if (d.data == id) return false;
@@ -1043,7 +1024,10 @@ class FigureStat extends StatelessWidget {
         FittedBox(
           fit: BoxFit.scaleDown,
           alignment: Alignment.centerLeft,
-          child: Text(value, style: Dt.tab(theme.textTheme.titleLarge!)),
+          child: AnimatedValueText(
+            value,
+            style: Dt.tab(theme.textTheme.titleLarge!),
+          ),
         ),
         if (caption != null)
           Text(

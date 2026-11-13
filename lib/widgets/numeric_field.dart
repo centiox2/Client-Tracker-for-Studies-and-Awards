@@ -6,6 +6,8 @@ import 'package:flutter/services.dart'
         FilteringTextInputFormatter,
         LengthLimitingTextInputFormatter;
 
+import 'package:flutter/scheduler.dart';
+
 import '../design/app_theme.dart';
 
 /// A fast numeric field for cumulative client counts.
@@ -96,9 +98,58 @@ enum PlusOne {
   always,
 }
 
+/// Turns drawn cells into real editors a few per frame, so a page with dozens
+/// of cells (the weekly tracker) appears at once instead of building every
+/// editor before its first frame. The whole grid is live within a few
+/// frames; a cell that's pointed at or focused first goes live straight
+/// away.
+abstract final class _EditorQueue {
+  static const _perFrame = 12;
+  static final _waiting = <_NumericFieldState>[];
+  static bool _scheduled = false;
+
+  /// Cells that went live straight away in the frame being built.
+  static int _builtNow = 0;
+
+  /// Whether a new cell can be live straight away: the first dozen in a
+  /// frame are (a lone field, a dialog's few); the rest of a big grid wait.
+  static bool claim() {
+    if (_builtNow == 0) {
+      SchedulerBinding.instance.addPostFrameCallback((_) => _builtNow = 0);
+    }
+    if (_builtNow >= _perFrame) return false;
+    _builtNow++;
+    return true;
+  }
+
+  static void add(_NumericFieldState cell) {
+    _waiting.add(cell);
+    _schedule();
+  }
+
+  static void remove(_NumericFieldState cell) => _waiting.remove(cell);
+
+  static void _schedule() {
+    if (_scheduled) return;
+    _scheduled = true;
+    SchedulerBinding.instance
+      ..scheduleFrameCallback((_) {
+        _scheduled = false;
+        for (var i = 0; i < _perFrame && _waiting.isNotEmpty; i++) {
+          _waiting.removeAt(0)._goLive();
+        }
+        if (_waiting.isNotEmpty) _schedule();
+      })
+      ..scheduleFrame();
+  }
+}
+
 class _NumericFieldState extends State<NumericField> {
   late final TextEditingController _controller;
-  late final FocusNode _focus;
+  late FocusNode _focus;
+
+  /// False while the cell is only drawn (see [_EditorQueue]).
+  bool _live = false;
   bool _suppress = false;
   bool _focused = false;
   bool _hovering = false;
@@ -151,11 +202,30 @@ class _NumericFieldState extends State<NumericField> {
     _controller = TextEditingController(text: _display(widget.value));
     _focus = widget.focusNode ?? FocusNode();
     _focus.addListener(_onFocusChanged);
+    if (widget.autofocus || _EditorQueue.claim()) {
+      _live = true;
+    } else {
+      _EditorQueue.add(this);
+    }
+  }
+
+  void _goLive() {
+    if (_live || !mounted) return;
+    _EditorQueue.remove(this);
+    setState(() => _live = true);
   }
 
   @override
   void didUpdateWidget(covariant NumericField old) {
     super.didUpdateWidget(old);
+    // A different focus node: listen to the new one, not the old (which
+    // would otherwise call back into this field after it has gone).
+    if (old.focusNode != widget.focusNode) {
+      _focus.removeListener(_onFocusChanged);
+      if (old.focusNode == null) _focus.dispose();
+      _focus = widget.focusNode ?? FocusNode();
+      _focus.addListener(_onFocusChanged);
+    }
     // Refresh text when the value changes externally (e.g. refresh/reload),
     // but never while the user is editing this exact field. A show-zeros
     // preference change is different: it changes only the presentation of a
@@ -171,6 +241,9 @@ class _NumericFieldState extends State<NumericField> {
   }
 
   void _onFocusChanged() {
+    // Focus can move as the field leaves the screen (a week switched, a
+    // row scrolled away): nothing to redraw then.
+    if (!mounted) return;
     setState(() => _focused = _focus.hasFocus);
     if (_focus.hasFocus) {
       // Select all so the first keystroke replaces the current value.
@@ -214,6 +287,9 @@ class _NumericFieldState extends State<NumericField> {
 
   @override
   void dispose() {
+    _EditorQueue.remove(this);
+    // A focus node passed in outlives this field: stop listening to it.
+    _focus.removeListener(_onFocusChanged);
     if (widget.focusNode == null) _focus.dispose();
     _controller.dispose();
     super.dispose();
@@ -242,6 +318,40 @@ class _NumericFieldState extends State<NumericField> {
         color: color,
       ),
     );
+
+    if (!_live) {
+      // Drawn like the editor at rest; pointing at it or clicking it makes
+      // it the real editor at once (the click then places the cursor).
+      final empty = _controller.text.isEmpty;
+      final drawn = MouseRegion(
+        onEnter: (_) => _goLive(),
+        child: Listener(
+          onPointerDown: (_) => _goLive(),
+          child: SizedBox(
+            width: widget.width.isFinite ? widget.width : null,
+            height: widget.height,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: rest,
+                borderRadius: BorderRadius.circular(Dt.rSm),
+              ),
+              child: Center(
+                child: Text(
+                  empty ? widget.placeholder : _controller.text,
+                  maxLines: 1,
+                  style: empty
+                      ? digits(Dt.textFaint(theme), FontWeight.w400)
+                      : digits(valueColor, FontWeight.w600),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      return _guarded && widget.dimGuarded
+          ? Opacity(opacity: 0.45, child: drawn)
+          : drawn;
+    }
 
     final field = Focus(
       // Keep this key-handler node separate from the TextField's node. The

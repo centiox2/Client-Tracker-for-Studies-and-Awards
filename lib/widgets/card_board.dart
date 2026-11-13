@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show kLongPressTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -17,8 +18,9 @@ class BoardCard {
   final int column;
 }
 
-/// Cards in columns that can be moved anywhere: drag one (press and hold on
-/// a phone or tablet) onto another card to put it there, or onto the empty
+/// Cards in columns that can be moved anywhere: press and hold one (a
+/// moment with the mouse, a long press on a phone or tablet), then drag it
+/// onto another card to put it there, or onto the empty
 /// space under any column. Where each card sits is remembered on this
 /// device, separately for each number of columns (a phone's single column
 /// keeps its own order).
@@ -39,6 +41,9 @@ class CardBoard extends ConsumerStatefulWidget {
 
   /// Prefix of the saved layouts (Settings › Reset card order clears it).
   static const prefPrefix = 'board.';
+
+  /// How long the mouse button is held before a card lifts.
+  static const holdMs = 350;
 
   @override
   ConsumerState<CardBoard> createState() => _CardBoardState();
@@ -134,10 +139,7 @@ class _CardBoardState extends ConsumerState<CardBoard> {
     ref.watch(cardOrderVersionProvider);
     final c = context.clarity;
     final byId = {for (final card in widget.cards) card.id: card.child};
-    final touch =
-        MediaQuery.sizeOf(context).width < 1050 ||
-        defaultTargetPlatform == TargetPlatform.android ||
-        defaultTargetPlatform == TargetPlatform.iOS;
+    final touch = touchLayout(context);
 
     return LayoutBuilder(
       builder: (context, box) {
@@ -150,39 +152,14 @@ class _CardBoardState extends ConsumerState<CardBoard> {
 
         Widget draggable(String id) {
           final child = byId[id]!;
-          final feedback = Material(
-            color: Colors.transparent,
-            elevation: 10,
-            borderRadius: BorderRadius.circular(Dt.rMd),
-            child: Opacity(
-              opacity: 0.92,
-              child: SizedBox(width: width, child: child),
-            ),
+          return holdToMove(
+            id: id,
+            width: width,
+            touch: touch,
+            onStart: () => setState(() => _dragging = true),
+            onEnd: () => setState(() => _dragging = false),
+            child: child,
           );
-          final ghost = Opacity(opacity: 0.3, child: child);
-          void start() => setState(() => _dragging = true);
-          void end() => setState(() => _dragging = false);
-          return touch
-              ? LongPressDraggable<String>(
-                  data: id,
-                  feedback: feedback,
-                  childWhenDragging: ghost,
-                  hapticFeedbackOnStart: true,
-                  onDragStarted: start,
-                  onDragEnd: (_) => end(),
-                  child: child,
-                )
-              : Draggable<String>(
-                  data: id,
-                  feedback: feedback,
-                  childWhenDragging: ghost,
-                  onDragStarted: start,
-                  onDragEnd: (_) => end(),
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.grab,
-                    child: child,
-                  ),
-                );
         }
 
         Widget slot(int col, String id) => DragTarget<String>(
@@ -254,4 +231,57 @@ class _CardBoardState extends ConsumerState<CardBoard> {
       },
     );
   }
+}
+
+/// Whether cards are moved with a finger (phones, tablets, narrow windows)
+/// or a mouse; only how long the hold is changes.
+bool touchLayout(BuildContext context) =>
+    MediaQuery.sizeOf(context).width < 1050 ||
+    defaultTargetPlatform == TargetPlatform.android ||
+    defaultTargetPlatform == TargetPlatform.iOS;
+
+/// A card that can be moved: press and hold (a moment with the mouse, a long
+/// press by touch), then drag. A click, or quick clicks, never lifts it, so
+/// its own buttons and links work as normal. Lifted, it shows a white
+/// outline: ready to be moved.
+Widget holdToMove({
+  required String id,
+  required double width,
+  required bool touch,
+  required Widget child,
+  VoidCallback? onStart,
+  VoidCallback? onEnd,
+}) {
+  final feedback = Material(
+    color: Colors.transparent,
+    elevation: 12,
+    borderRadius: BorderRadius.circular(Dt.rMd),
+    child: DecoratedBox(
+      key: const ValueKey('board-lifted'),
+      position: DecorationPosition.foreground,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(Dt.rMd),
+        border: Border.all(color: Colors.white, width: 2),
+        // Keeps the white outline visible on a light page.
+        boxShadow: const [BoxShadow(color: Color(0x33000000), spreadRadius: 1)],
+      ),
+      child: Opacity(
+        opacity: 0.95,
+        child: SizedBox(width: width, child: child),
+      ),
+    ),
+  );
+  return LongPressDraggable<String>(
+    data: id,
+    delay: touch
+        ? kLongPressTimeout
+        : const Duration(milliseconds: CardBoard.holdMs),
+    feedback: feedback,
+    childWhenDragging: Opacity(opacity: 0.3, child: child),
+    hapticFeedbackOnStart: true,
+    onDragStarted: onStart,
+    onDragEnd: onEnd == null ? null : (_) => onEnd(),
+    onDraggableCanceled: onEnd == null ? null : (_, _) => onEnd(),
+    child: child,
+  );
 }

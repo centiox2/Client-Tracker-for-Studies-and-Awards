@@ -2,65 +2,73 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:client_tracker/widgets/motion.dart';
 
+/// Changing page fades the old one out. It must keep the old page as it is
+/// while it fades: version 1.3.0 threw it away and built it again from
+/// scratch (with every editor on the weekly tracker), which made every
+/// page change slow.
 void main() {
-  Widget host(Widget child, {bool reduceMotion = false}) => MaterialApp(
-    home: MediaQuery(
-      data: MediaQueryData(disableAnimations: reduceMotion),
-      child: Scaffold(body: Center(child: child)),
-    ),
-  );
+  testWidgets('the page that is leaving is not built again', (tester) async {
+    final starts = <String, int>{};
+    Widget page(String name) =>
+        KeyedSubtree(key: ValueKey(name), child: _Page(name, starts));
+    Widget app(String name) =>
+        MaterialApp(home: FadeThroughSwitcher(child: page(name)));
 
-  testWidgets('numbers count up to their value, then to new values', (
-    tester,
-  ) async {
-    await tester.pumpWidget(host(const AnimatedValueText('120')));
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('120'), findsNothing, reason: 'still counting');
-    await tester.pumpAndSettle();
-    expect(find.text('120'), findsOneWidget);
+    await tester.pumpWidget(app('tracker'));
+    expect(starts, {'tracker': 1});
 
-    await tester.pumpWidget(host(const AnimatedValueText('26.3')));
-    await tester.pumpAndSettle();
-    expect(find.text('26.3'), findsOneWidget);
+    await tester.pumpWidget(app('revenue'));
+    await tester.pump(const Duration(milliseconds: 50));
+    // Both are on screen mid-change; the tracker is the same one as before.
+    expect(find.text('tracker'), findsOneWidget);
+    expect(find.text('revenue'), findsOneWidget);
+    expect(starts, {'tracker': 1, 'revenue': 1});
 
-    // Words just fade in.
-    await tester.pumpWidget(host(const AnimatedValueText('Tuesday')));
     await tester.pumpAndSettle();
-    expect(find.text('Tuesday'), findsOneWidget);
+    expect(find.text('tracker'), findsNothing);
+    expect(starts, {'tracker': 1, 'revenue': 1});
   });
 
-  testWidgets('reduced motion shows final values at once', (tester) async {
-    await tester.pumpWidget(
-      host(const AnimatedValueText('120'), reduceMotion: true),
-    );
-    expect(find.text('120'), findsOneWidget);
-
-    await tester.pumpWidget(
-      host(
-        const GrowIn(child: SizedBox(width: 10, height: 50)),
-        reduceMotion: true,
+  testWidgets('only the new page takes clicks', (tester) async {
+    var oldTaps = 0;
+    var newTaps = 0;
+    Widget app(bool second) => MaterialApp(
+      home: FadeThroughSwitcher(
+        child: KeyedSubtree(
+          key: ValueKey(second),
+          child: SizedBox.expand(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => second ? newTaps++ : oldTaps++,
+            ),
+          ),
+        ),
       ),
     );
-    expect(
-      find.descendant(
-        of: find.byType(GrowIn),
-        matching: find.byType(Transform),
-      ),
-      findsNothing,
-    );
+    await tester.pumpWidget(app(false));
+    await tester.pumpWidget(app(true));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tapAt(const Offset(100, 100));
+    expect(oldTaps, 0);
+    expect(newTaps, 1);
   });
+}
 
-  testWidgets('the live dot rings once per new update, then rests', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      host(const LiveDot(color: Colors.green, pingKey: 1)),
-    );
-    await tester.pumpWidget(
-      host(const LiveDot(color: Colors.green, pingKey: 2)),
-    );
-    await tester.pump(const Duration(milliseconds: 300));
-    // A finite animation: the app settles (no endless pulsing).
-    await tester.pumpAndSettle();
-  });
+class _Page extends StatefulWidget {
+  const _Page(this.name, this.starts);
+  final String name;
+  final Map<String, int> starts;
+  @override
+  State<_Page> createState() => _PageState();
+}
+
+class _PageState extends State<_Page> {
+  @override
+  void initState() {
+    super.initState();
+    widget.starts.update(widget.name, (n) => n + 1, ifAbsent: () => 1);
+  }
+
+  @override
+  Widget build(BuildContext context) => Text(widget.name);
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -7,6 +8,7 @@ import '../../services/account_services.dart';
 import '../../services/app_info.dart';
 import '../../state/app_state.dart';
 import '../../widgets/clarity.dart';
+import '../../widgets/motion.dart';
 import '../../widgets/panels.dart';
 import '../quick_search/shortcuts_dialog.dart';
 
@@ -88,23 +90,27 @@ Future<void> showWhatsNew(BuildContext context) => showDialog<void>(
 
 // ------------------------------------------------------------- text size --
 
-/// Normal / Large / Larger.
+/// Smaller to Larger. Chips, so all five fit (on two lines on a phone).
 class TextSizePicker extends ConsumerWidget {
   const TextSizePicker({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scale = ref.watch(textScaleProvider);
-    return SegmentedButton<double>(
+    return Wrap(
       key: const ValueKey('text-size'),
-      segments: [
+      spacing: 8,
+      runSpacing: 8,
+      children: [
         for (final (v, label) in TextScaleNotifier.sizes)
-          ButtonSegment(value: v, label: Text(label)),
+          ChoiceChip(
+            key: ValueKey('text-size-$label'),
+            label: Text(label),
+            selected: (scale - v).abs() < 0.001,
+            showCheckmark: false,
+            onSelected: (_) => ref.read(textScaleProvider.notifier).set(v),
+          ),
       ],
-      selected: {scale},
-      showSelectedIcon: false,
-      onSelectionChanged: (s) =>
-          ref.read(textScaleProvider.notifier).set(s.first),
     );
   }
 }
@@ -117,7 +123,10 @@ Future<void> showTextSize(BuildContext context) => showDialog<void>(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('For this device. Larger text may show fewer items at once.'),
+        Text(
+          'For this device. Smaller text fits more on the screen; larger '
+          'text is easier to read.',
+        ),
         SizedBox(height: 14),
         TextSizePicker(),
       ],
@@ -480,6 +489,29 @@ class AboutSection extends ConsumerStatefulWidget {
 
 class _AboutSectionState extends ConsumerState<AboutSection> {
   List<ErrorReport>? _errors;
+
+  /// The problem whose details are open (one at a time).
+  int? _open;
+
+  /// A problem as plain text: what to paste into a message or a chat.
+  static String _asText(ErrorReport e) => [
+    e.message,
+    [
+      'Seen ${e.count}× · last ${_when(e.lastSeen)}',
+      if (e.version.isNotEmpty) 'v${e.version}',
+      if (e.platform.isNotEmpty) e.platform,
+      if (e.who.isNotEmpty) e.who,
+    ].join(' · '),
+    if (e.stack.trim().isNotEmpty) e.stack.trimRight(),
+  ].join('\n');
+
+  Future<void> _copy(String text, String what) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('$what copied')));
+  }
+
   String? _error;
 
   @override
@@ -543,7 +575,16 @@ class _AboutSectionState extends ConsumerState<AboutSection> {
                 children: [
                   Text('PROBLEMS REPORTED', style: microLabel(theme)),
                   const Spacer(),
-                  if (errors != null && errors.isNotEmpty)
+                  if (errors != null && errors.isNotEmpty) ...[
+                    TextButton.icon(
+                      key: const ValueKey('copy-all-problems'),
+                      onPressed: () => _copy(
+                        errors.take(10).map(_asText).join('\n\n'),
+                        errors.length == 1 ? 'Problem' : 'Problems',
+                      ),
+                      icon: const Icon(Icons.copy, size: 14),
+                      label: const Text('Copy all'),
+                    ),
                     TextButton(
                       onPressed: () async {
                         await ref.read(errorsServiceProvider).clear();
@@ -551,6 +592,7 @@ class _AboutSectionState extends ConsumerState<AboutSection> {
                       },
                       child: const Text('Clear'),
                     ),
+                  ],
                 ],
               ),
               const SizedBox(height: 6),
@@ -565,48 +607,114 @@ class _AboutSectionState extends ConsumerState<AboutSection> {
                   style: theme.textTheme.bodySmall,
                 )
               else
-                for (final e in errors.take(10))
-                  Tooltip(
-                    message: e.stack,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      decoration: BoxDecoration(
-                        border: Border(top: BorderSide(color: c.borderSubtle)),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          StatusPill(
-                            '×${e.count}',
-                            tone: e.count > 5
-                                ? PillTone.negative
-                                : PillTone.warning,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
+                for (final (i, e) in errors.take(10).indexed)
+                  DecoratedBox(
+                    key: ValueKey('problem-$i'),
+                    decoration: BoxDecoration(
+                      border: Border(top: BorderSide(color: c.borderSubtle)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        InkWell(
+                          // Tap to see (and copy) the details.
+                          onTap: () =>
+                              setState(() => _open = _open == i ? null : i),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  e.message,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.bodyMedium,
+                                StatusPill(
+                                  '×${e.count}',
+                                  tone: e.count > 5
+                                      ? PillTone.negative
+                                      : PillTone.warning,
                                 ),
-                                Text(
-                                  [
-                                    _when(e.lastSeen),
-                                    if (e.version.isNotEmpty) 'v${e.version}',
-                                    if (e.platform.isNotEmpty) e.platform,
-                                    if (e.who.isNotEmpty) e.who,
-                                  ].join(' · '),
-                                  style: theme.textTheme.bodySmall,
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        e.message,
+                                        maxLines: _open == i ? null : 2,
+                                        overflow: _open == i
+                                            ? null
+                                            : TextOverflow.ellipsis,
+                                        style: theme.textTheme.bodyMedium,
+                                      ),
+                                      Text(
+                                        [
+                                          _when(e.lastSeen),
+                                          if (e.version.isNotEmpty)
+                                            'v${e.version}',
+                                          if (e.platform.isNotEmpty) e.platform,
+                                          if (e.who.isNotEmpty) e.who,
+                                        ].join(' · '),
+                                        style: theme.textTheme.bodySmall,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                IconButton(
+                                  key: ValueKey('copy-problem-$i'),
+                                  tooltip: 'Copy',
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: () => _copy(_asText(e), 'Problem'),
+                                  icon: const Icon(Icons.copy, size: 16),
+                                ),
+                                Icon(
+                                  _open == i
+                                      ? Icons.expand_less
+                                      : Icons.expand_more,
+                                  size: 20,
+                                  color: Dt.textMuted(theme),
                                 ),
                               ],
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                        AnimatedSize(
+                          duration: Motion.of(context, Motion.fast),
+                          curve: Motion.curve,
+                          alignment: Alignment.topCenter,
+                          child: _open != i || e.stack.trim().isEmpty
+                              ? const SizedBox(width: double.infinity)
+                              : Container(
+                                  key: ValueKey('problem-details-$i'),
+                                  margin: const EdgeInsets.only(bottom: 10),
+                                  padding: const EdgeInsets.all(12),
+                                  constraints: const BoxConstraints(
+                                    maxHeight: 260,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: theme
+                                        .colorScheme
+                                        .surfaceContainerHighest,
+                                    border: Border.all(
+                                      color: theme.colorScheme.outline,
+                                    ),
+                                    borderRadius: BorderRadius.circular(Dt.rSm),
+                                  ),
+                                  child: SingleChildScrollView(
+                                    child: SelectableText(
+                                      e.stack.trimRight(),
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                            fontFamily: 'monospace',
+                                            fontFamilyFallback: const [
+                                              'Consolas',
+                                              'Courier New',
+                                            ],
+                                            height: 1.5,
+                                          ),
+                                    ),
+                                  ),
+                                ),
+                        ),
+                      ],
                     ),
                   ),
             ],

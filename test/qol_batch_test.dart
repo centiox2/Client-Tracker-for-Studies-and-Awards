@@ -18,6 +18,8 @@ import 'package:client_tracker/services/app_info.dart';
 import 'package:client_tracker/services/print_views.dart';
 import 'package:client_tracker/state/app_state.dart';
 
+import 'package:client_tracker/widgets/card_board.dart';
+
 import 'test_helpers.dart';
 
 /// Version, undo after deleting, printable PDFs, keyboard shortcuts,
@@ -333,13 +335,35 @@ void main() {
     expect(find.text('Daily reports'), findsOneWidget);
   });
 
-  testWidgets('on a Windows PC a card drags straight away with the mouse', (
+  testWidgets('on a Windows PC a card moves only after press and hold', (
     tester,
   ) async {
     WeekRepository(db).createWeekFor(DateTime.now());
     await pumpApp(tester);
     Offset at(String label) => tester.getCenter(find.text(label).first);
-    final gesture = await tester.startGesture(
+    final before = at('Existing clients');
+    final lifted = find.byKey(const ValueKey('board-lifted'));
+
+    // A click is a click: it never lifts the card, and the card's own
+    // action runs (this one opens the weekly tracker).
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ClientTrackerApp)),
+    );
+    final click = await tester.startGesture(
+      at('Existing clients'),
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(lifted, findsNothing);
+    await click.up();
+    await tester.pumpAndSettle();
+    expect(lifted, findsNothing);
+    expect(container.read(navTabProvider), isNot(AppTab.home));
+    container.read(navTabProvider.notifier).set(AppTab.home);
+    await tester.pumpAndSettle();
+
+    // Nor does a click that drifts as it's pressed.
+    var gesture = await tester.startGesture(
       at('Existing clients'),
       kind: PointerDeviceKind.mouse,
     );
@@ -347,8 +371,28 @@ void main() {
     await tester.pump();
     await gesture.moveTo(at('Active staff'));
     await tester.pump();
+    expect(lifted, findsNothing);
     await gesture.up();
     await tester.pumpAndSettle();
+    expect(at('Existing clients'), before);
+
+    // Hold: it lifts with a white outline, then moves where it's dropped.
+    gesture = await tester.startGesture(
+      at('Existing clients'),
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump(const Duration(milliseconds: CardBoard.holdMs + 50));
+    await gesture.moveBy(const Offset(30, 0));
+    await tester.pump();
+    expect(lifted, findsOneWidget);
+    final outline =
+        tester.widget<DecoratedBox>(lifted).decoration as BoxDecoration;
+    expect((outline.border! as Border).top.color, Colors.white);
+    await gesture.moveTo(at('Active staff'));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(lifted, findsNothing);
     expect(at('Existing clients').dy, at('Active staff').dy);
     expect(at('Existing clients').dx, greaterThan(at('Active staff').dx));
   }, variant: TargetPlatformVariant.only(TargetPlatform.windows));

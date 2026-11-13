@@ -28,12 +28,18 @@ class FadeThroughSwitcher extends StatelessWidget {
     // then the new one comes in. The two never show over each other.
     switchInCurve: const Interval(0.3, 1, curve: Motion.curve),
     switchOutCurve: const Interval(0.7, 1, curve: Curves.easeIn),
-    // Only the incoming page lays out; the old one just fades on top.
+    // The old page fades out under the new one and takes no clicks. Both
+    // are wrapped the same way and keyed by their page, so the page that's
+    // leaving keeps its place in the tree. (Wrapping only the old one
+    // made Flutter throw it away and build it again from scratch just to
+    // fade it out — the main cost of every page change.)
     layoutBuilder: (current, previous) => Stack(
       alignment: Alignment.topCenter,
       children: [
-        for (final p in previous) IgnorePointer(child: p),
-        ?current,
+        for (final p in previous)
+          IgnorePointer(key: p.key, ignoring: true, child: p),
+        if (current != null)
+          IgnorePointer(key: current.key, ignoring: false, child: current),
       ],
     ),
     transitionBuilder: (child, animation) => FadeTransition(
@@ -78,8 +84,10 @@ class FadeSlideIn extends StatelessWidget {
 }
 
 /// A number that counts to its value: up from zero when it first appears,
-/// then from the old value to the new one when it changes. Text that isn't a
-/// plain number ("26.3" counts too; "Tuesday" or "–") fades instead.
+/// then from the old value to the new one when it changes. A figure with
+/// one number in it counts too, keeping its words and thousands commas
+/// ("KSh 12,300", "45%", "26.3 h"); anything else ("Tuesday", "3 of 5",
+/// "–") fades instead.
 class AnimatedValueText extends StatelessWidget {
   const AnimatedValueText(
     this.value, {
@@ -96,7 +104,35 @@ class AnimatedValueText extends StatelessWidget {
   final int? maxLines;
   final TextOverflow? overflow;
 
-  static final _number = RegExp(r'^-?\d+(\.\d+)?$');
+  static final _figure = RegExp(r'^(\D*?)(-?\d[\d,]*(?:\.\d+)?)(\D*)$');
+
+  /// The words before, the number and the words after, or null when
+  /// [value] isn't a single number.
+  static (String, double, int, bool, String)? parse(String value) {
+    final m = _figure.firstMatch(value);
+    if (m == null) return null;
+    final digits = m[2]!;
+    // "1,2" isn't a thousands figure; leave odd text alone.
+    if (digits.contains(',') &&
+        !RegExp(r'^-?\d{1,3}(,\d{3})*(\.\d+)?$').hasMatch(digits)) {
+      return null;
+    }
+    final plain = digits.replaceAll(',', '');
+    final decimals = plain.contains('.') ? plain.split('.').last.length : 0;
+    return (m[1]!, double.parse(plain), decimals, digits.contains(','), m[3]!);
+  }
+
+  static String _format(double v, int decimals, bool commas) {
+    final s = v.toStringAsFixed(decimals);
+    if (!commas) return s;
+    final neg = s.startsWith('-');
+    final parts = (neg ? s.substring(1) : s).split('.');
+    final whole = parts.first.replaceAllMapped(
+      RegExp(r'\B(?=(\d{3})+(?!\d))'),
+      (_) => ',',
+    );
+    return '${neg ? '-' : ''}$whole${parts.length > 1 ? '.${parts[1]}' : ''}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -108,21 +144,25 @@ class AnimatedValueText extends StatelessWidget {
       overflow: overflow,
     );
     final duration = Motion.of(context, Motion.slow);
-    if (!_number.hasMatch(value) || duration == Duration.zero) {
+    final parts = parse(value);
+    if (parts == null || duration == Duration.zero) {
       return AnimatedSwitcher(
         duration: Motion.of(context, Motion.fast),
         child: KeyedSubtree(key: ValueKey(value), child: text(value)),
       );
     }
-    final decimals = value.contains('.') ? value.split('.').last.length : 0;
-    final target = double.parse(value);
+    final (before, target, decimals, commas, after) = parts;
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: target),
       duration: duration,
       curve: Motion.curve,
       builder: (context, v, _) =>
           // The final frame shows the exact text it was given.
-          text(v == target ? value : v.toStringAsFixed(decimals)),
+          text(
+            v == target
+                ? value
+                : '$before${_format(v, decimals, commas)}$after',
+          ),
     );
   }
 }

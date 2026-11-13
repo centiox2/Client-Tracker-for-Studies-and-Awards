@@ -913,8 +913,8 @@ class SidebarCollapsedNotifier extends Notifier<bool> {
   }
 }
 
-/// Text size on this device: 1.0 normal, 1.15 large, 1.3 larger. Applied on
-/// top of the computer's own setting; never synced.
+/// Text size on this device, from 0.8 (smaller) to 1.3 (larger); 1.0 is
+/// normal. Applied on top of the computer's own setting; never synced.
 final textScaleProvider = NotifierProvider<TextScaleNotifier, double>(
   TextScaleNotifier.new,
 );
@@ -922,6 +922,8 @@ final textScaleProvider = NotifierProvider<TextScaleNotifier, double>(
 class TextScaleNotifier extends Notifier<double> {
   static const _key = 'text_scale';
   static const sizes = <(double, String)>[
+    (0.8, 'Smaller'),
+    (0.9, 'Small'),
     (1.0, 'Normal'),
     (1.15, 'Large'),
     (1.3, 'Larger'),

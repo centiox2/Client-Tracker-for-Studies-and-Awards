@@ -416,8 +416,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         key: ValueKey('settings-${current.id}'),
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (final section in current.sections) ...[
-            section,
+          for (final (i, section) in current.sections.indexed) ...[
+            FadeSlideIn(index: i, child: section),
             const SizedBox(height: 12),
           ],
         ],
@@ -614,9 +614,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         final counts = await ref
             .read(cloudSyncProvider.notifier)
             .restoreOnline(online);
-        final back = counts.values
-            .whereType<num>()
-            .fold<num>(0, (a, b) => a + b);
+        final back = counts.values.whereType<num>().fold<num>(
+          0,
+          (a, b) => a + b,
+        );
         message = back == 0
             ? 'Data restored. Daily reports and departments online were '
                   'already complete.'
@@ -631,9 +632,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       }
     }
     if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
     }
   }
 }

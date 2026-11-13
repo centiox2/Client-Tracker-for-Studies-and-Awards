@@ -564,7 +564,12 @@ void main() {
     );
     await pumpApp(tester, admin: true);
 
-    await tester.tap(find.text('Reports').first);
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('sidebar')),
+        matching: find.text('Reports'),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Details'));
     await tester.pumpAndSettle();

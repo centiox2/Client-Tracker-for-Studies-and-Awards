@@ -69,6 +69,11 @@ abstract final class Dt {
   /// The accent: the brand navy on light, the brand gold on dark.
   static Color brand(Brightness b) => Clarity.forBrightness(b).accent;
 
+  /// Money: revenue bars and figures. A clear "cash" green that reads on
+  /// both the light and the dark page.
+  static Color money(Brightness b) =>
+      b == Brightness.dark ? const Color(0xFF34D399) : const Color(0xFF16A34A);
+
   /// Text and icons on [brand].
   static Color onBrand(Brightness b) => Clarity.forBrightness(b).onAccent;
 

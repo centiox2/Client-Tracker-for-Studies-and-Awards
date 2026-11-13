@@ -967,7 +967,7 @@ class MoneyBars extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final color = Dt.brand(theme.brightness);
+    final color = Dt.money(theme.brightness);
     final max = bars.fold<int>(0, (m, b) => b.cents > m ? b.cents : m);
     final withMoney = bars.where((b) => b.cents > 0).toList();
     final avg = withMoney.isEmpty
@@ -1215,7 +1215,7 @@ class _HBars extends StatelessWidget {
                           decoration: BoxDecoration(
                             color: r.cents == 0
                                 ? scheme.onSurface.withValues(alpha: 0.12)
-                                : Dt.brand(theme.brightness),
+                                : Dt.money(theme.brightness),
                             borderRadius: const BorderRadius.horizontal(
                               right: Radius.circular(4),
                             ),

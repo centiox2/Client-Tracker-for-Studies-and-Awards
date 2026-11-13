@@ -48,6 +48,10 @@ class ClientTrackerApp extends ConsumerWidget {
       theme: buildAppTheme(Brightness.light),
       darkTheme: buildAppTheme(Brightness.dark),
       themeMode: themeMode,
+      // Light ⇄ dark switches at once. The default 200 ms fade rebuilds the
+      // whole app with in-between colours on every frame, which made the
+      // switch feel slow.
+      themeAnimationDuration: Duration.zero,
       // Text size (Settings or the account menu), on top of the computer's.
       builder: (context, child) {
         if (scale == 1.0) return child!;
@@ -637,18 +641,42 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       );
     }
 
+    // The page takes its final width at once, and the sidebar slides over a
+    // strip of its own colour. Squeezing the page frame by frame as the
+    // sidebar opened or closed laid every card and chart out again on each
+    // frame, which made it feel slow.
+    final sideWidth = ref.watch(sidebarCollapsedProvider)
+        ? _AppSidebar.stripWidth
+        : _AppSidebar.fullWidth;
     return Scaffold(
-      body: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: Stack(
         children: [
-          _AppSidebar(
-            reportDue: reportDue,
-            tabs: _tabs,
-            selected: tab,
-            onSelect: (value) => ref.read(navTabProvider.notifier).set(value),
-            onSearch: () => showQuickSearch(context),
+          Positioned.fill(
+            left: sideWidth,
+            child: RepaintBoundary(child: content),
           ),
-          Expanded(child: content),
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: sideWidth,
+            child: ColoredBox(color: context.clarity.surface),
+          ),
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            child: RepaintBoundary(
+              child: _AppSidebar(
+                reportDue: reportDue,
+                tabs: _tabs,
+                selected: tab,
+                onSelect: (value) =>
+                    ref.read(navTabProvider.notifier).set(value),
+                onSearch: () => showQuickSearch(context),
+              ),
+            ),
+          ),
         ],
       ),
     );
