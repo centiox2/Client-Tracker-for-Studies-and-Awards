@@ -85,6 +85,36 @@ class Application {
   bool offerOverdue(DateTime today) =>
       (offerWaitDays(today) ?? 0) > ApplicationRepository.offerReminderDays;
 
+  /// Every date written in the to-do list and the follow-up update, wherever
+  /// it sits in the line ("03/11/2026- Paid", "Called 5/11/26", "Paid on
+  /// 4-11-2026"), day first as the team writes them, with the line it's on.
+  /// The follow-up's lines come second in each pair: (date, line, followUp).
+  List<(DateTime, String, bool)> get noteDates => [
+    for (final line in todo.split('\n'))
+      for (final d in datesIn(line)) (d, line.trim(), false),
+    for (final line in followUp.split('\n'))
+      for (final d in datesIn(line)) (d, line.trim(), true),
+  ];
+
+  static final _anyDate = RegExp(
+    // Not inside a longer run of numbers ("1/2/3/4"); a dash or full stop
+    // right after the date is fine ("03/11/2026- Paid").
+    r'(?<!\d|\d[/.-])(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})(?!\d|[/.-]\d)',
+  );
+
+  /// The real calendar dates in [text], day first.
+  static List<DateTime> datesIn(String text) => [
+    for (final m in _anyDate.allMatches(text))
+      ?_calendarDate(int.parse(m[1]!), int.parse(m[2]!), int.parse(m[3]!)),
+  ];
+
+  static DateTime? _calendarDate(int d, int mo, int y) {
+    if (y < 100) y += 2000;
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    final t = DateTime(y, mo, d);
+    return t.month == mo ? t : null;
+  }
+
   /// The newest milestone date reached (documents, applied, offer, COE).
   DateTime? get lastStep => [coeDate, offerDate, appDate, docDate]
       .whereType<DateTime>()
@@ -325,6 +355,16 @@ class ApplicationRepository {
 
   ApplicationImport? get latestImport => imports(limit: 1).firstOrNull;
 
+  /// When the tracker first got applications (the oldest upload or sync):
+  /// changes are known from then on.
+  DateTime? get firstImportAt {
+    final r = _db.raw.select(
+      'SELECT MIN(imported_at) AS t FROM application_imports;',
+    );
+    final t = r.isEmpty ? null : r.first['t'] as String?;
+    return t == null ? null : DateTime.tryParse(t);
+  }
+
   /// What changed in one upload.
   List<ApplicationChange> changesFor(int importId) => [
     for (final r in _db.raw.select(
@@ -343,6 +383,19 @@ class ApplicationRepository {
     ))
       ApplicationChange.fromRow(r),
   ];
+
+  /// The newest change to each application, by its key. Only real changes
+  /// count: a field that changed, or the application being added.
+  Map<String, ApplicationChange> lastChanges() => {
+    for (final r in _db.raw.select(
+      'SELECT * FROM ('
+      '  SELECT *, ROW_NUMBER() OVER ('
+      '    PARTITION BY app_key ORDER BY changed_at DESC, id DESC) AS n '
+      '  FROM application_changes WHERE field <> \'removed\''
+      ') WHERE n = 1;',
+    ))
+      r['app_key']! as String: ApplicationChange.fromRow(r),
+  };
 
   /// Every change to one application, newest first.
   List<ApplicationChange> historyOf(String key) => [
@@ -750,4 +803,76 @@ class ApplicationCsvRow {
 
   /// For the INSERT: student, then [fields].
   List<Object?> get values => [student, ...fields];
+}
+
+/// The latest sign that someone worked on an application, and what it was.
+class ApplicationActivity {
+  const ApplicationActivity(this.day, this.what);
+
+  /// The day it happened (no time).
+  final DateTime day;
+
+  /// What happened, in words: "Status changed to Visa lodged",
+  /// "Follow-up: Called the school", "Offer letter received".
+  final String what;
+
+  /// Applications with no change for this many days or more are flagged.
+  static const staleDays = 14;
+
+  static DateTime _d(DateTime t) => DateTime(t.year, t.month, t.day);
+
+  static String _oneLine(String s) => s.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+  /// The newest of: a step date (documents, application, offer, COE); a
+  /// date written in the to-do list or follow-up; and [change], the last
+  /// change a sync saw; and when it came into the tracker (nothing before
+  /// that is known). Dates after [today]
+  /// (appointments, deadlines) aren't work done, so they're left out.
+  static ApplicationActivity? of(
+    Application a,
+    DateTime today, {
+    ApplicationChange? change,
+  }) {
+    final t = _d(today);
+    final found = <ApplicationActivity>[];
+    void add(DateTime? at, String what) {
+      if (at == null) return;
+      final d = _d(at);
+      if (!d.isAfter(t)) found.add(ApplicationActivity(d, what));
+    }
+
+    // A recorded change says the most, so it's listed first and wins ties.
+    if (change != null) add(change.at, describe(change));
+    for (final (d, line, follow) in a.noteDates) {
+      add(d, '${follow ? 'Follow-up' : 'To do'}: ${_oneLine(line)}');
+    }
+    add(a.coeDate, 'COE / CAS issued');
+    add(a.offerDate, 'Offer letter received');
+    add(a.appDate, 'Application submitted');
+    add(a.docDate, 'Documents submitted');
+    // Last, so anything more telling on the same day wins: nothing is known
+    // from before an application came into the tracker, so it's never
+    // counted as waiting longer than that.
+    add(a.updatedAt, 'No change since it came into the tracker');
+    if (found.isEmpty) return null;
+    return found.reduce((x, y) => y.day.isAfter(x.day) ? y : x);
+  }
+
+  /// A change in words.
+  static String describe(ApplicationChange c) {
+    final label = ApplicationRepository.fieldLabels[c.field] ?? c.field;
+    final value = _oneLine(c.newValue);
+    return switch (c.field) {
+      'added' => 'Added in Airtable',
+      'status' => 'Status changed to $value',
+      'assignee' => value.isEmpty ? 'Assignee removed' : 'Assigned to $value',
+      'todo' || 'follow_up' =>
+        value.isEmpty ? '$label cleared' : '$label updated: $value',
+      'doc_date' ||
+      'app_date' ||
+      'offer_date' ||
+      'coe_date' => value.isEmpty ? '$label date cleared' : '$label date set',
+      _ => value.isEmpty ? '$label cleared' : '$label changed to $value',
+    };
+  }
 }

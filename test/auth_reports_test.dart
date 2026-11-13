@@ -11,6 +11,7 @@ import 'package:client_tracker/repositories/report_repository.dart';
 import 'package:client_tracker/repositories/time_off_repository.dart';
 import 'package:client_tracker/repositories/week_repository.dart';
 import 'package:client_tracker/state/app_state.dart';
+import 'package:client_tracker/widgets/card_board.dart';
 
 import 'test_helpers.dart';
 
@@ -601,6 +602,42 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.text('Staff by day'), findsOneWidget);
+  });
+
+  testWidgets('on a phone the Reports tabs stay put when switching', (
+    tester,
+  ) async {
+    WeekRepository(db).createWeekFor(DateTime.now());
+    await pumpApp(tester, size: const Size(390, 844));
+    final tabs = find.byKey(const ValueKey('reports-view'));
+    // Near the start of the label: the test font draws letters as wide
+    // blocks, so the last label runs on under the share button.
+    Future<void> open(String tab) async {
+      final label = find.descendant(of: tabs, matching: find.text(tab));
+      await tester.tapAt(tester.getTopLeft(label) + const Offset(6, 6));
+      await tester.pumpAndSettle();
+    }
+
+    final quick = tester.getRect(tabs);
+    for (final tab in ['Details', 'Trends', 'Quick view']) {
+      await open(tab);
+      expect(tester.getRect(tabs), quick, reason: 'moved on $tab');
+    }
+    // Share keeps its place but only Quick view can use it.
+    final share = find.byKey(const ValueKey('share-summary'));
+    await open('Trends');
+    expect(share.hitTestable(), findsNothing);
+    await open('Quick view');
+    expect(share.hitTestable(), findsOneWidget);
+  });
+
+  testWidgets('every Quick view card can be moved', (tester) async {
+    WeekRepository(db).createWeekFor(DateTime.now());
+    await pumpApp(tester, size: const Size(1440, 1000));
+    final board = find.byType(CardBoard);
+    expect(board, findsOneWidget);
+    final cards = tester.widget<CardBoard>(board).cards.map((c) => c.id);
+    expect(cards, containsAll(['who', 'week', 'activity']));
   });
 
   testWidgets('Details month view scrolls sideways without overflow', (

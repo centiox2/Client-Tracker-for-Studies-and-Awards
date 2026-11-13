@@ -373,53 +373,20 @@ class _QuickView extends ConsumerWidget {
           },
         ),
         const SizedBox(height: 24),
-        if (compact) ...[
-          whoPanel,
-          const SizedBox(height: 12),
-          weekPanel,
-          if (reportsPanel != null) ...[
-            const SizedBox(height: 12),
-            reportsPanel,
+        // Press and hold any card to move it, like Overview.
+        CardBoard(
+          boardKey: 'reports.quick',
+          maxColumns: 2,
+          cards: [
+            BoardCard('who', whoPanel),
+            if (applicationsPanel != null)
+              BoardCard('applications', applicationsPanel),
+            BoardCard('week', weekPanel, column: 1),
+            if (reportsPanel != null)
+              BoardCard('reports', reportsPanel, column: 1),
+            BoardCard('activity', activityPanel, column: 1),
           ],
-          const SizedBox(height: 12),
-          activityPanel,
-          if (applicationsPanel != null) ...[
-            const SizedBox(height: 12),
-            applicationsPanel,
-          ],
-        ] else
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                flex: 5,
-                child: Column(
-                  children: [
-                    whoPanel,
-                    if (applicationsPanel != null) ...[
-                      const SizedBox(height: Dt.gap),
-                      applicationsPanel,
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(width: Dt.gap),
-              Expanded(
-                flex: 3,
-                child: Column(
-                  children: [
-                    weekPanel,
-                    if (reportsPanel != null) ...[
-                      const SizedBox(height: Dt.gap),
-                      reportsPanel,
-                    ],
-                    const SizedBox(height: Dt.gap),
-                    activityPanel,
-                  ],
-                ),
-              ),
-            ],
-          ),
+        ),
       ],
     );
   }

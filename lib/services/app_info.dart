@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.3.1';
+  static const version = '1.3.2';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,14 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.3.2', 'November 2026', [
+      'Applications: "Needs attention" is now "No change in 14+ days". Any '
+          'change in Airtable counts as work (status, notes, follow-up, '
+          'assignee), and dates anywhere in the notes count too. Each one '
+          'says what was last done and when.',
+      'Reports › Quick view: every card can be moved (press and hold).',
+      'Reports on a phone: the tabs no longer jump when switching.',
+    ]),
     Release('1.3.1', 'November 2026', [
       'Moving cards: press and hold, then drag. A click just opens the card, '
           'and a lifted card has a white outline.',

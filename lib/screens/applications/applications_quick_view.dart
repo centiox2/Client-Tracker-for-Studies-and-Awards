@@ -286,31 +286,32 @@ class ApplicationsQuickView extends ConsumerWidget {
       ),
     );
 
-    // ---- Needs attention: waiting longest since the last step ----
+    // ---- No change in 14+ days: in progress, nothing done lately ----
+    // Anything counts as work: a change Airtable sync saw (status, notes,
+    // follow-up, assignee…), a date written in the notes, or a step date.
     final inProgress = apps.where((a) => a.inProgress).toList();
-    DateTime? lastActivity(Application a) {
-      final notes = a.datedNotes.map((n) => n.$1);
-      return [a.lastStep, ...notes].whereType<DateTime>().fold<DateTime?>(
-        null,
-        (x, y) => x == null || y.isAfter(x) ? y : x,
-      );
-    }
-
+    final changes = repo.lastChanges();
+    final since = repo.firstImportAt;
+    DateTime? lastActivity(Application a) =>
+        ApplicationActivity.of(a, now, change: changes[a.key])?.day;
     final waiting = [
       for (final a in inProgress)
-        if (lastActivity(a) case final t?)
-          (a, today.difference(_day(t)).inDays),
+        if (ApplicationActivity.of(a, now, change: changes[a.key])
+            case final last?)
+          (a, today.difference(last.day).inDays, last),
     ]..sort((x, y) => y.$2.compareTo(x.$2));
-    final stale = waiting.where((w) => w.$2 >= 14).toList();
+    final stale = waiting
+        .where((w) => w.$2 >= ApplicationActivity.staleDays)
+        .toList();
     final unassigned = inProgress.where((a) => a.assignee.isEmpty).length;
-    // No date anywhere in the tracker: can't say how long they've waited,
-    // so they're named here rather than left out.
-    final undated = inProgress.where((a) => lastActivity(a) == null).length;
+    // Nothing dated at all: can't say how long, so they're named here
+    // rather than left out.
+    final undated = inProgress.length - waiting.length;
 
     final attentionPanel = AppPanel(
-      title: 'Needs attention',
+      title: 'No change in 14+ days',
       icon: Icons.priority_high_rounded,
-      trailing: stale.isEmpty ? null : '${stale.length} waiting 2+ weeks',
+      trailing: stale.isEmpty ? null : '${stale.length}',
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
         child: Column(
@@ -318,11 +319,12 @@ class ApplicationsQuickView extends ConsumerWidget {
           children: [
             if (stale.isEmpty)
               Text(
-                'No application in progress has waited two weeks or more.',
+                'Every application in progress has changed in the last '
+                '14 days.',
                 style: theme.textTheme.bodySmall?.copyWith(color: muted),
               )
             else
-              for (final (a, daysWaiting) in stale.take(8))
+              for (final (a, daysWaiting, last) in stale.take(8))
                 InkWell(
                   onTap: () => showApplicationDetails(context, ref, a),
                   borderRadius: BorderRadius.circular(Dt.rSm),
@@ -349,6 +351,16 @@ class ApplicationsQuickView extends ConsumerWidget {
                                 a.student,
                                 style: theme.textTheme.bodyMedium,
                                 overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                'Last: ${last.what} · '
+                                '${DateFormat('d MMM').format(last.day)}',
+                                key: ValueKey('stale-last-${a.key}'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: muted,
+                                ),
                               ),
                               const SizedBox(height: 2),
                               Wrap(
@@ -392,7 +404,7 @@ class ApplicationsQuickView extends ConsumerWidget {
             if (undated > 0) ...[
               const SizedBox(height: 4),
               Text(
-                '$undated in progress with no dates in the tracker yet',
+                '$undated in progress with nothing dated yet',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.error,
                 ),
@@ -400,8 +412,11 @@ class ApplicationsQuickView extends ConsumerWidget {
             ],
             const SizedBox(height: 4),
             Text(
-              'Days since the last date in the tracker (documents, '
-              'application, offer, COE or a dated note).',
+              'Days since anything changed in Airtable (status, notes, '
+              'follow-up, assignee, step dates) or a date written in the '
+              'notes.${since == null ? '' : ' Changes are known from '
+                        '${DateFormat('d MMMM y').format(since)}, when '
+                        'syncing started.'}',
               style: theme.textTheme.labelSmall?.copyWith(color: muted),
             ),
           ],
@@ -954,8 +969,8 @@ Future<void> showHandling(
       return days <= 0
           ? 'Active today'
           : days == 1
-          ? '1 day since last step'
-          : '$days days since last step';
+          ? '1 day since the last change'
+          : '$days days since the last change';
     }
 
     Widget row(Application a) {

@@ -145,7 +145,7 @@ void main() {
 
     expect(find.byKey(const ValueKey('upload-applications')), findsNothing);
     // Opens on its quick view; the full list is the other tab.
-    expect(find.text('Needs attention'), findsOneWidget);
+    expect(find.text('No change in 14+ days'), findsOneWidget);
     await tester.tap(find.text('All applications'));
     await tester.pumpAndSettle();
     expect(find.text('In progress'), findsOneWidget);
@@ -215,6 +215,10 @@ void main() {
         'Nobody Assigned,,Australia,"${long(now)}",,,,'
         'Application to be submitted,,\n';
     ApplicationRepository(db).importCsv(csv);
+    // As if they came into the tracker 40 days ago, with no change since.
+    db.raw.execute('UPDATE applications SET updated_at = ?;', [
+      old.toIso8601String(),
+    ]);
     await pumpApp(tester, UserRole.director);
     await tester.tap(find.text('Applications').first);
     await tester.pumpAndSettle();

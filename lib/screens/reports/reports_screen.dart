@@ -13,6 +13,7 @@ import '../../services/export_actions.dart';
 import '../../services/print_views.dart';
 import '../../services/report_export.dart';
 import '../../state/app_state.dart';
+import '../../widgets/card_board.dart';
 import '../../widgets/clarity.dart';
 import '../../widgets/today_reports_panel.dart';
 import '../../widgets/empty_state.dart';
@@ -220,28 +221,28 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                       ],
                       selected: _view,
                       onChanged: (v) => setState(() => _view = v),
-                      trailing: _view != _View.quick
-                          ? null
-                          : Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: compact
-                                  ? [
-                                      IconButton(
-                                        tooltip: 'Share summary',
-                                        onPressed: () =>
-                                            showDailySummary(context),
-                                        icon: const Icon(Icons.ios_share),
-                                      ),
-                                    ]
-                                  : [
-                                      OutlinedButton.icon(
-                                        onPressed: () =>
-                                            showDailySummary(context),
-                                        icon: const Icon(Icons.ios_share),
-                                        label: const Text('Share summary'),
-                                      ),
-                                    ],
-                            ),
+                      // Only Quick view shares, but the button keeps its
+                      // place on every tab: it's taller than the tabs, so
+                      // taking it away made the tabs jump up and down.
+                      trailing: Visibility(
+                        visible: _view == _View.quick,
+                        maintainSize: true,
+                        maintainAnimation: true,
+                        maintainState: true,
+                        child: compact
+                            ? IconButton(
+                                key: const ValueKey('share-summary'),
+                                tooltip: 'Share summary',
+                                onPressed: () => showDailySummary(context),
+                                icon: const Icon(Icons.ios_share),
+                              )
+                            : OutlinedButton.icon(
+                                key: const ValueKey('share-summary'),
+                                onPressed: () => showDailySummary(context),
+                                icon: const Icon(Icons.ios_share),
+                                label: const Text('Share summary'),
+                              ),
+                      ),
                     ),
                     const SizedBox(height: 16),
                     if (_view != _View.details)
