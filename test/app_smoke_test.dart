@@ -97,7 +97,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('No week yet'), findsNothing);
-    expect(find.text('This week'), findsOneWidget);
+    expect(currentWeekTitle(), findsOneWidget);
   });
 
   testWidgets('New week dialog lists Mon–Fri and creates the week', (
@@ -122,7 +122,7 @@ void main() {
     await tester.tap(find.text('Create week'));
     await tester.pumpAndSettle();
 
-    expect(find.text('This week'), findsOneWidget);
+    expect(currentWeekTitle(), findsOneWidget);
     expect(find.text('Enter today’s numbers'), findsOneWidget);
   });
 
@@ -370,3 +370,12 @@ void main() {
     expect(tester.takeException(), isNull);
   }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 }
+
+/// The current week's card title: "This week" on weekdays; at the weekend
+/// (the Mon–Fri week is over) it reads "Week of 9 Nov".
+Finder currentWeekTitle() => find.byWidgetPredicate(
+  (w) =>
+      w is Text &&
+      (w.data == 'This week' ||
+          RegExp(r'^Week of \d{1,2} [A-Z][a-z]{2}$').hasMatch(w.data ?? '')),
+);

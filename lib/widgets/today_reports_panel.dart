@@ -78,7 +78,7 @@ class TodayReportsPanel extends ConsumerWidget {
                         child: FigureStat(
                           label: 'Reported today',
                           value: people.isEmpty
-                              ? '${s.total}'
+                              ? '${s.submitted}'
                               : '$done of ${people.length}',
                         ),
                       ),

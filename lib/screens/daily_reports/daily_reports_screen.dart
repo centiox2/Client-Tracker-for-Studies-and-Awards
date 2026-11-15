@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../design/app_theme.dart';
-import '../../services/cloud/cloud_api.dart' show CloudException;
 import '../../services/daily_report_export.dart';
 import '../../services/daily_reports_service.dart';
 import '../../services/export_actions.dart';
@@ -14,12 +13,18 @@ import '../../state/app_state.dart';
 import '../../widgets/clarity.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/panels.dart';
+import 'notifications_sheet.dart';
 import 'report_editor.dart';
 
-/// Daily reports: everyone records the work they did each day ("My
-/// reports"); department heads, the Operations Manager, admins and the
-/// director also get the Overview — status totals, who has submitted,
-/// department summaries, items needing attention, and exports.
+/// Daily reports, as tasks.
+///
+/// - My tasks: your to-do list. Add what you're going to do or are doing,
+///   with a status your manager sees; submit each when it's done.
+/// - My submissions: what you've submitted, by day, and how it was reviewed.
+/// - Review (heads, managers, admins, the director, and anyone who
+///   assigned work): approve submitted work or return it with a comment.
+/// - Team (the same people): everyone's tasks, who has reported, figures,
+///   assigning tasks and exports.
 class DailyReportsScreen extends ConsumerStatefulWidget {
   const DailyReportsScreen({super.key});
 
@@ -27,173 +32,163 @@ class DailyReportsScreen extends ConsumerStatefulWidget {
   ConsumerState<DailyReportsScreen> createState() => _DailyReportsScreenState();
 }
 
-enum _Tab { mine, overview }
-
-/// The page as it was last opened on this device (for the account in
-/// [ReportsStart.meta]): shown straight away next time while it reloads.
-ReportsStart? _lastStart;
+enum _Tab { tasks, submissions, review, team }
 
 class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
-  ReportsMeta? _meta;
-
-  /// What the page opened with: your day's lists, so My reports needn't
-  /// ask again. Null when only [_meta] could be read.
-  ReportsStart? _start;
-  Object? _error;
   _Tab? _tab;
-
-  /// Goes up each time the page reloads (Refresh, a new day), so the views
-  /// below reload too.
-  int _refresh = 0;
-  Timer? _refreshDebounce;
+  final _search = TextEditingController();
+  Timer? _searchDebounce;
+  String _query = '';
 
   @override
   void dispose() {
-    _refreshDebounce?.cancel();
+    _search.dispose();
+    _searchDebounce?.cancel();
     super.dispose();
   }
 
-  @override
-  void initState() {
-    super.initState();
-    final cached = _lastStart;
-    final me = ref.read(currentUserProvider)?.id;
-    if (cached != null && me != null && cached.meta.myId == me) {
-      _start = cached;
-      _meta = cached.meta;
-      _tab = _firstTab(cached.meta);
-    }
-    _load();
-  }
-
-  /// People without a department (the Operations Manager, say) start on
-  /// the Overview; everyone else on their own day.
   static _Tab _firstTab(ReportsMeta meta) =>
-      meta.seesOthers && meta.myDepartmentId == null
-      ? _Tab.overview
-      : _Tab.mine;
+      meta.seesOthers && meta.myDepartmentId == null ? _Tab.team : _Tab.tasks;
 
-  Future<void> _load() async {
-    setState(() => _error = null);
-    final service = ref.read(dailyReportsProvider);
-    try {
-      ReportsStart? start;
-      ReportsMeta meta;
-      try {
-        // One round trip for the page and your day.
-        start = await service.start();
-        meta = start.meta;
-      } on CloudException catch (e) {
-        // An older online database without it: the page, then the lists.
-        if (e.code != 'needs_update') rethrow;
-        meta = await service.meta();
-      }
-      if (!mounted) return;
-      if (start != null) _lastStart = start;
-      setState(() {
-        _meta = meta;
-        _start = start;
-        _refresh++;
-        _tab ??= _firstTab(meta);
-      });
-    } catch (e) {
-      if (mounted) setState(() => _error = e);
-    }
+  void _onSearch(String text) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) setState(() => _query = text.trim());
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    // Refresh in the top bar, and the app noticing a new day, bump the data
-    // version: read everything again (including what "today" is).
-    ref.listen(dataVersionProvider, (_, _) {
-      _refreshDebounce?.cancel();
-      _refreshDebounce = Timer(const Duration(milliseconds: 400), () {
-        if (mounted) _load();
-      });
-    });
-    final meta = _meta;
-    if (meta == null) {
-      if (_error == null) {
-        return const Center(child: CircularProgressIndicator());
+    final start = ref.watch(reportStartProvider);
+    final badge = ref.watch(reportBadgeProvider) ?? start?.badge;
+    if (start == null) {
+      final error = ref.read(reportStartProvider.notifier).error;
+      if (error != null) {
+        return EmptyState(
+          icon: Icons.cloud_off_outlined,
+          title: 'Daily reports aren’t available right now',
+          message: describeReportError(error),
+          actionLabel: 'Try again',
+          onAction: () => ref.read(reportStartProvider.notifier).refresh(),
+        );
       }
-      return EmptyState(
-        icon: Icons.cloud_off_outlined,
-        title: 'Daily reports aren’t available right now',
-        message: describeReportError(_error!),
-        actionLabel: 'Try again',
-        onAction: _load,
-      );
+      return const _Skeleton();
     }
+    final meta = start.meta;
     final theme = Theme.of(context);
+    final c = Clarity.of(theme);
+    final tabs = <(_Tab, String)>[
+      (
+        _Tab.tasks,
+        'My tasks${start.tasks.isEmpty ? '' : ' (${start.tasks.length})'}',
+      ),
+      (_Tab.submissions, 'My submissions'),
+      if (meta.reviews)
+        (
+          _Tab.review,
+          'Review${(badge?.toReview ?? 0) == 0 ? '' : ' (${badge!.toReview})'}',
+        ),
+      if (meta.seesOthers) (_Tab.team, 'Team'),
+    ];
+    var tab = _tab ?? _firstTab(meta);
+    if (!tabs.any((t) => t.$1 == tab)) tab = _Tab.tasks;
+
     return LayoutBuilder(
       builder: (context, viewport) {
         final phone = viewport.maxWidth < 600;
         final pad = clarityHPad(context);
-        final tab = _tab ?? _Tab.mine;
-        return SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(pad, 16, pad, 28),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: Dt.contentMaxWidth),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 8,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    alignment: WrapAlignment.spaceBetween,
-                    children: [
-                      // The page header already says "Daily reports": this
-                      // line only says whose reports these are.
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.apartment_outlined,
-                            size: 16,
-                            color: Dt.textMuted(theme),
-                          ),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(
+        final searchField = TextField(
+          key: const ValueKey('task-search'),
+          controller: _search,
+          onChanged: _onSearch,
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            isDense: true,
+            prefixIcon: const Icon(Icons.search, size: 18),
+            hintText: 'Search tasks: words, a name or #123',
+            suffixIcon: _search.text.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: 'Clear',
+                    onPressed: () {
+                      _search.clear();
+                      setState(() => _query = '');
+                    },
+                    icon: const Icon(Icons.close, size: 16),
+                  ),
+          ),
+        );
+        return RefreshIndicator(
+          onRefresh: () => ref.read(reportStartProvider.notifier).refresh(),
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: EdgeInsets.fromLTRB(pad, 14, pad, 28),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: Dt.contentMaxWidth),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.apartment_outlined,
+                          size: 16,
+                          color: c.textMuted,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            [
+                              meta.myName,
                               meta.myDepartment?.name ??
                                   (meta.seesOthers
                                       ? 'Every department'
                                       : 'No department yet'),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: Dt.textMuted(theme),
-                                fontWeight: FontWeight.w500,
-                              ),
+                            ].where((s) => s.isNotEmpty).join(' · '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: c.textMuted,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
-                        ],
-                      ),
-                      if (meta.seesOthers)
-                        UnderlineTabs<_Tab>(
-                          key: const ValueKey('reports-tab'),
-                          tabs: const [
-                            (_Tab.mine, 'My reports'),
-                            (_Tab.overview, 'Overview'),
-                          ],
-                          selected: tab,
-                          onChanged: (v) => setState(() => _tab = v),
                         ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  if (tab == _Tab.mine)
-                    _MyReports(
-                      meta: meta,
-                      phone: phone,
-                      refresh: _refresh,
-                      start: _start,
-                    )
-                  else
-                    _Overview(meta: meta, phone: phone, refresh: _refresh),
-                ],
+                        if (!phone) ...[
+                          SizedBox(width: 320, child: searchField),
+                          const SizedBox(width: 4),
+                        ],
+                        IconButton(
+                          key: const ValueKey('reports-refresh'),
+                          tooltip: 'Refresh',
+                          onPressed: () =>
+                              ref.read(reportStartProvider.notifier).refresh(),
+                          icon: const Icon(Icons.refresh, size: 20),
+                        ),
+                        // Phones have the bell in the top bar.
+                        if (!phone) const ReportBell(),
+                      ],
+                    ),
+                    if (phone) ...[const SizedBox(height: 8), searchField],
+                    const SizedBox(height: 6),
+                    UnderlineTabs<_Tab>(
+                      key: const ValueKey('reports-tab'),
+                      tabs: tabs,
+                      selected: tab,
+                      onChanged: (v) => setState(() => _tab = v),
+                    ),
+                    const SizedBox(height: 14),
+                    if (_query.isNotEmpty)
+                      _SearchResults(meta: meta, query: _query)
+                    else
+                      switch (tab) {
+                        _Tab.tasks => _MyTasks(start: start, phone: phone),
+                        _Tab.submissions => _MySubmissions(start: start),
+                        _Tab.review => _ReviewTab(meta: meta),
+                        _Tab.team => _TeamTab(meta: meta, phone: phone),
+                      },
+                  ],
+                ),
               ),
             ),
           ),
@@ -203,418 +198,843 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
   }
 }
 
-// ---------------------------------------------------------------- My day ---
-
-class _MyReports extends ConsumerStatefulWidget {
-  const _MyReports({
-    required this.meta,
-    required this.phone,
-    required this.refresh,
-    this.start,
-  });
-
-  final ReportsMeta meta;
-  final bool phone;
-  final int refresh;
-
-  /// Today's lists, already read with the page (null: read them here).
-  final ReportsStart? start;
+/// Grey shapes where the page will be, while the first copy loads.
+class _Skeleton extends StatelessWidget {
+  const _Skeleton();
 
   @override
-  ConsumerState<_MyReports> createState() => _MyReportsState();
+  Widget build(BuildContext context) {
+    final c = Clarity.of(Theme.of(context));
+    Widget box(double h, {double? w}) => Container(
+      height: h,
+      width: w,
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: c.track,
+        borderRadius: BorderRadius.circular(Dt.rMd),
+      ),
+    );
+    final pad = clarityHPad(context);
+    return Padding(
+      key: const ValueKey('reports-skeleton'),
+      padding: EdgeInsets.fromLTRB(pad, 16, pad, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          box(18, w: 220),
+          box(34, w: 380),
+          const SizedBox(height: 8),
+          box(44),
+          box(84),
+          box(84),
+          box(84),
+        ],
+      ),
+    );
+  }
 }
 
-class _MyReportsState extends ConsumerState<_MyReports> {
-  late DateTime _day = widget.meta.today;
-  List<ActivityReport>? _entries;
-  List<ActivityReport>? _open;
+// ---------------------------------------------------------- Shared bits ---
 
-  /// This week's reports (Monday to today), for "My week".
-  List<ActivityReport>? _week;
-  Object? _error;
+int _urgencyRank(TaskUrgency u) => TaskUrgency.values.length - u.index;
 
-  ReportsMeta get meta => widget.meta;
-
-  DateTime get _monday =>
-      meta.today.subtract(Duration(days: meta.today.weekday - 1));
-
-  /// The newest load; an older one finishing late is ignored.
-  int _loadSeq = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    if (!_takeStart()) _load();
-  }
-
-  /// Uses the lists the page opened with, when they are for the day shown.
-  bool _takeStart() {
-    final start = widget.start;
-    if (start == null || _day != start.meta.today) return false;
-    _loadSeq++; // anything still loading is older
-    _entries = start.day;
-    _open = _soonestFirst(start.open);
-    _week = start.week;
-    _error = null;
-    return true;
-  }
-
-  static List<ActivityReport> _soonestFirst(List<ActivityReport> open) =>
-      [...open]..sort((a, b) {
-        // Soonest due first; anything without a date last.
-        final x = a.dueDate, y = b.dueDate;
-        if (x == null || y == null) return x == null ? 1 : -1;
+/// Most urgent first, then soonest due, then newest.
+List<ActivityReport> _byUrgency(Iterable<ActivityReport> tasks) =>
+    [...tasks]..sort((a, b) {
+      final u = _urgencyRank(a.urgency).compareTo(_urgencyRank(b.urgency));
+      if (u != 0) return u;
+      final x = a.dueDate, y = b.dueDate;
+      if (x != y) {
+        if (x == null) return 1;
+        if (y == null) return -1;
         return x.compareTo(y);
-      });
-
-  @override
-  void didUpdateWidget(_MyReports old) {
-    super.didUpdateWidget(old);
-    if (old.refresh == widget.refresh) return;
-    // A new day while the app was open: "today" moves on with it.
-    if (old.meta.today != widget.meta.today && _day == old.meta.today) {
-      _day = widget.meta.today;
-    }
-    if (!identical(old.start, widget.start) && _takeStart()) {
-      setState(() {});
-      return;
-    }
-    _load();
-  }
-
-  Future<void> _load() async {
-    final seq = ++_loadSeq;
-    final service = ref.read(dailyReportsProvider);
-    try {
-      final results = await Future.wait([
-        service.list(ReportFilter(from: _day, to: _day, userId: meta.myId)),
-        service.list(ReportFilter(userId: meta.myId, openOnly: true)),
-        service.list(
-          ReportFilter(from: _monday, to: meta.today, userId: meta.myId),
-        ),
-      ]);
-      if (!mounted || seq != _loadSeq) return;
-      setState(() {
-        _entries = results[0];
-        _open = _soonestFirst(results[1]);
-        _week = results[2];
-        _error = null;
-      });
-    } catch (e) {
-      if (mounted && seq == _loadSeq) setState(() => _error = e);
-    }
-  }
-
-  void _moveDay(int days) {
-    final next = _day.add(Duration(days: days));
-    if (next.isAfter(meta.today)) return;
-    setState(() {
-      _day = next;
-      _entries = null;
+      }
+      return (b.id ?? 0).compareTo(a.id ?? 0);
     });
-    _load();
-  }
 
-  Future<void> _add() async {
-    final saved = await showReportEditor(context, meta: meta, day: _day);
-    if (saved != null) await _load();
-  }
+void _snack(BuildContext context, String text) =>
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 
-  Future<void> _markDone(ActivityReport report) =>
-      _setStatus(report, ReportStatus.completed);
+/// A titled group of task cards.
+class _Section extends StatelessWidget {
+  const _Section({
+    required this.title,
+    required this.children,
+    this.color,
+    this.icon,
+    this.trailing,
+    super.key,
+  });
 
-  /// One tap: a new status, everything else as it was.
-  Future<void> _setStatus(ActivityReport report, ReportStatus status) async {
-    try {
-      await ref.read(dailyReportsProvider).save(report.withStatus(status));
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              status == ReportStatus.completed
-                  ? 'Marked completed'
-                  : 'Now ${status.label.toLowerCase()}',
-            ),
-          ),
-        );
-      }
-      await _load();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(describeReportError(e))));
-      }
-    }
-  }
-
-  Future<void> _show(ActivityReport report) async {
-    final changed = await showReportDetails(
-      context,
-      meta: meta,
-      report: report,
-    );
-    if (changed) await _load();
-  }
+  final String title;
+  final List<Widget> children;
+  final Color? color;
+  final IconData? icon;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final muted = theme.textTheme.bodySmall?.copyWith(
-      color: Dt.textMuted(theme),
+    final c = Clarity.of(theme);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8, left: 2),
+            child: Row(
+              children: [
+                if (icon != null) ...[
+                  Icon(icon, size: 16, color: color ?? c.textSecondary),
+                  const SizedBox(width: 6),
+                ],
+                Expanded(
+                  child: Text(
+                    title,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: color,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                ?trailing,
+              ],
+            ),
+          ),
+          ...children,
+        ],
+      ),
     );
-    final dept = meta.myDepartment;
-    if (dept == null) {
-      return AppPanel(
-        title: 'Not in a department yet',
-        icon: Icons.info_outline,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
-          child: Text(
-            meta.seesOthers
-                ? 'You can see the Overview. To record your own daily '
-                      'reports, ask an admin to set your department in '
-                      'Settings › Users.'
-                : 'Ask an admin to set your department in Settings › Users. '
-                      'Then you can record your daily reports here.',
+  }
+}
+
+/// Opens a task; true when it changed.
+Future<bool> _openTask(
+  BuildContext context,
+  ReportsMeta meta,
+  ActivityReport task,
+) => showReportDetails(context, meta: meta, report: task);
+
+// --------------------------------------------------------------- Search ---
+
+class _SearchResults extends ConsumerStatefulWidget {
+  const _SearchResults({required this.meta, required this.query});
+  final ReportsMeta meta;
+  final String query;
+
+  @override
+  ConsumerState<_SearchResults> createState() => _SearchResultsState();
+}
+
+class _SearchResultsState extends ConsumerState<_SearchResults> {
+  List<ActivityReport>? _results;
+  Object? _error;
+  int _seq = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(_SearchResults old) {
+    super.didUpdateWidget(old);
+    if (old.query != widget.query) _load();
+  }
+
+  Future<void> _load() async {
+    final seq = ++_seq;
+    setState(() => _error = null);
+    try {
+      final r = await ref
+          .read(dailyReportsProvider)
+          .list(ReportFilter(search: widget.query, limit: 200));
+      if (mounted && seq == _seq) setState(() => _results = r);
+    } catch (e) {
+      if (mounted && seq == _seq) setState(() => _error = e);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen(reportsChangedProvider, (_, _) => _load());
+    final muted = Theme.of(context).textTheme.bodySmall
+        ?.copyWith(color: Dt.textMuted(Theme.of(context)));
+    final results = _results;
+    if (_error != null) return Text(describeReportError(_error!), style: muted);
+    if (results == null) return const LinearProgressIndicator();
+    return _Section(
+      key: const ValueKey('search-results'),
+      title:
+          '${results.length} task${results.length == 1 ? '' : 's'} '
+          'matching “${widget.query}”',
+      icon: Icons.search,
+      children: [
+        if (results.isEmpty)
+          Text(
+            'Nothing matches. Try fewer words, a person’s name, or a task '
+            'number like #12.',
             style: muted,
           ),
-        ),
-      );
-    }
-    final isToday = _day == meta.today;
-    final entries = _entries;
-    final open = _open;
-    final dayTotals = <String, int>{};
-    for (final e in entries ?? const <ActivityReport>[]) {
-      e.outputs.forEach((k, v) => dayTotals[k] = (dayTotals[k] ?? 0) + v);
-    }
-    final dayLabel = DateFormat('EEEE, d MMMM y').format(_day);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            IconButton(
-              tooltip: 'Previous day',
-              onPressed: () => _moveDay(-1),
-              icon: const Icon(Icons.chevron_left),
-            ),
-            Text(
-              isToday ? 'Today · $dayLabel' : dayLabel,
-              key: const ValueKey('my-day'),
-              style: theme.textTheme.titleSmall,
-            ),
-            IconButton(
-              tooltip: 'Next day',
-              onPressed: isToday ? null : () => _moveDay(1),
-              icon: const Icon(Icons.chevron_right),
-            ),
-            if (!isToday)
-              TextButton(
-                onPressed: () => _moveDay(meta.today.difference(_day).inDays),
-                child: const Text('Back to today'),
-              ),
-            FilledButton.icon(
-              key: const ValueKey('add-activity'),
-              onPressed: _add,
-              icon: const Icon(Icons.add, size: 16),
-              label: const Text('Add activity'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        if (_error != null)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Text(describeReportError(_error!), style: muted),
+        for (final t in results)
+          TaskCard(
+            task: t,
+            meta: widget.meta,
+            showPerson: t.userId != widget.meta.myId,
+            onTap: () => _openTask(context, widget.meta, t),
           ),
-        AppPanel(
-          title: isToday ? 'What I did today' : 'What I did',
-          icon: Icons.checklist_outlined,
-          trailing: entries == null ? null : '${entries.length}',
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: entries == null
-                ? const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (entries.isEmpty)
-                        PanelEmpty(
-                          icon: Icons.edit_note_outlined,
-                          title: isToday
-                              ? 'Nothing recorded yet today'
-                              : 'Nothing recorded for this day',
-                          message: isToday
-                              ? 'Add each piece of work you did, with '
-                                    'numbers where you can (applications '
-                                    'reviewed, calls made…).'
-                              : null,
-                        ),
-                      for (final e in entries)
-                        ReportTile(
-                          report: e,
-                          meta: meta,
-                          today: meta.today,
-                          onTap: () => _show(e),
-                        ),
-                      if (dayTotals.isNotEmpty) ...[
-                        const Divider(height: 18),
-                        Text(
-                          'Outputs: ${[for (final t in dayTotals.entries) '${dept.outputLabel(t.key)} ${t.value}'].join(' · ')}',
-                          style: muted,
-                        ),
-                      ],
-                    ],
-                  ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        AppPanel(
-          title: 'My open items',
-          icon: Icons.pending_actions_outlined,
-          trailing: open == null ? null : '${open.length}',
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: open == null
-                ? const SizedBox.shrink()
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (open.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.all(6),
-                          child: Text(
-                            'Nothing open. Anything not completed stays '
-                            'here until it is.',
-                            style: muted,
-                          ),
-                        ),
-                      for (final e in open)
-                        ReportTile(
-                          report: e,
-                          meta: meta,
-                          today: meta.today,
-                          showDate: true,
-                          onTap: () => _show(e),
-                          onStatus: (s) => _setStatus(e, s),
-                          action: TextButton(
-                            onPressed: () => _markDone(e),
-                            child: const Text('Mark done'),
-                          ),
-                        ),
-                    ],
-                  ),
-          ),
-        ),
-        if (_week case final week?) ...[
-          const SizedBox(height: 12),
-          _MyWeek(
-            week: week,
-            from: _monday,
-            today: meta.today,
-            department: dept,
-          ),
-        ],
       ],
     );
   }
 }
 
-/// "My week": the person's own figures, Monday to today.
-class _MyWeek extends StatelessWidget {
-  const _MyWeek({
-    required this.week,
-    required this.from,
-    required this.today,
-    required this.department,
-  });
+// ------------------------------------------------------------- My tasks ---
 
-  final List<ActivityReport> week;
-  final DateTime from;
-  final DateTime today;
-  final Department department;
+class _MyTasks extends ConsumerStatefulWidget {
+  const _MyTasks({required this.start, required this.phone});
+  final ReportsStart start;
+  final bool phone;
+
+  @override
+  ConsumerState<_MyTasks> createState() => _MyTasksState();
+}
+
+class _MyTasksState extends ConsumerState<_MyTasks> {
+  final _quick = TextEditingController();
+  var _quickUrgency = TaskUrgency.normal;
+  bool _adding = false;
+
+  ReportsMeta get meta => widget.start.meta;
+
+  @override
+  void dispose() {
+    _quick.dispose();
+    super.dispose();
+  }
+
+  Future<void> _quickAdd() async {
+    final title = _quick.text.trim();
+    if (title.isEmpty || _adding) return;
+    setState(() => _adding = true);
+    try {
+      final saved = await ref
+          .read(dailyReportsProvider)
+          .save(
+            ActivityReport(
+              description: title,
+              status: ReportStatus.toDo,
+              urgency: _quickUrgency,
+            ),
+          );
+      if (!mounted) return;
+      _quick.clear();
+      setState(() => _quickUrgency = TaskUrgency.normal);
+      _snack(context, 'Added ${saved.ref} to your list');
+    } catch (e) {
+      if (mounted) _snack(context, describeReportError(e));
+    } finally {
+      if (mounted) setState(() => _adding = false);
+    }
+  }
+
+  Future<void> _add(TaskMode mode) async {
+    final saved = await showReportEditor(context, meta: meta, mode: mode);
+    if (saved != null && mounted) {
+      _snack(
+        context,
+        saved.isSubmitted
+            ? '${saved.ref} submitted for today'
+            : 'Added ${saved.ref} to your list',
+      );
+    }
+  }
+
+  Future<void> _setStatus(ActivityReport t, ReportStatus s) async {
+    if (s == ReportStatus.blocked) {
+      // Needs to say what's blocking it.
+      await showReportEditor(
+        context,
+        meta: meta,
+        existing: t.withStatus(ReportStatus.blocked),
+      );
+      return;
+    }
+    try {
+      await ref.read(dailyReportsProvider).save(t.withStatus(s));
+      if (mounted) _snack(context, '${t.ref} is now ${s.label.toLowerCase()}');
+    } catch (e) {
+      if (mounted) _snack(context, describeReportError(e));
+    }
+  }
+
+  Future<void> _submit(ActivityReport t) async {
+    final saved = await showSubmitDialog(context, meta: meta, task: t);
+    if (saved != null && mounted) {
+      _snack(context, '${saved.ref} submitted for review');
+    }
+  }
+
+  List<Widget> _actions(ActivityReport t) => [
+    if (t.status == ReportStatus.toDo && t.review != ReviewState.returned)
+      OutlinedButton.icon(
+        key: ValueKey('start-${t.id}'),
+        onPressed: () => _setStatus(t, ReportStatus.inProgress),
+        icon: const Icon(Icons.play_arrow, size: 16),
+        label: const Text('Start'),
+      ),
+    if (t.status == ReportStatus.blocked)
+      OutlinedButton(
+        key: ValueKey('unblock-${t.id}'),
+        onPressed: () => _setStatus(t, ReportStatus.inProgress),
+        child: const Text('Unblocked'),
+      ),
+    FilledButton.icon(
+      key: ValueKey('submit-${t.id}'),
+      onPressed: () => _submit(t),
+      icon: const Icon(Icons.send, size: 15),
+      label: Text(t.review == ReviewState.returned ? 'Resubmit' : 'Submit'),
+    ),
+  ];
+
+  Widget _card(ActivityReport t) => TaskCard(
+    task: t,
+    meta: meta,
+    onTap: () => _openTask(context, meta, t),
+    onStatus: (s) => _setStatus(t, s),
+    actions: _actions(t),
+  );
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final muted = theme.textTheme.bodySmall?.copyWith(
-      color: Dt.textMuted(theme),
+    final c = Clarity.of(theme);
+    final muted = theme.textTheme.bodySmall?.copyWith(color: c.textMuted);
+    final tasks = widget.start.tasks;
+    final returned = _byUrgency(
+      tasks.where((t) => t.review == ReviewState.returned),
     );
-    var workingDays = 0;
-    for (var d = from; !d.isAfter(today); d = d.add(const Duration(days: 1))) {
-      if (d.weekday <= DateTime.friday) workingDays++;
-    }
-    // Working days with a report, to compare with the working days so far
-    // (a Saturday entry still counts as an entry, not as a working day).
-    final days = {
-      for (final r in week)
-        if (r.date.weekday <= DateTime.friday) r.date,
-    }.length;
-    final completed = week
-        .where((r) => r.status == ReportStatus.completed)
-        .length;
-    final totals = <String, int>{};
-    for (final r in week) {
-      r.outputs.forEach((k, v) => totals[k] = (totals[k] ?? 0) + v);
-    }
-    Widget figure(String label, String value) => Padding(
-      padding: const EdgeInsets.only(right: 24, bottom: 6),
+    final rest = tasks.where((t) => t.review != ReviewState.returned);
+    final blocked = _byUrgency(
+      rest.where((t) => t.status == ReportStatus.blocked),
+    );
+    final doing = _byUrgency(
+      rest.where((t) => t.status == ReportStatus.inProgress),
+    );
+    final todo = _byUrgency(rest.where((t) => t.status == ReportStatus.toDo));
+    final today = meta.today;
+    final doneToday = widget.start.submissions
+        .where((s) => s.date == today)
+        .toList();
+    final needsReport = meta.myDepartmentId != null;
+
+    final quickAdd = Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border.all(color: c.border),
+        borderRadius: BorderRadius.circular(Dt.rMd),
+      ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(label.toUpperCase(), style: microLabel(theme)),
-          Text(
-            value,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-              fontFeatures: const [FontFeature.tabularFigures()],
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const ValueKey('quick-task'),
+                  controller: _quick,
+                  enabled: !_adding,
+                  textCapitalization: TextCapitalization.sentences,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => _quickAdd(),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    filled: false,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    disabledBorder: InputBorder.none,
+                    prefixIcon: Icon(Icons.add_task, size: 18),
+                    hintText: 'Add to your to-do list, then press Enter',
+                  ),
+                ),
+              ),
+              PopupMenuButton<TaskUrgency>(
+                key: const ValueKey('quick-urgency'),
+                tooltip: 'Urgency',
+                initialValue: _quickUrgency,
+                onSelected: (u) => setState(() => _quickUrgency = u),
+                itemBuilder: (_) => [
+                  for (final u in TaskUrgency.values)
+                    PopupMenuItem(
+                      value: u,
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.circle,
+                            size: 12,
+                            color: u.color(theme.brightness),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(u.label),
+                        ],
+                      ),
+                    ),
+                ],
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: UrgencyPill(_quickUrgency),
+                ),
+              ),
+              IconButton(
+                key: const ValueKey('quick-add'),
+                tooltip: 'Add',
+                onPressed: _adding ? null : _quickAdd,
+                icon: _adding
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.keyboard_return, size: 18),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+
+    final buttons = Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        FilledButton.icon(
+          key: const ValueKey('add-activity'),
+          onPressed: () => _add(TaskMode.done),
+          icon: const Icon(Icons.check_circle_outline, size: 16),
+          label: const Text('Add activity done'),
+        ),
+        OutlinedButton.icon(
+          key: const ValueKey('add-task'),
+          onPressed: () => _add(TaskMode.todo),
+          icon: const Icon(Icons.playlist_add, size: 16),
+          label: const Text('Plan a task'),
+        ),
+      ],
+    );
+
+    final todayBar = Container(
+      key: const ValueKey('my-today'),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+      decoration: BoxDecoration(
+        color: doneToday.isEmpty && needsReport ? c.warningBg : c.positiveBg,
+        borderRadius: BorderRadius.circular(Dt.rMd),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            doneToday.isEmpty ? Icons.edit_note : Icons.task_alt,
+            size: 18,
+            color: doneToday.isEmpty && needsReport
+                ? c.warningFg
+                : c.positiveFg,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              doneToday.isEmpty
+                  ? 'Today, ${taskDay(today, today: today)}: nothing '
+                        'submitted yet. Submit each task as you finish it, '
+                        'or add work you’ve done.'
+                  : 'Today, ${taskDay(today, today: today)}: '
+                        '${doneToday.length} submitted '
+                        '(${doneToday.where((s) => s.review == ReviewState.approved).length} approved).',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: doneToday.isEmpty && needsReport
+                    ? c.warningFg
+                    : c.positiveFg,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
         ],
       ),
     );
-    return AppPanel(
-      key: const ValueKey('my-week'),
-      title: 'My week',
-      icon: Icons.insights_outlined,
-      trailing: DateFormat('d MMM').format(from),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Wrap(
-              children: [
-                figure('Days reported', '$days of $workingDays'),
-                figure('Entries', '${week.length}'),
-                figure('Completed', '$completed'),
-              ],
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (!needsReport)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              'You aren’t in a department, so you aren’t expected to report '
+              'daily — but you can still keep your own tasks here.',
+              style: muted,
             ),
-            if (totals.isNotEmpty)
-              Text(
-                [
-                  for (final e in totals.entries)
-                    '${department.outputLabel(e.key)} ${e.value}',
-                ].join(' · '),
-                style: theme.textTheme.bodySmall,
-              )
-            else
-              Text('No counts recorded yet this week.', style: muted),
-          ],
-        ),
-      ),
+          ),
+        todayBar,
+        const SizedBox(height: 12),
+        quickAdd,
+        const SizedBox(height: 10),
+        buttons,
+        const SizedBox(height: 18),
+        if (tasks.isEmpty)
+          const PanelEmpty(
+            icon: Icons.checklist_outlined,
+            title: 'Your list is clear',
+            message:
+                'Add what you’re going to do today above. Tasks your '
+                'manager assigns you show here too, with their urgency.',
+          ),
+        if (returned.isNotEmpty)
+          _Section(
+            key: const ValueKey('section-returned'),
+            title: 'Returned to you (${returned.length})',
+            icon: Icons.undo,
+            color: theme.colorScheme.error,
+            children: [for (final t in returned) _card(t)],
+          ),
+        if (blocked.isNotEmpty)
+          _Section(
+            key: const ValueKey('section-blocked'),
+            title: 'Blocked (${blocked.length})',
+            icon: Icons.block,
+            color: theme.colorScheme.error,
+            children: [for (final t in blocked) _card(t)],
+          ),
+        if (doing.isNotEmpty)
+          _Section(
+            key: const ValueKey('section-doing'),
+            title: 'Doing (${doing.length})',
+            icon: Icons.timelapse,
+            color: Dt.existingBlue(theme.brightness),
+            children: [for (final t in doing) _card(t)],
+          ),
+        if (todo.isNotEmpty)
+          _Section(
+            key: const ValueKey('section-todo'),
+            title: 'To do (${todo.length})',
+            icon: Icons.radio_button_unchecked,
+            children: [for (final t in todo) _card(t)],
+          ),
+      ],
     );
   }
 }
 
-// -------------------------------------------------------------- Overview ---
+// ------------------------------------------------------ My submissions ---
+
+enum _SubFilter {
+  all('All'),
+  waiting('Awaiting review'),
+  approved('Approved'),
+  returned('Returned');
+
+  const _SubFilter(this.label);
+  final String label;
+}
+
+class _MySubmissions extends StatefulWidget {
+  const _MySubmissions({required this.start});
+  final ReportsStart start;
+
+  @override
+  State<_MySubmissions> createState() => _MySubmissionsState();
+}
+
+class _MySubmissionsState extends State<_MySubmissions> {
+  var _filter = _SubFilter.all;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = Clarity.of(theme);
+    final muted = theme.textTheme.bodySmall?.copyWith(color: c.textMuted);
+    final meta = widget.start.meta;
+    final all = [
+      ...widget.start.submissions,
+      for (final t in widget.start.tasks)
+        if (t.review == ReviewState.returned) t,
+    ];
+    final shown =
+        [
+          for (final s in all)
+            if (switch (_filter) {
+              _SubFilter.all => true,
+              _SubFilter.waiting => s.review == ReviewState.submitted,
+              _SubFilter.approved => s.review == ReviewState.approved,
+              _SubFilter.returned => s.review == ReviewState.returned,
+            })
+              s,
+        ]..sort((a, b) {
+          final x = a.submittedAt, y = b.submittedAt;
+          if (x == null || y == null) return (b.id ?? 0).compareTo(a.id ?? 0);
+          return y.compareTo(x);
+        });
+    // By the day each was submitted for.
+    final days = <DateTime, List<ActivityReport>>{};
+    for (final s in shown) {
+      final d = s.date ?? meta.today;
+      days.putIfAbsent(d, () => []).add(s);
+    }
+    final dept = meta.myDepartment;
+    int count(ReviewState r) => all.where((s) => s.review == r).length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final f in _SubFilter.values)
+              ChoiceChip(
+                key: ValueKey('subs-${f.name}'),
+                label: Text(switch (f) {
+                  _SubFilter.all => 'All (${all.length})',
+                  _SubFilter.waiting =>
+                    '${f.label} (${count(ReviewState.submitted)})',
+                  _SubFilter.approved =>
+                    '${f.label} (${count(ReviewState.approved)})',
+                  _SubFilter.returned =>
+                    '${f.label} (${count(ReviewState.returned)})',
+                }),
+                selected: _filter == f,
+                onSelected: (_) => setState(() => _filter = f),
+              ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'The last 60 days. Search above for anything older.',
+          style: muted,
+        ),
+        const SizedBox(height: 14),
+        if (shown.isEmpty)
+          PanelEmpty(
+            icon: Icons.outbox_outlined,
+            title: all.isEmpty ? 'Nothing submitted yet' : 'None here',
+            message: all.isEmpty
+                ? 'When you submit a task it shows here with the day it was '
+                      'submitted, and whether it was approved.'
+                : null,
+          ),
+        for (final entry in days.entries)
+          _Section(
+            key: ValueKey('day-${dateKey(entry.key)}'),
+            title: entry.key == meta.today
+                ? 'Today · ${taskDay(entry.key, today: meta.today)}'
+                : entry.key == meta.today.subtract(const Duration(days: 1))
+                ? 'Yesterday · ${taskDay(entry.key, today: meta.today)}'
+                : DateFormat('EEEE d MMMM').format(entry.key),
+            icon: Icons.event_note_outlined,
+            trailing: Text(
+              [
+                '${entry.value.length} task${entry.value.length == 1 ? '' : 's'}',
+                ..._outputTotals(entry.value, dept),
+              ].join(' · '),
+              style: muted,
+            ),
+            children: [
+              for (final t in entry.value)
+                TaskCard(
+                  task: t,
+                  meta: meta,
+                  onTap: () => _openTask(context, meta, t),
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+List<String> _outputTotals(List<ActivityReport> tasks, Department? dept) {
+  final totals = <String, int>{};
+  for (final t in tasks) {
+    t.outputs.forEach((k, v) => totals[k] = (totals[k] ?? 0) + v);
+  }
+  return [
+    for (final e in totals.entries)
+      '${dept?.outputLabel(e.key) ?? e.key.replaceAll('_', ' ')} ${e.value}',
+  ];
+}
+
+// --------------------------------------------------------------- Review ---
+
+class _ReviewTab extends ConsumerStatefulWidget {
+  const _ReviewTab({required this.meta});
+  final ReportsMeta meta;
+
+  @override
+  ConsumerState<_ReviewTab> createState() => _ReviewTabState();
+}
+
+class _ReviewTabState extends ConsumerState<_ReviewTab> {
+  List<ActivityReport>? _waiting;
+  List<ActivityReport>? _reviewed;
+  Object? _error;
+  int? _person;
+  int _seq = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final seq = ++_seq;
+    final service = ref.read(dailyReportsProvider);
+    try {
+      final r = await Future.wait([
+        service.list(const ReportFilter(toReview: true, limit: 300)),
+        service.list(
+          ReportFilter(
+            reviewedByMe: true,
+            reviews: const [ReviewState.approved, ReviewState.returned],
+            from: widget.meta.today.subtract(const Duration(days: 14)),
+            limit: 60,
+          ),
+        ),
+      ]);
+      if (!mounted || seq != _seq) return;
+      setState(() {
+        _waiting = r[0];
+        _reviewed = r[1];
+        _error = null;
+      });
+    } catch (e) {
+      if (mounted && seq == _seq) setState(() => _error = e);
+    }
+  }
+
+  Future<void> _review(ActivityReport t, bool approve) async {
+    final saved = await reviewTask(context, ref, task: t, approve: approve);
+    if (saved != null && mounted) {
+      _snack(context, approve ? '${t.ref} approved' : '${t.ref} returned');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen(reportsChangedProvider, (_, _) => _load());
+    final theme = Theme.of(context);
+    final c = Clarity.of(theme);
+    final muted = theme.textTheme.bodySmall?.copyWith(color: c.textMuted);
+    final meta = widget.meta;
+    final waiting = _waiting;
+    if (waiting == null) {
+      return _error != null
+          ? Text(describeReportError(_error!), style: muted)
+          : const LinearProgressIndicator();
+    }
+    final people = {
+      for (final t in waiting)
+        if (t.userId != null) t.userId!: t.userName,
+    };
+    final shown =
+        _byUrgency(waiting.where((t) => _person == null || t.userId == _person))
+          ..sort((a, b) {
+            // Oldest submission first within the same urgency.
+            final u = _urgencyRank(a.urgency)
+                .compareTo(_urgencyRank(b.urgency));
+            if (u != 0) return u;
+            return (a.submittedAt ?? DateTime(0)).compareTo(
+              b.submittedAt ?? DateTime(0),
+            );
+          });
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Work submitted by the people you assigned it to, or in your '
+          '${meta.scope == ReportScope.all ? 'company' : 'department'}. '
+          'Approve it, or return it with a comment saying what to fix — it '
+          'goes back on their list.',
+          style: muted,
+        ),
+        const SizedBox(height: 10),
+        if (people.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                ChoiceChip(
+                  label: Text('Everyone (${waiting.length})'),
+                  selected: _person == null,
+                  onSelected: (_) => setState(() => _person = null),
+                ),
+                for (final p in people.entries)
+                  ChoiceChip(
+                    label: Text(
+                      '${p.value} (${waiting.where((t) => t.userId == p.key).length})',
+                    ),
+                    selected: _person == p.key,
+                    onSelected: (_) => setState(() => _person = p.key),
+                  ),
+              ],
+            ),
+          ),
+        _Section(
+          key: const ValueKey('review-waiting'),
+          title: 'Waiting for your review (${shown.length})',
+          icon: Icons.hourglass_top,
+          color: shown.isEmpty ? null : c.warningFg,
+          children: [
+            if (shown.isEmpty)
+              const PanelEmpty(
+                icon: Icons.inbox_outlined,
+                title: 'Nothing waiting',
+                message: 'Submitted work shows here for you to review.',
+              ),
+            for (final t in shown)
+              TaskCard(
+                task: t,
+                meta: meta,
+                showPerson: true,
+                onTap: () => _openTask(context, meta, t),
+                actions: [
+                  OutlinedButton.icon(
+                    key: ValueKey('return-${t.id}'),
+                    onPressed: () => _review(t, false),
+                    icon: const Icon(Icons.undo, size: 16),
+                    label: const Text('Return'),
+                  ),
+                  FilledButton.icon(
+                    key: ValueKey('approve-${t.id}'),
+                    onPressed: () => _review(t, true),
+                    icon: const Icon(Icons.check, size: 16),
+                    label: const Text('Approve'),
+                  ),
+                ],
+              ),
+          ],
+        ),
+        if ((_reviewed ?? const []).isNotEmpty)
+          _Section(
+            title: 'Reviewed by you, last 2 weeks',
+            icon: Icons.history,
+            children: [
+              for (final t in _reviewed!)
+                TaskCard(
+                  task: t,
+                  meta: meta,
+                  showPerson: true,
+                  onTap: () => _openTask(context, meta, t),
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+// ----------------------------------------------------------------- Team ---
 
 enum _Period {
   today('Today', 'Today'),
@@ -624,46 +1044,40 @@ enum _Period {
 
   const _Period(this.label, this.short);
   final String label;
-
-  /// On a phone, where four long labels don't fit one line.
   final String short;
 }
 
-enum _EntryFilter {
-  all('All'),
+enum _TaskFilter {
   open('Open'),
-  completed('Completed'),
-  problems('Blocked / escalated'),
-  overdue('Overdue');
+  submitted('Submitted'),
+  waiting('Awaiting review'),
+  approved('Approved'),
+  blocked('Blocked'),
+  overdue('Overdue'),
+  mine('Assigned by me');
 
-  const _EntryFilter(this.label);
+  const _TaskFilter(this.label);
   final String label;
 }
 
-class _Overview extends ConsumerStatefulWidget {
-  const _Overview({
-    required this.meta,
-    required this.phone,
-    required this.refresh,
-  });
+class _TeamTab extends ConsumerStatefulWidget {
+  const _TeamTab({required this.meta, required this.phone});
 
   final ReportsMeta meta;
   final bool phone;
-  final int refresh;
 
   @override
-  ConsumerState<_Overview> createState() => _OverviewState();
+  ConsumerState<_TeamTab> createState() => _TeamTabState();
 }
 
-class _OverviewState extends ConsumerState<_Overview> {
+class _TeamTabState extends ConsumerState<_TeamTab> {
   var _period = _Period.today;
   late DateTime _from = widget.meta.today;
   late DateTime _to = widget.meta.today;
   int? _departmentId;
   int? _userId;
-  var _filter = _EntryFilter.all;
-  final _search = TextEditingController();
-  Timer? _searchDebounce;
+  var _filter = _TaskFilter.open;
+  TaskUrgency? _urgency;
 
   ReportSummary? _summary;
   List<ActivityReport>? _entries;
@@ -680,24 +1094,14 @@ class _OverviewState extends ConsumerState<_Overview> {
   }
 
   @override
-  void dispose() {
-    _search.dispose();
-    _searchDebounce?.cancel();
-    super.dispose();
-  }
-
-  @override
-  void didUpdateWidget(_Overview old) {
+  void didUpdateWidget(_TeamTab old) {
     super.didUpdateWidget(old);
-    if (old.refresh == widget.refresh) return;
-    // A new day while the app was open: Today / This week / This month
-    // move on with it.
     if (old.meta.today != widget.meta.today && _period != _Period.custom) {
       final range = _rangeFor(_period, widget.meta.today);
       _from = range.$1;
       _to = range.$2;
+      _load();
     }
-    _load();
   }
 
   static (DateTime, DateTime) _rangeFor(_Period p, DateTime today) =>
@@ -710,7 +1114,7 @@ class _OverviewState extends ConsumerState<_Overview> {
         _ => (today, today),
       };
 
-  void _setPeriod(_Period p) async {
+  Future<void> _setPeriod(_Period p) async {
     final today = meta.today;
     DateTime from;
     var to = today;
@@ -736,26 +1140,39 @@ class _OverviewState extends ConsumerState<_Overview> {
     _load();
   }
 
-  ReportFilter get _listFilter => ReportFilter(
-    from: _filter == _EntryFilter.overdue ? null : _from,
-    to: _filter == _EntryFilter.overdue ? null : _to,
-    departmentId: _departmentId,
-    userId: _userId,
-    statuses: switch (_filter) {
-      _EntryFilter.completed => const [ReportStatus.completed],
-      _EntryFilter.problems => const [
-        ReportStatus.blocked,
-        ReportStatus.escalated,
-      ],
-      _ => null,
-    },
-    openOnly: _filter == _EntryFilter.open,
-    overdueOnly: _filter == _EntryFilter.overdue,
-    search: _search.text,
-  );
+  /// Open, blocked, overdue and "assigned by me" are about now; the
+  /// others are about what was submitted in the period.
+  ReportFilter get _listFilter {
+    final dated =
+        _filter == _TaskFilter.submitted ||
+        _filter == _TaskFilter.waiting ||
+        _filter == _TaskFilter.approved;
+    return ReportFilter(
+      from: dated ? _from : null,
+      to: dated ? _to : null,
+      departmentId: _departmentId,
+      userId: _userId,
+      urgency: _urgency,
+      statuses: _filter == _TaskFilter.blocked
+          ? const [ReportStatus.blocked]
+          : null,
+      reviews: switch (_filter) {
+        _TaskFilter.submitted => const [
+          ReviewState.submitted,
+          ReviewState.approved,
+          ReviewState.returned,
+        ],
+        _TaskFilter.waiting => const [ReviewState.submitted],
+        _TaskFilter.approved => const [ReviewState.approved],
+        _ => null,
+      },
+      openOnly: _filter == _TaskFilter.open || _filter == _TaskFilter.mine,
+      overdueOnly: _filter == _TaskFilter.overdue,
+      assignedByMe: _filter == _TaskFilter.mine,
+      limit: 500,
+    );
+  }
 
-  /// The newest loads; older ones finishing late are ignored, so quick
-  /// filter changes never leave stale figures on screen.
   int _loadSeq = 0;
   int _entriesSeq = 0;
 
@@ -814,20 +1231,17 @@ class _OverviewState extends ConsumerState<_Overview> {
         (meta.scope == ReportScope.department
             ? (meta.myDepartment?.name ?? 'My department')
             : 'All departments'),
-    meta.people.where((p) => p.id == _userId).firstOrNull?.fullName ??
-        'Everyone',
-    if (_filter != _EntryFilter.all) 'Entries: ${_filter.label}',
-    if (_search.text.trim().isNotEmpty) 'Search: “${_search.text.trim()}”',
+    meta.person(_userId)?.fullName ?? 'Everyone',
+    'Tasks: ${_filter.label}',
+    if (_urgency != null) 'Urgency: ${_urgency!.label}',
   ].join(' · ');
 
   String get _reportTitle {
     if (_userId != null) return 'Staff Activity Report';
-    if (_filter == _EntryFilter.open || _filter == _EntryFilter.overdue) {
+    if (_filter == _TaskFilter.open || _filter == _TaskFilter.overdue) {
       return 'Pending Tasks Report';
     }
-    if (_filter == _EntryFilter.problems) {
-      return 'Exception / Escalation Report';
-    }
+    if (_filter == _TaskFilter.blocked) return 'Exception Report';
     return switch (_period) {
       _Period.today => 'Daily Operations Report',
       _Period.week => 'Weekly Performance Report',
@@ -875,47 +1289,48 @@ class _OverviewState extends ConsumerState<_Overview> {
         bytes: bytes,
       );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Couldn’t make the report: $e')));
-      }
+      if (mounted) _snack(context, 'Couldn’t make the report: $e');
     } finally {
       if (mounted) setState(() => _exporting = false);
     }
   }
 
-  /// A head or manager gives someone a task (the person filter, if set,
-  /// is chosen already).
   Future<void> _assign() async {
     final saved = await showReportEditor(
       context,
       meta: meta,
-      day: meta.today,
       assign: true,
       assignTo: _userId,
     );
     if (saved == null || !mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Task assigned to ${saved.userName}')),
-    );
-    await _load();
+    _snack(context, 'Task assigned to ${saved.userName}');
   }
 
-  Future<void> _openReport(ActivityReport report) async {
-    final changed = await showReportDetails(
+  Future<void> _copyReminder(List<ComplianceRow> notYet) async {
+    final names = [for (final c in notYet) c.fullName];
+    final list = names.length == 1
+        ? names.first
+        : '${names.sublist(0, names.length - 1).join(', ')} and ${names.last}';
+    final text =
+        'Hi $list, a reminder to submit today’s work in ${Dt.appName} '
+        '(Daily reports › My tasks). Thank you!';
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    _snack(
       context,
-      meta: meta,
-      report: report,
+      'Reminder for ${names.length} '
+      '${names.length == 1 ? 'person' : 'people'} copied — paste it in '
+      'WhatsApp or email.',
     );
-    if (changed) await _load();
   }
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(reportsChangedProvider, (_, _) => _load());
     final theme = Theme.of(context);
+    final c = Clarity.of(theme);
     final muted = theme.textTheme.bodySmall?.copyWith(
-      color: Dt.textMuted(theme),
+      color: c.textMuted,
       height: 1.4,
     );
     final summary = _summary;
@@ -960,7 +1375,7 @@ class _OverviewState extends ConsumerState<_Overview> {
               setState(() {
                 _departmentId = v;
                 if (_userId != null &&
-                    !people.any(
+                    !meta.people.any(
                       (p) => p.id == _userId && p.departmentId == v,
                     )) {
                   _userId = null;
@@ -979,17 +1394,18 @@ class _OverviewState extends ConsumerState<_Overview> {
             _load();
           },
         ),
-        IconButton(
-          tooltip: 'Refresh',
-          onPressed: _loading ? null : _load,
-          icon: const Icon(Icons.refresh, size: 18),
-        ),
-        FilledButton.icon(
-          key: const ValueKey('assign-task'),
-          onPressed: _assign,
-          icon: const Icon(Icons.assignment_ind_outlined, size: 16),
-          label: const Text('Assign task'),
-        ),
+        if (_loading)
+          const SizedBox.square(
+            dimension: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        if (meta.canAssign)
+          FilledButton.icon(
+            key: const ValueKey('assign-task'),
+            onPressed: _assign,
+            icon: const Icon(Icons.assignment_ind_outlined, size: 16),
+            label: const Text('Assign task'),
+          ),
         MenuAnchor(
           menuChildren: [
             MenuItemButton(
@@ -1033,23 +1449,20 @@ class _OverviewState extends ConsumerState<_Overview> {
           if (_error != null)
             Text(describeReportError(_error!), style: muted)
           else
-            const Center(child: CircularProgressIndicator()),
+            const LinearProgressIndicator(),
         ],
       );
     }
 
     final s = summary;
     final submittedToday = [
-      for (final c in s.compliance)
-        if (c.submittedToday) c,
+      for (final r in s.compliance)
+        if (r.submittedToday) r,
     ];
     final notYet = [
-      for (final c in s.compliance)
-        if (!c.submittedToday) c,
+      for (final r in s.compliance)
+        if (!r.submittedToday) r,
     ];
-    final attention = {
-      for (final e in [...s.overdue, ...s.attention]) e.id: e,
-    }.values.toList();
     final todayOnly = _from == _to && _to == meta.today;
 
     return Column(
@@ -1067,35 +1480,57 @@ class _OverviewState extends ConsumerState<_Overview> {
           Text(describeReportError(_error!), style: muted),
         ],
         const SizedBox(height: 12),
-        // The five figures share the row evenly (two or three a row on
-        // smaller screens), so no tile is wider or narrower than another.
         LayoutBuilder(
           builder: (context, box) {
+            void show(_TaskFilter f) {
+              setState(() => _filter = f);
+              _reloadEntries();
+            }
+
             final stats = [
-              _Stat('Activities', s.total, key: const ValueKey('stat-total')),
-              _Stat('Completed', s.count(ReportStatus.completed)),
               _Stat(
-                'In progress',
-                s.count(ReportStatus.inProgress) +
-                    s.count(ReportStatus.pending),
-                hint: 'In progress or pending',
+                'Submitted',
+                s.submitted,
+                key: const ValueKey('stat-total'),
+                hint: 'Tasks submitted in the period',
+                onTap: () => show(_TaskFilter.submitted),
+              ),
+              _Stat(
+                'Approved',
+                s.reviewed(ReviewState.approved),
+                good: true,
+                onTap: () => show(_TaskFilter.approved),
+              ),
+              _Stat(
+                'To review',
+                s.reviewed(ReviewState.submitted),
+                warn: true,
+                hint: 'Submitted, waiting for review',
+                onTap: () => show(_TaskFilter.waiting),
+              ),
+              _Stat(
+                'Open now',
+                s.open,
+                hint: 'To do, doing or blocked, any date',
+                onTap: () => show(_TaskFilter.open),
               ),
               _Stat(
                 'Blocked',
-                s.count(ReportStatus.blocked) + s.count(ReportStatus.escalated),
+                s.count(ReportStatus.blocked),
                 alert: true,
-                hint: 'Blocked or escalated',
+                onTap: () => show(_TaskFilter.blocked),
               ),
               _Stat(
                 'Overdue',
                 s.overdue.length,
                 alert: true,
                 key: const ValueKey('stat-overdue'),
+                onTap: () => show(_TaskFilter.overdue),
               ),
             ];
             const gap = 10.0;
-            final cols = box.maxWidth >= 760
-                ? 5
+            final cols = box.maxWidth >= 860
+                ? 6
                 : box.maxWidth >= 460
                 ? 3
                 : 2;
@@ -1109,7 +1544,7 @@ class _OverviewState extends ConsumerState<_Overview> {
         ),
         const SizedBox(height: 12),
         AppPanel(
-          title: 'Submission compliance',
+          title: 'Who has reported',
           icon: Icons.how_to_reg_outlined,
           trailing: todayOnly
               ? '${submittedToday.length} of ${s.compliance.length} today'
@@ -1133,8 +1568,6 @@ class _OverviewState extends ConsumerState<_Overview> {
                       Row(
                         children: [
                           Text('Not yet', style: microLabel(theme)),
-                          // Right-aligned at its own width; it shortens
-                          // only when the line is too narrow for it.
                           Expanded(
                             child: Align(
                               alignment: Alignment.centerRight,
@@ -1160,8 +1593,8 @@ class _OverviewState extends ConsumerState<_Overview> {
                   )
                 : Column(
                     children: [
-                      for (final c in s.compliance)
-                        _ComplianceRow(row: c, workingDays: s.workingDays),
+                      for (final r in s.compliance)
+                        _ComplianceRow(row: r, workingDays: s.workingDays),
                     ],
                   ),
           ),
@@ -1171,10 +1604,12 @@ class _OverviewState extends ConsumerState<_Overview> {
           title: 'Departments',
           icon: Icons.apartment_outlined,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (s.departments.isEmpty)
+                  Text('No departments.', style: muted),
                 for (final d in s.departments)
                   _DepartmentRow(
                     summary: d,
@@ -1193,136 +1628,94 @@ class _OverviewState extends ConsumerState<_Overview> {
             ),
           ),
         ),
-        const SizedBox(height: 12),
-        AppPanel(
-          title: 'Needs attention',
-          icon: Icons.priority_high,
-          trailing: '${attention.length}',
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: attention.isEmpty
-                ? Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Text(
-                      'Nothing overdue, blocked or escalated.',
-                      style: muted,
-                    ),
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+        const SizedBox(height: 16),
+        _Section(
+          key: const ValueKey('team-tasks'),
+          title:
+              'Tasks · ${_filter.label}${entries == null ? '' : ' (${entries.length})'}',
+          icon: Icons.list_alt_outlined,
+          trailing: PopupMenuButton<TaskUrgency?>(
+            key: const ValueKey('team-urgency'),
+            tooltip: 'Urgency',
+            onSelected: (u) {
+              setState(() => _urgency = u);
+              _reloadEntries();
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: null, child: Text('Any urgency')),
+              for (final u in TaskUrgency.values)
+                PopupMenuItem(
+                  value: u,
+                  child: Row(
                     children: [
-                      for (final e in attention)
-                        ReportTile(
-                          report: e,
-                          meta: meta,
-                          today: meta.today,
-                          showPerson: true,
-                          showDate: true,
-                          onTap: () => _openReport(e),
-                        ),
+                      Icon(
+                        Icons.circle,
+                        size: 12,
+                        color: u.color(theme.brightness),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(u.label),
                     ],
                   ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        AppPanel(
-          title: 'Entries',
-          icon: Icons.list_alt_outlined,
-          trailing: entries == null ? null : '${entries.length}',
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    for (final f in _EntryFilter.values)
-                      ChoiceChip(
-                        key: ValueKey('entries-${f.name}'),
-                        label: Text(f.label),
-                        selected: _filter == f,
-                        onSelected: (_) {
-                          setState(() => _filter = f);
-                          _reloadEntries();
-                        },
-                      ),
-                    SizedBox(
-                      width: 220,
-                      child: TextField(
-                        controller: _search,
-                        decoration: const InputDecoration(
-                          isDense: true,
-                          prefixIcon: Icon(Icons.search, size: 18),
-                          hintText: 'Search entries',
-                        ),
-                        onChanged: (_) {
-                          _searchDebounce?.cancel();
-                          _searchDebounce = Timer(
-                            const Duration(milliseconds: 400),
-                            _reloadEntries,
-                          );
-                        },
-                      ),
-                    ),
-                  ],
                 ),
-                if (_filter == _EntryFilter.overdue)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      'Overdue items from any date, not only this period.',
-                      style: muted,
-                    ),
-                  ),
-                const SizedBox(height: 8),
-                if (entries == null)
-                  const Center(child: CircularProgressIndicator())
-                else if (entries.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Text('No entries match.', style: muted),
-                  )
+            ],
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_urgency == null)
+                  Text('Any urgency', style: muted)
                 else
-                  for (final e in entries)
-                    ReportTile(
-                      report: e,
-                      meta: meta,
-                      today: meta.today,
-                      showPerson: true,
-                      showDate: _from != _to || _filter == _EntryFilter.overdue,
-                      onTap: () => _openReport(e),
-                    ),
+                  UrgencyPill(_urgency!),
+                Icon(Icons.arrow_drop_down, size: 18, color: c.textMuted),
               ],
             ),
           ),
+          children: [
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final f in _TaskFilter.values)
+                  if (f != _TaskFilter.mine || meta.canAssign)
+                    ChoiceChip(
+                      key: ValueKey('entries-${f.name}'),
+                      label: Text(f.label),
+                      selected: _filter == f,
+                      onSelected: (_) {
+                        setState(() => _filter = f);
+                        _reloadEntries();
+                      },
+                    ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(switch (_filter) {
+              _TaskFilter.open =>
+                'Everything on people’s lists now, most urgent first.',
+              _TaskFilter.mine => 'Tasks you assigned that aren’t done yet.',
+              _TaskFilter.overdue ||
+              _TaskFilter.blocked => 'From any date, not only this period.',
+              _ => 'Submitted in this period.',
+            }, style: muted),
+            const SizedBox(height: 10),
+            if (entries == null)
+              const LinearProgressIndicator()
+            else if (entries.isEmpty)
+              Text('No tasks match.', style: muted)
+            else
+              for (final t
+                  in _filter == _TaskFilter.open || _filter == _TaskFilter.mine
+                      ? _byUrgency(entries)
+                      : entries)
+                TaskCard(
+                  task: t,
+                  meta: meta,
+                  showPerson: true,
+                  onTap: () => _openTask(context, meta, t),
+                ),
+          ],
         ),
       ],
-    );
-  }
-
-  /// A message to paste into WhatsApp or email for those who haven't
-  /// submitted today.
-  Future<void> _copyReminder(List<ComplianceRow> notYet) async {
-    final names = [for (final c in notYet) c.fullName];
-    final list = names.length == 1
-        ? names.first
-        : '${names.sublist(0, names.length - 1).join(', ')} and ${names.last}';
-    final text =
-        'Hi $list, a reminder to add today’s daily report in ${Dt.appName} '
-        '(Daily reports › Add activity). Thank you!';
-    await Clipboard.setData(ClipboardData(text: text));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Reminder for ${names.length} '
-          '${names.length == 1 ? 'person' : 'people'} copied — paste it in '
-          'WhatsApp or email.',
-        ),
-      ),
     );
   }
 
@@ -1341,8 +1734,8 @@ class _OverviewState extends ConsumerState<_Overview> {
       spacing: 6,
       runSpacing: 6,
       children: [
-        for (final c in rows)
-          Chip(
+        for (final r in rows)
+          ActionChip(
             avatar: Icon(
               done ? Icons.check_circle : Icons.schedule,
               size: 16,
@@ -1351,11 +1744,20 @@ class _OverviewState extends ConsumerState<_Overview> {
                   : theme.colorScheme.error,
             ),
             label: Text(
-              c.departmentName.isEmpty
-                  ? c.fullName
-                  : '${c.fullName} · ${c.departmentName}',
+              [
+                r.fullName,
+                if (r.departmentName.isNotEmpty) r.departmentName,
+                if (r.open > 0) '${r.open} open',
+              ].join(' · '),
             ),
             visualDensity: VisualDensity.compact,
+            onPressed: () {
+              setState(() {
+                _userId = r.id;
+                _filter = _TaskFilter.open;
+              });
+              _load();
+            },
           ),
       ],
     );
@@ -1374,8 +1776,6 @@ class _Dropdown<T> extends StatelessWidget {
   final T value;
   final Map<T, String> items;
   final ValueChanged<T> onChanged;
-
-  /// Takes the whole line (on a phone).
   final bool fill;
 
   @override
@@ -1384,9 +1784,6 @@ class _Dropdown<T> extends StatelessWidget {
         ? const BoxConstraints(minWidth: double.infinity)
         : const BoxConstraints(maxWidth: 260),
     child: DropdownButtonFormField<T>(
-      // A form field reads its initial value once: keyed by the value, it
-      // follows changes made in code (a department row tapped, the person
-      // reset when the department changes).
       key: ValueKey(value),
       initialValue: items.containsKey(value) ? value : items.keys.first,
       isExpanded: true,
@@ -1410,47 +1807,67 @@ class _Stat extends StatelessWidget {
     this.value, {
     super.key,
     this.alert = false,
+    this.warn = false,
+    this.good = false,
     this.hint,
+    this.onTap,
   });
 
   final String label;
   final int value;
   final bool alert;
-
-  /// What the figure counts, when the short label leaves it out.
+  final bool warn;
+  final bool good;
   final String? hint;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final color = alert && value > 0 ? scheme.error : scheme.onSurface;
-    final tile = Container(
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        border: Border.all(color: scheme.outline),
+    final c = Clarity.of(theme);
+    final color = value == 0
+        ? scheme.onSurface
+        : alert
+        ? scheme.error
+        : warn
+        ? c.warningFg
+        : good
+        ? Dt.statusGreen(theme.brightness)
+        : scheme.onSurface;
+    final tile = Material(
+      color: c.surface,
+      borderRadius: BorderRadius.circular(Dt.rMd),
+      child: InkWell(
         borderRadius: BorderRadius.circular(Dt.rMd),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label.toUpperCase(),
-            style: microLabel(theme),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+          decoration: BoxDecoration(
+            border: Border.all(color: c.border),
+            borderRadius: BorderRadius.circular(Dt.rMd),
           ),
-          const SizedBox(height: 4),
-          Text(
-            '$value',
-            style: theme.textTheme.headlineSmall?.copyWith(
-              color: color,
-              fontWeight: FontWeight.w700,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label.toUpperCase(),
+                style: microLabel(theme),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '$value',
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
     return hint == null ? tile : Tooltip(message: hint, child: tile);
@@ -1492,7 +1909,8 @@ class _ComplianceRow extends StatelessWidget {
           ),
           Text(
             '${row.daysSubmitted} of $workingDays days · '
-            '${row.entries} entr${row.entries == 1 ? 'y' : 'ies'}',
+            '${row.entries} task${row.entries == 1 ? '' : 's'}'
+            '${row.open > 0 ? ' · ${row.open} open' : ''}',
             style: muted,
           ),
         ],
@@ -1527,7 +1945,7 @@ class _DepartmentRow extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(Dt.rSm),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+        padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1542,18 +1960,20 @@ class _DepartmentRow extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${d.activities} activit${d.activities == 1 ? 'y' : 'ies'}',
+                  '${d.activities} submitted',
                   style: theme.textTheme.bodySmall,
                 ),
               ],
             ),
             const SizedBox(height: 2),
             Text(
-              d.activities == 0
-                  ? 'No reports in this period.'
-                  : '${d.completed} completed · ${d.open} open'
-                        '${d.blocked + d.escalated > 0 ? ' · ${d.blocked} blocked · ${d.escalated} escalated' : ''}'
-                        ' · ${d.people} reporting',
+              [
+                '${d.completed} approved',
+                if (d.awaiting > 0) '${d.awaiting} to review',
+                '${d.open} open',
+                if (d.blocked > 0) '${d.blocked} blocked',
+                '${d.people} reporting',
+              ].join(' · '),
               style: muted,
             ),
             if (outputs.isNotEmpty) ...[

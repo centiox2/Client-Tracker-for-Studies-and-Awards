@@ -86,7 +86,7 @@ void main() {
     await pumpApp(tester);
 
     expect(find.text('Overview'), findsWidgets);
-    expect(find.text('This week'), findsOneWidget);
+    expect(currentWeekTitle(), findsOneWidget);
     expect(find.text('Entered'), findsOneWidget);
     // The other four days have no numbers: "—", never "0".
     expect(find.text('—'), findsNWidgets(4 * 3));
@@ -172,3 +172,12 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 }
+
+/// The current week's card title: "This week" on weekdays; at the weekend
+/// (the Mon–Fri week is over) it reads "Week of 9 Nov".
+Finder currentWeekTitle() => find.byWidgetPredicate(
+  (w) =>
+      w is Text &&
+      (w.data == 'This week' ||
+          RegExp(r'^Week of \d{1,2} [A-Z][a-z]{2}$').hasMatch(w.data ?? '')),
+);

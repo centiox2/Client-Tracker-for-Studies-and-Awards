@@ -1,39 +1,77 @@
-/// Daily activity reports: what each person did, with measurable outputs,
-/// status, next action, blockers, priority and a due / follow-up date.
+/// Daily reports, as tasks.
+///
+/// Every entry is a task that belongs to one person. It sits on their to-do
+/// list (to do / doing / blocked) until it's done. When it's done it is
+/// submitted, and the server dates it with the day it was submitted. A
+/// reviewer (whoever assigned it, a department head or a manager) then
+/// approves it or returns it with a comment.
+///
 /// Kept only in the online database (never copied to every device).
 library;
 
-enum ReportStatus {
-  completed('completed', 'Completed'),
-  inProgress('in_progress', 'In progress'),
-  pending('pending', 'Pending'),
-  blocked('blocked', 'Blocked'),
-  escalated('escalated', 'Escalated');
+import 'package:flutter/material.dart';
 
-  const ReportStatus(this.code, this.label);
+/// Where the work is.
+enum ReportStatus {
+  toDo('to_do', 'To do', Icons.radio_button_unchecked),
+  inProgress('in_progress', 'Doing', Icons.timelapse),
+  blocked('blocked', 'Blocked', Icons.block),
+  done('done', 'Done', Icons.check_circle);
+
+  const ReportStatus(this.code, this.label, this.icon);
   final String code;
   final String label;
+  final IconData icon;
 
-  bool get isOpen => this != completed;
+  bool get isOpen => this != done;
 
-  /// Needs management attention.
-  bool get isProblem => this == blocked || this == escalated;
+  /// The statuses a person picks while working (Done goes through Submit).
+  static const working = [toDo, inProgress, blocked];
 
   static ReportStatus fromCode(String? code) =>
-      values.firstWhere((s) => s.code == code, orElse: () => pending);
+      values.firstWhere((s) => s.code == code, orElse: () => toDo);
 }
 
-enum ReportPriority {
+/// How urgent a task is: the colour on its card.
+enum TaskUrgency {
+  low('low', 'Low'),
+  normal('normal', 'Normal'),
   high('high', 'High'),
-  medium('medium', 'Medium'),
-  low('low', 'Low');
+  urgent('urgent', 'Urgent');
 
-  const ReportPriority(this.code, this.label);
+  const TaskUrgency(this.code, this.label);
   final String code;
   final String label;
 
-  static ReportPriority fromCode(String? code) =>
-      values.firstWhere((p) => p.code == code, orElse: () => medium);
+  /// Grey, blue, orange, red — the same in light and dark.
+  Color color(Brightness b) => switch (this) {
+    low =>
+      b == Brightness.dark ? const Color(0xFF9AA3AF) : const Color(0xFF6B7280),
+    normal =>
+      b == Brightness.dark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB),
+    high =>
+      b == Brightness.dark ? const Color(0xFFFB923C) : const Color(0xFFEA580C),
+    urgent =>
+      b == Brightness.dark ? const Color(0xFFF87171) : const Color(0xFFDC2626),
+  };
+
+  static TaskUrgency fromCode(String? code) =>
+      values.firstWhere((u) => u.code == code, orElse: () => normal);
+}
+
+/// Where a task is in review.
+enum ReviewState {
+  none('none', 'Not submitted'),
+  submitted('submitted', 'Waiting for review'),
+  approved('approved', 'Approved'),
+  returned('returned', 'Returned');
+
+  const ReviewState(this.code, this.label);
+  final String code;
+  final String label;
+
+  static ReviewState fromCode(String? code) =>
+      values.firstWhere((r) => r.code == code, orElse: () => none);
 }
 
 /// What a person may see: their own reports, their department's, or all.
@@ -51,16 +89,16 @@ enum ReportScope {
 
 /// Report access an admin gives each account.
 enum ReportAccess {
-  employee('employee', 'Employee', 'Records and sees their own reports'),
+  employee('employee', 'Employee', 'Records and sees their own tasks'),
   head(
     'head',
     'Department head',
-    'Also sees everyone in their department, and its dashboard',
+    'Also sees, assigns and reviews tasks in their department',
   ),
   manager(
     'manager',
     'Operations manager',
-    'Sees every department, the full dashboard and exports',
+    'Sees, assigns and reviews every department’s tasks, with exports',
   );
 
   const ReportAccess(this.code, this.label, this.summary);
@@ -121,6 +159,14 @@ class Department {
     position: (json['position'] as num?)?.toInt() ?? 0,
   );
 
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'name': name,
+    'outputs': [for (final o in outputs) o.toJson()],
+    'active': active,
+    'position': position,
+  };
+
   String outputLabel(String key) =>
       outputs.where((o) => o.key == key).firstOrNull?.label ??
       key.replaceAll('_', ' ');
@@ -129,10 +175,18 @@ class Department {
 DateTime? _date(Object? v) =>
     v == null || '$v'.isEmpty ? null : DateTime.tryParse('$v');
 
+/// A calendar day from the server ("2026-11-15"), as a local date.
+DateTime? _day(Object? v) {
+  final d = _date(v);
+  return d == null ? null : DateTime(d.year, d.month, d.day);
+}
+
 String dateKey(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-'
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
+
+const _unset = Object();
 
 class ActivityReport {
   const ActivityReport({
@@ -141,20 +195,26 @@ class ActivityReport {
     this.userName = '',
     this.departmentId,
     this.departmentName = '',
-    required this.date,
+    this.date,
     required this.description,
+    this.details = '',
     this.reference = '',
     this.outputs = const {},
-    this.status = ReportStatus.completed,
-    this.nextAction = '',
+    this.status = ReportStatus.toDo,
     this.blocker = '',
-    this.priority = ReportPriority.medium,
+    this.urgency = TaskUrgency.normal,
     this.dueDate,
     this.createdAt,
     this.updatedAt,
+    this.submittedAt,
     this.assignedBy,
     this.assignedByName = '',
+    this.review = ReviewState.none,
+    this.reviewedBy,
+    this.reviewedByName = '',
+    this.reviewedAt,
     this.commentCount = 0,
+    this.lastReviewNote = '',
   });
 
   final int? id;
@@ -162,25 +222,49 @@ class ActivityReport {
   final String userName;
   final int? departmentId;
   final String departmentName;
-  final DateTime date;
+
+  /// The day it was submitted for (set by the server on submit, Kenya
+  /// time). Null until then.
+  final DateTime? date;
+
+  /// The task's title: what needs doing, or what was done.
   final String description;
+
+  /// What the person did, in their words (written when they submit).
+  final String details;
   final String reference;
   final Map<String, int> outputs;
   final ReportStatus status;
-  final String nextAction;
   final String blocker;
-  final ReportPriority priority;
+  final TaskUrgency urgency;
   final DateTime? dueDate;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
-  /// Who gave this task to the person (a head or manager); null when they
-  /// added it themselves.
+  /// When it was submitted (this device's time zone).
+  final DateTime? submittedAt;
+
+  /// Who gave this task to the person; null when they added it themselves.
   final int? assignedBy;
   final String assignedByName;
+  final ReviewState review;
+  final int? reviewedBy;
+  final String reviewedByName;
+  final DateTime? reviewedAt;
   final int commentCount;
 
+  /// The reviewer's latest note (approved or returned).
+  final String lastReviewNote;
+
   bool get isAssigned => assignedBy != null || assignedByName.isNotEmpty;
+
+  /// "#123", the number people quote.
+  String get ref => id == null ? '' : '#$id';
+
+  /// On the person's list: not done yet, or done but returned to them.
+  bool get isOpen => status.isOpen || review == ReviewState.returned;
+
+  bool get isSubmitted => review == ReviewState.submitted;
 
   /// Open and due on [today].
   bool isDueToday(DateTime today) =>
@@ -198,71 +282,141 @@ class ActivityReport {
     userName: json['user_name'] as String? ?? '',
     departmentId: (json['department_id'] as num?)?.toInt(),
     departmentName: json['department_name'] as String? ?? '',
-    date: _date(json['report_date'])!,
+    date: _day(json['report_date']),
     description: json['description'] as String? ?? '',
+    details: json['details'] as String? ?? '',
     reference: json['reference'] as String? ?? '',
     outputs: {
       for (final e in ((json['outputs'] as Map?) ?? const {}).entries)
         '${e.key}': (e.value as num).toInt(),
     },
     status: ReportStatus.fromCode(json['status'] as String?),
-    nextAction: json['next_action'] as String? ?? '',
     blocker: json['blocker'] as String? ?? '',
-    priority: ReportPriority.fromCode(json['priority'] as String?),
-    dueDate: _date(json['due_date']),
+    urgency: TaskUrgency.fromCode(json['urgency'] as String?),
+    dueDate: _day(json['due_date']),
     createdAt: _date(json['created_at'])?.toLocal(),
     updatedAt: _date(json['updated_at'])?.toLocal(),
+    submittedAt: _date(json['submitted_at'])?.toLocal(),
     assignedBy: (json['assigned_by'] as num?)?.toInt(),
     assignedByName: json['assigned_by_name'] as String? ?? '',
+    review: ReviewState.fromCode(json['review'] as String?),
+    reviewedBy: (json['reviewed_by'] as num?)?.toInt(),
+    reviewedByName: json['reviewed_by_name'] as String? ?? '',
+    reviewedAt: _date(json['reviewed_at'])?.toLocal(),
     commentCount: (json['comment_count'] as num?)?.toInt() ?? 0,
+    lastReviewNote: json['last_review_note'] as String? ?? '',
   );
 
-  /// The same report with another status (one-tap status changes).
-  ActivityReport withStatus(ReportStatus next) => ActivityReport(
+  /// The same shape the server sends, to keep a copy on this device.
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'user_id': userId,
+    'user_name': userName,
+    'department_id': departmentId,
+    'department_name': departmentName,
+    'report_date': date == null ? null : dateKey(date!),
+    'description': description,
+    'details': details,
+    'reference': reference,
+    'outputs': outputs,
+    'status': status.code,
+    'blocker': blocker,
+    'urgency': urgency.code,
+    'due_date': dueDate == null ? null : dateKey(dueDate!),
+    'created_at': createdAt?.toUtc().toIso8601String(),
+    'updated_at': updatedAt?.toUtc().toIso8601String(),
+    'submitted_at': submittedAt?.toUtc().toIso8601String(),
+    'assigned_by': assignedBy,
+    'assigned_by_name': assignedByName,
+    'review': review.code,
+    'reviewed_by': reviewedBy,
+    'reviewed_by_name': reviewedByName,
+    'reviewed_at': reviewedAt?.toUtc().toIso8601String(),
+    'comment_count': commentCount,
+    'last_review_note': lastReviewNote,
+  };
+
+  ActivityReport copyWith({
+    int? userId,
+    String? description,
+    String? details,
+    String? reference,
+    Map<String, int>? outputs,
+    ReportStatus? status,
+    String? blocker,
+    TaskUrgency? urgency,
+    Object? dueDate = _unset,
+  }) => ActivityReport(
     id: id,
-    userId: userId,
+    userId: userId ?? this.userId,
     userName: userName,
     departmentId: departmentId,
     departmentName: departmentName,
     date: date,
-    description: description,
-    reference: reference,
-    outputs: outputs,
-    status: next,
-    nextAction: nextAction,
-    blocker: blocker,
-    priority: priority,
-    dueDate: dueDate,
+    description: description ?? this.description,
+    details: details ?? this.details,
+    reference: reference ?? this.reference,
+    outputs: outputs ?? this.outputs,
+    status: status ?? this.status,
+    blocker: blocker ?? this.blocker,
+    urgency: urgency ?? this.urgency,
+    dueDate: identical(dueDate, _unset) ? this.dueDate : dueDate as DateTime?,
+    createdAt: createdAt,
+    updatedAt: updatedAt,
+    submittedAt: submittedAt,
     assignedBy: assignedBy,
     assignedByName: assignedByName,
+    review: review,
+    reviewedBy: reviewedBy,
+    reviewedByName: reviewedByName,
+    reviewedAt: reviewedAt,
     commentCount: commentCount,
+    lastReviewNote: lastReviewNote,
   );
 
-  /// What is sent to save it (the person and department come from the
-  /// sign-in, online).
-  ///
-  /// A new report with [userId] set is a task assigned to that person.
-  Map<String, Object?> toSaveJson() => {
+  /// The same task with another status (one-tap status changes).
+  ActivityReport withStatus(ReportStatus next) => copyWith(status: next);
+
+  /// What is sent to save it. A task with [userId] set to someone else is
+  /// assigned to them; [submit] marks it done and sends it for review,
+  /// dated today by the server.
+  Map<String, Object?> toSaveJson({bool submit = false, String note = ''}) => {
     'id': ?id,
-    if (id == null && userId != null) 'user_id': userId,
-    'report_date': dateKey(date),
+    'user_id': ?userId,
     'description': description.trim(),
+    'details': details.trim(),
     'reference': reference.trim(),
     'outputs': outputs,
     'status': status.code,
-    'next_action': nextAction.trim(),
     'blocker': blocker.trim(),
-    'priority': priority.code,
+    'urgency': urgency.code,
     'due_date': dueDate == null ? null : dateKey(dueDate!),
+    if (submit) 'submit': true,
+    if (submit && note.trim().isNotEmpty) 'note': note.trim(),
   };
 }
 
-/// A comment on a report (a question, an answer, feedback).
+/// One line in a task's timeline: a comment, or a submit / approve /
+/// return (with the note that came with it).
+enum CommentKind {
+  comment('comment'),
+  submitted('submitted'),
+  approved('approved'),
+  returned('returned');
+
+  const CommentKind(this.code);
+  final String code;
+
+  static CommentKind fromCode(String? code) =>
+      values.firstWhere((k) => k.code == code, orElse: () => comment);
+}
+
 class ReportComment {
   const ReportComment({
     required this.id,
     required this.body,
     required this.createdAt,
+    this.kind = CommentKind.comment,
     this.userId,
     this.userName = '',
   });
@@ -270,6 +424,7 @@ class ReportComment {
   final int id;
   final String body;
   final DateTime createdAt;
+  final CommentKind kind;
   final int? userId;
   final String userName;
 
@@ -277,12 +432,13 @@ class ReportComment {
     id: (json['id'] as num).toInt(),
     body: json['body'] as String? ?? '',
     createdAt: _date(json['created_at'])!.toLocal(),
+    kind: CommentKind.fromCode(json['kind'] as String?),
     userId: (json['user_id'] as num?)?.toInt(),
     userName: json['user_name'] as String? ?? '',
   );
 }
 
-/// One person in the reports, for filters and compliance.
+/// One person in the reports, for filters, compliance and assigning.
 class ReportPerson {
   const ReportPerson({
     required this.id,
@@ -302,6 +458,13 @@ class ReportPerson {
     departmentId: (json['department_id'] as num?)?.toInt(),
     active: json['active'] as bool? ?? true,
   );
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'full_name': fullName,
+    'department_id': departmentId,
+    'active': active,
+  };
 }
 
 /// What the Daily reports page needs to start.
@@ -314,6 +477,7 @@ class ReportsMeta {
     required this.scope,
     required this.departments,
     required this.people,
+    this.canAssign = false,
   });
 
   /// Today in Kenya, per the online database.
@@ -325,22 +489,32 @@ class ReportsMeta {
   final List<Department> departments;
   final List<ReportPerson> people;
 
+  /// Directors, managers, admins and department heads assign tasks.
+  final bool canAssign;
+
   Department? department(int? id) =>
       departments.where((d) => d.id == id).firstOrNull;
 
   Department? get myDepartment => department(myDepartmentId);
 
-  /// Sees more than their own reports (heads, managers, admins, director).
+  /// Sees more than their own tasks (heads, managers, admins, director).
   bool get seesOthers => scope != ReportScope.own;
+
+  /// Reviews other people's submitted work.
+  bool get reviews => scope != ReportScope.own || canAssign;
+
+  ReportPerson? person(int? id) => people.where((p) => p.id == id).firstOrNull;
 
   factory ReportsMeta.fromJson(Map<String, Object?> json) {
     final me = (json['me'] as Map).cast<String, Object?>();
+    final scope = ReportScope.fromCode(me['scope'] as String?);
     return ReportsMeta(
-      today: _date(json['today'])!,
+      today: _day(json['today'])!,
       myId: (me['id'] as num).toInt(),
       myName: me['full_name'] as String? ?? '',
       myDepartmentId: (me['department_id'] as num?)?.toInt(),
-      scope: ReportScope.fromCode(me['scope'] as String?),
+      scope: scope,
+      canAssign: me['can_assign'] as bool? ?? scope != ReportScope.own,
       departments: [
         for (final d in (json['departments'] as List? ?? const []))
           Department.fromJson((d as Map).cast<String, Object?>()),
@@ -351,6 +525,151 @@ class ReportsMeta {
       ],
     );
   }
+
+  Map<String, Object?> toJson() => {
+    'today': dateKey(today),
+    'me': {
+      'id': myId,
+      'full_name': myName,
+      'department_id': myDepartmentId,
+      'scope': scope.name,
+      'can_assign': canAssign,
+    },
+    'departments': [for (final d in departments) d.toJson()],
+    'people': [for (final p in people) p.toJson()],
+  };
+}
+
+/// The small counts the app shows as badges (polled about once a minute).
+class ReportBadge {
+  const ReportBadge({
+    this.unread = 0,
+    this.toReview = 0,
+    this.submittedToday = false,
+    this.needsReport = false,
+  });
+
+  /// Notifications not read yet.
+  final int unread;
+
+  /// Submitted work waiting for this person to review.
+  final int toReview;
+  final bool submittedToday;
+
+  /// Has a department, so is expected to submit daily.
+  final bool needsReport;
+
+  /// The number on the Daily reports menu item.
+  int get count => unread + toReview;
+
+  factory ReportBadge.fromJson(Map<String, Object?> json) => ReportBadge(
+    unread: (json['unread'] as num?)?.toInt() ?? 0,
+    toReview: (json['to_review'] as num?)?.toInt() ?? 0,
+    submittedToday: json['submitted_today'] as bool? ?? false,
+    needsReport: json['needs_report'] as bool? ?? false,
+  );
+
+  Map<String, Object?> toJson() => {
+    'unread': unread,
+    'to_review': toReview,
+    'submitted_today': submittedToday,
+    'needs_report': needsReport,
+  };
+}
+
+/// What a notification is about.
+enum NotificationKind {
+  assigned('assigned', Icons.assignment_ind_outlined),
+  reassigned('reassigned', Icons.swap_horiz),
+  submitted('submitted', Icons.outbox_outlined),
+  approved('approved', Icons.verified_outlined),
+  returned('returned', Icons.undo),
+  comment('comment', Icons.chat_bubble_outline),
+  blocked('blocked', Icons.block),
+  dueToday('due_today', Icons.today_outlined),
+  overdue('overdue', Icons.warning_amber_outlined),
+  reminder('reminder', Icons.edit_note_outlined);
+
+  const NotificationKind(this.code, this.icon);
+  final String code;
+  final IconData icon;
+
+  static NotificationKind fromCode(String? code) =>
+      values.firstWhere((k) => k.code == code, orElse: () => comment);
+}
+
+class ReportNotification {
+  const ReportNotification({
+    required this.id,
+    required this.kind,
+    required this.createdAt,
+    this.reportId,
+    this.body = '',
+    this.read = false,
+    this.actorName = '',
+    this.task = '',
+    this.urgency,
+  });
+
+  final int id;
+  final NotificationKind kind;
+  final DateTime createdAt;
+  final int? reportId;
+  final String body;
+  final bool read;
+  final String actorName;
+
+  /// The task's title now (empty when it was deleted).
+  final String task;
+  final TaskUrgency? urgency;
+
+  /// One line: who did what.
+  String get title {
+    final who = actorName.isEmpty ? 'Someone' : actorName;
+    final ref = reportId == null ? '' : ' #$reportId';
+    return switch (kind) {
+      NotificationKind.assigned =>
+        body.startsWith('Updated: ')
+            ? '$who updated a task for you$ref'
+            : '$who assigned you a task$ref',
+      NotificationKind.reassigned => '$who gave your task$ref to someone else',
+      NotificationKind.submitted => '$who submitted a task you assigned$ref',
+      NotificationKind.approved => '$who approved your task$ref',
+      NotificationKind.returned => '$who returned your task$ref',
+      NotificationKind.comment => '$who commented on task$ref',
+      NotificationKind.blocked => '$who is blocked on task$ref',
+      NotificationKind.dueToday => 'Task$ref is due today',
+      NotificationKind.overdue => 'Task$ref is overdue',
+      NotificationKind.reminder => 'Daily report reminder',
+    };
+  }
+
+  /// The detail under the title: the note or comment, else the task.
+  String get detail {
+    if (kind == NotificationKind.returned ||
+        kind == NotificationKind.comment ||
+        kind == NotificationKind.blocked ||
+        kind == NotificationKind.approved ||
+        kind == NotificationKind.reminder) {
+      return body.isNotEmpty ? body : task;
+    }
+    return task.isNotEmpty ? task : body.replaceFirst('Updated: ', '');
+  }
+
+  factory ReportNotification.fromJson(Map<String, Object?> json) =>
+      ReportNotification(
+        id: (json['id'] as num).toInt(),
+        kind: NotificationKind.fromCode(json['kind'] as String?),
+        createdAt: _date(json['created_at'])!.toLocal(),
+        reportId: (json['report_id'] as num?)?.toInt(),
+        body: json['body'] as String? ?? '',
+        read: json['read'] as bool? ?? false,
+        actorName: json['actor_name'] as String? ?? '',
+        task: json['task'] as String? ?? '',
+        urgency: json['urgency'] == null
+            ? null
+            : TaskUrgency.fromCode(json['urgency'] as String?),
+      );
 }
 
 /// One department's figures for a period.
@@ -362,18 +681,26 @@ class DepartmentSummary {
     required this.completed,
     required this.open,
     required this.blocked,
-    required this.escalated,
+    required this.awaiting,
     required this.people,
     required this.outputs,
   });
 
   final int id;
   final String name;
+
+  /// Submitted in the period.
   final int activities;
+
+  /// Approved, of those.
   final int completed;
+
+  /// Not done yet (any date).
   final int open;
   final int blocked;
-  final int escalated;
+
+  /// Waiting for review.
+  final int awaiting;
   final int people;
   final Map<String, int> outputs;
 
@@ -385,7 +712,7 @@ class DepartmentSummary {
         completed: (json['completed'] as num?)?.toInt() ?? 0,
         open: (json['open'] as num?)?.toInt() ?? 0,
         blocked: (json['blocked'] as num?)?.toInt() ?? 0,
-        escalated: (json['escalated'] as num?)?.toInt() ?? 0,
+        awaiting: (json['awaiting'] as num?)?.toInt() ?? 0,
         people: (json['people'] as num?)?.toInt() ?? 0,
         outputs: {
           for (final e in ((json['outputs'] as Map?) ?? const {}).entries)
@@ -403,6 +730,7 @@ class ComplianceRow {
     required this.daysSubmitted,
     required this.entries,
     required this.submittedToday,
+    this.open = 0,
     this.lastDate,
   });
 
@@ -412,6 +740,9 @@ class ComplianceRow {
   final int daysSubmitted;
   final int entries;
   final bool submittedToday;
+
+  /// Tasks on their list now.
+  final int open;
   final DateTime? lastDate;
 
   factory ComplianceRow.fromJson(Map<String, Object?> json) => ComplianceRow(
@@ -421,11 +752,12 @@ class ComplianceRow {
     daysSubmitted: (json['days_submitted'] as num?)?.toInt() ?? 0,
     entries: (json['entries'] as num?)?.toInt() ?? 0,
     submittedToday: json['submitted_today'] as bool? ?? false,
-    lastDate: _date(json['last_date']),
+    open: (json['open'] as num?)?.toInt() ?? 0,
+    lastDate: _day(json['last_date']),
   );
 }
 
-/// The dashboard's figures for a period, all from submitted reports.
+/// The team figures for a period.
 class ReportSummary {
   const ReportSummary({
     required this.from,
@@ -433,6 +765,7 @@ class ReportSummary {
     required this.today,
     required this.workingDays,
     required this.status,
+    required this.review,
     required this.departments,
     required this.compliance,
     required this.overdue,
@@ -445,15 +778,31 @@ class ReportSummary {
 
   /// Monday–Friday in the period, up to today.
   final int workingDays;
+
+  /// Open tasks now by status, plus Done for the ones submitted in the
+  /// period.
   final Map<ReportStatus, int> status;
+
+  /// Tasks submitted in the period, by where they are in review.
+  final Map<ReviewState, int> review;
   final List<DepartmentSummary> departments;
   final List<ComplianceRow> compliance;
   final List<ActivityReport> overdue;
+
+  /// Blocked, returned, or urgent and not done.
   final List<ActivityReport> attention;
 
-  int get total => status.values.fold(0, (a, b) => a + b);
   int count(ReportStatus s) => status[s] ?? 0;
-  int get open => total - count(ReportStatus.completed);
+  int reviewed(ReviewState r) => review[r] ?? 0;
+
+  /// Submitted in the period.
+  int get submitted => review.values.fold(0, (a, b) => a + b);
+
+  /// Not done yet.
+  int get open =>
+      count(ReportStatus.toDo) +
+      count(ReportStatus.inProgress) +
+      count(ReportStatus.blocked);
 
   factory ReportSummary.fromJson(Map<String, Object?> json) {
     List<ActivityReport> reports(Object? list) => [
@@ -461,13 +810,17 @@ class ReportSummary {
         ActivityReport.fromJson((r as Map).cast<String, Object?>()),
     ];
     return ReportSummary(
-      from: _date(json['from'])!,
-      to: _date(json['to'])!,
-      today: _date(json['today'])!,
+      from: _day(json['from'])!,
+      to: _day(json['to'])!,
+      today: _day(json['today'])!,
       workingDays: (json['working_days'] as num?)?.toInt() ?? 0,
       status: {
         for (final e in ((json['status'] as Map?) ?? const {}).entries)
           ReportStatus.fromCode('${e.key}'): (e.value as num).toInt(),
+      },
+      review: {
+        for (final e in ((json['review'] as Map?) ?? const {}).entries)
+          ReviewState.fromCode('${e.key}'): (e.value as num).toInt(),
       },
       departments: [
         for (final d in (json['departments'] as List? ?? const []))
@@ -483,7 +836,7 @@ class ReportSummary {
   }
 }
 
-/// One entry in a report's audit trail.
+/// One entry in a task's audit trail.
 class ReportChange {
   const ReportChange({
     required this.action,
@@ -495,6 +848,15 @@ class ReportChange {
   final DateTime changedAt;
   final String changedBy;
 
+  String get label => switch (action) {
+    'created' => 'Added',
+    'edited' => 'Changed',
+    'submitted' => 'Submitted',
+    'approved' => 'Approved',
+    'returned' => 'Returned',
+    _ => 'Deleted',
+  };
+
   factory ReportChange.fromJson(Map<String, Object?> json) => ReportChange(
     action: json['action'] as String,
     changedAt: _date(json['changed_at'])!.toLocal(),
@@ -502,7 +864,7 @@ class ReportChange {
   );
 }
 
-/// The filter for listing reports.
+/// The filter for listing tasks.
 class ReportFilter {
   const ReportFilter({
     this.from,
@@ -510,21 +872,36 @@ class ReportFilter {
     this.departmentId,
     this.userId,
     this.statuses,
-    this.priority,
+    this.reviews,
+    this.urgency,
     this.openOnly = false,
     this.overdueOnly = false,
+    this.assignedByMe = false,
+    this.toReview = false,
+    this.reviewedByMe = false,
     this.search,
+    this.limit,
   });
 
+  /// Submitted on or after (tasks not submitted have no date).
   final DateTime? from;
   final DateTime? to;
   final int? departmentId;
   final int? userId;
   final List<ReportStatus>? statuses;
-  final ReportPriority? priority;
+  final List<ReviewState>? reviews;
+  final TaskUrgency? urgency;
   final bool openOnly;
   final bool overdueOnly;
+  final bool assignedByMe;
+
+  /// Submitted and waiting for this person to review.
+  final bool toReview;
+  final bool reviewedByMe;
+
+  /// Words in the title, details, people or department, or "#123".
   final String? search;
+  final int? limit;
 
   Map<String, Object?> toJson() => {
     if (from != null) 'from': dateKey(from!),
@@ -532,9 +909,14 @@ class ReportFilter {
     'department_id': ?departmentId,
     'user_id': ?userId,
     if (statuses != null) 'statuses': [for (final s in statuses!) s.code],
-    if (priority != null) 'priority': priority!.code,
+    if (reviews != null) 'reviews': [for (final r in reviews!) r.code],
+    if (urgency != null) 'urgency': urgency!.code,
     if (openOnly) 'open_only': true,
     if (overdueOnly) 'overdue_only': true,
+    if (assignedByMe) 'assigned_by_me': true,
+    if (toReview) 'to_review': true,
+    if (reviewedByMe) 'reviewed_by_me': true,
     if (search != null && search!.trim().isNotEmpty) 'search': search!.trim(),
+    'limit': ?limit,
   };
 }

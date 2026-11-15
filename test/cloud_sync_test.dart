@@ -462,6 +462,18 @@ class FakeCloud implements CloudApi {
   final reports = <int, Map<String, Object?>>{};
   final reportChanges = <Map<String, Object?>>[];
   final calls = <String>[];
+  final notifications = <Map<String, Object?>>[];
+  int _nextReport = 100;
+  int _tick = 0;
+
+  /// A moment on [reportsToday]; each call a minute later, so orderings by
+  /// time are stable.
+  String _now() => DateTime.utc(
+    reportsToday.year,
+    reportsToday.month,
+    reportsToday.day,
+    8,
+  ).add(Duration(minutes: _tick++)).toIso8601String();
 
   String _scope(int uid) {
     final u = users[uid]!;
@@ -482,19 +494,74 @@ class FakeCloud implements CloudApi {
     _ => owner == uid,
   };
 
+  bool _canSeeTask(int uid, Map<String, Object?> r) =>
+      r['user_id'] == uid ||
+      r['assigned_by'] == uid ||
+      _canSee(uid, r['user_id'] as int, r['department_id'] as int?);
+
+  bool _canReview(int uid, Map<String, Object?> r) {
+    if (r['user_id'] == uid) return false;
+    if (r['assigned_by'] == uid) return true;
+    return switch (_scope(uid)) {
+      'all' => true,
+      'department' => r['department_id'] == users[uid]!.departmentId,
+      _ => false,
+    };
+  }
+
   String _day(DateTime d) => dateKey(d);
 
   final comments = <Map<String, Object?>>[];
+
+  void _notify(Object? user, String kind, int? rid, int? actor, String body) {
+    if (user == null || user == actor) return;
+    notifications.add({
+      'id': notifications.length + 1,
+      'user_id': user,
+      'kind': kind,
+      'report_id': rid,
+      'actor_id': actor,
+      'body': body,
+      'created_at': _now(),
+      'read': false,
+    });
+  }
+
+  void _comment(int rid, int uid, String kind, String body) => comments.add({
+    'id': comments.length + 1,
+    'report_id': rid,
+    'user_id': uid,
+    'user_name': users[uid]!.fullName,
+    'kind': kind,
+    'body': body,
+    'created_at': _now(),
+  });
 
   Map<String, Object?> _reportJson(Map<String, Object?> r) => {
     ...r,
     'user_name': users[r['user_id']]!.fullName,
     'assigned_by_name': users[r['assigned_by']]?.fullName,
-    'comment_count': comments.where((c) => c['report_id'] == r['id']).length,
+    'reviewed_by_name': users[r['reviewed_by']]?.fullName,
+    'comment_count': comments
+        .where((c) => c['report_id'] == r['id'] && c['kind'] == 'comment')
+        .length,
+    'last_review_note': comments
+        .where(
+          (c) =>
+              c['report_id'] == r['id'] &&
+              (c['kind'] == 'returned' || c['kind'] == 'approved'),
+        )
+        .lastOrNull?['body'],
     'department_name': departments.firstWhere(
       (d) => d['id'] == r['department_id'],
     )['name'],
   };
+
+  bool _isOpen(Map<String, Object?> r) =>
+      r['status'] != 'done' || r['review'] == 'returned';
+
+  bool _between(Object? day, String from, String to) =>
+      day is String && day.compareTo(from) >= 0 && day.compareTo(to) <= 0;
 
   @override
   Future<Object?> callFunction(String name, Map<String, Object?> p) async {
@@ -503,36 +570,40 @@ class FakeCloud implements CloudApi {
     final uid = _tokenUser(p['p_token'] as String);
     final me = users[uid]!;
     final today = reportsToday;
+    final t = _day(today);
     List<Map<String, Object?>> visible() => [
       for (final r in reports.values)
-        if (_canSee(uid, r['user_id'] as int, r['department_id'] as int?)) r,
+        if (_canSeeTask(uid, r)) r,
     ];
+    Future<Object?> again(String fn, [Map<String, Object?> more = const {}]) =>
+        callFunction(fn, {'p_token': p['p_token'], ...more});
     switch (name) {
       case 'report_start':
-        // As the server: the page's meta and your own day in one call.
-        final t = _day(today);
-        final monday = _day(today.subtract(Duration(days: today.weekday - 1)));
-        Future<Object?> list(Map<String, Object?> f) => callFunction(
-          'report_list',
-          {'p_token': p['p_token'], 'p_filter': f},
-        );
+        // As the server: everything the page opens with, in one call.
         return {
-          'meta': await callFunction('reports_meta', {'p_token': p['p_token']}),
-          'day': await list({'from': t, 'to': t, 'user_id': uid}),
-          'open': await list({'user_id': uid, 'open_only': true}),
-          'week': await list({'from': monday, 'to': t, 'user_id': uid}),
+          'meta': await again('reports_meta'),
+          'badge': await again('report_badge'),
+          'tasks': await again('report_list', {
+            'p_filter': {'user_id': uid, 'open_only': true},
+          }),
+          'submissions': await again('report_list', {
+            'p_filter': {
+              'user_id': uid,
+              'reviews': ['submitted', 'approved'],
+              'from': _day(today.subtract(const Duration(days: 60))),
+            },
+          }),
         };
       case 'reports_meta':
         final scope = _scope(uid);
         return {
-          'today': _day(today),
-          'me': {...me.toJson(), 'scope': scope},
+          'today': t,
+          'now': '${t}T09:00:00',
+          'me': {...me.toJson(), 'scope': scope, 'can_assign': scope != 'own'},
           'departments': departments,
           'people': [
             for (final u in users.values)
-              if (scope == 'all' ||
-                  u.id == uid ||
-                  (scope == 'department' && u.departmentId == me.departmentId))
+              if (scope != 'own' || u.id == uid)
                 {
                   'id': u.id,
                   'full_name': u.fullName,
@@ -541,63 +612,130 @@ class FakeCloud implements CloudApi {
                 },
           ],
         };
+      case 'report_badge':
+        return {
+          'unread': notifications
+              .where((n) => n['user_id'] == uid && n['read'] != true)
+              .length,
+          'to_review': reports.values
+              .where((r) => r['review'] == 'submitted' && _canReview(uid, r))
+              .length,
+          'submitted_today': reports.values.any(
+            (r) => r['user_id'] == uid && r['report_date'] == t,
+          ),
+          'needs_report': me.departmentId != null,
+        };
+      case 'report_notifications':
+        return [
+          for (final n in notifications.reversed)
+            if (n['user_id'] == uid)
+              {
+                ...n,
+                'actor_name': users[n['actor_id']]?.fullName,
+                'task': reports[n['report_id']]?['description'],
+                'urgency': reports[n['report_id']]?['urgency'],
+              },
+        ];
+      case 'report_notifications_read':
+        final ids = (p['p_ids'] as List?)?.cast<int>();
+        for (final n in notifications) {
+          if (n['user_id'] == uid && (ids == null || ids.contains(n['id']))) {
+            n['read'] = true;
+          }
+        }
+        return null;
       case 'report_list':
         final f = (p['p_filter'] as Map).cast<String, Object?>();
+        final search = (f['search'] as String?)?.trim().toLowerCase();
+        final searchId = search == null
+            ? null
+            : int.tryParse(search.replaceFirst('#', ''));
         final rows = visible().where((r) {
-          final d = r['report_date'] as String;
-          final open = r['status'] != 'completed';
-          return (f['from'] == null || d.compareTo(f['from'] as String) >= 0) &&
-              (f['to'] == null || d.compareTo(f['to'] as String) <= 0) &&
+          final d = r['report_date'] as String?;
+          bool on(String key, bool Function(String) test) =>
+              f[key] == null || (d != null && test(f[key] as String));
+          return on('from', (v) => d!.compareTo(v) >= 0) &&
+              on('to', (v) => d!.compareTo(v) <= 0) &&
               (f['user_id'] == null || r['user_id'] == f['user_id']) &&
               (f['department_id'] == null ||
                   r['department_id'] == f['department_id']) &&
               (f['statuses'] == null ||
                   (f['statuses'] as List).contains(r['status'])) &&
-              (f['open_only'] != true || open) &&
+              (f['reviews'] == null ||
+                  (f['reviews'] as List).contains(r['review'])) &&
+              (f['urgency'] == null || r['urgency'] == f['urgency']) &&
+              (f['open_only'] != true || _isOpen(r)) &&
               (f['overdue_only'] != true ||
-                  (open &&
+                  (r['status'] != 'done' &&
                       r['due_date'] != null &&
-                      (r['due_date'] as String).compareTo(_day(today)) < 0)) &&
-              (f['search'] == null ||
-                  '${r['description']} ${r['reference']}'
-                      .toLowerCase()
-                      .contains((f['search'] as String).toLowerCase()));
-        }).toList()..sort((a, b) => (b['id'] as int).compareTo(a['id'] as int));
-        return [for (final r in rows) _reportJson(r)];
+                      (r['due_date'] as String).compareTo(t) < 0)) &&
+              (f['assigned_by_me'] != true || r['assigned_by'] == uid) &&
+              (f['to_review'] != true ||
+                  (r['review'] == 'submitted' && _canReview(uid, r))) &&
+              (f['reviewed_by_me'] != true || r['reviewed_by'] == uid) &&
+              (search == null ||
+                  r['id'] == searchId ||
+                  [
+                    r['description'],
+                    r['details'],
+                    r['reference'],
+                    r['blocker'],
+                    users[r['user_id']]?.fullName,
+                    users[r['assigned_by']]?.fullName,
+                    departments.firstWhere(
+                      (x) => x['id'] == r['department_id'],
+                    )['name'],
+                  ].join(' ').toLowerCase().contains(search));
+        }).toList();
+        String when(Map<String, Object?> r) =>
+            (r['submitted_at'] ?? r['updated_at']) as String;
+        rows.sort((a, b) {
+          final c = when(b).compareTo(when(a));
+          return c != 0 ? c : (b['id'] as int).compareTo(a['id'] as int);
+        });
+        final limit = f['limit'] as int?;
+        return [
+          for (final r in limit == null ? rows : rows.take(limit))
+            _reportJson(r),
+        ];
       case 'report_summary':
         final from = p['p_from'] as String;
         final to = p['p_to'] as String;
         final deptFilter = p['p_department'] as int?;
         final userFilter = p['p_user'] as int?;
-        final inRange = visible().where((r) {
-          final d = r['report_date'] as String;
-          return d.compareTo(from) >= 0 &&
-              d.compareTo(to) <= 0 &&
-              (deptFilter == null || r['department_id'] == deptFilter) &&
-              (userFilter == null || r['user_id'] == userFilter);
-        }).toList();
+        bool scoped(Map<String, Object?> r) =>
+            (deptFilter == null || r['department_id'] == deptFilter) &&
+            (userFilter == null || r['user_id'] == userFilter);
+        final inView = visible().where(scoped).toList();
+        final inRange = inView
+            .where((r) => _between(r['report_date'], from, to))
+            .toList();
         final status = <String, int>{};
+        for (final r in inView) {
+          if (r['status'] != 'done' || _between(r['report_date'], from, to)) {
+            status['${r['status']}'] = (status['${r['status']}'] ?? 0) + 1;
+          }
+        }
+        final review = <String, int>{};
         for (final r in inRange) {
-          status[r['status'] as String] =
-              (status[r['status'] as String] ?? 0) + 1;
+          review['${r['review']}'] = (review['${r['review']}'] ?? 0) + 1;
         }
         final scope = _scope(uid);
-        final open = visible().where(
-          (r) =>
-              r['status'] != 'completed' &&
-              (userFilter == null || r['user_id'] == userFilter),
-        );
         return {
           'from': from,
           'to': to,
-          'today': _day(today),
+          'today': t,
           'working_days': 1,
           'status': status,
+          'review': review,
           'departments': [
             for (final d in departments)
               if ((deptFilter == null || d['id'] == deptFilter) &&
                   (scope == 'all' || d['id'] == me.departmentId))
                 () {
+                  final all = inView.where(
+                    (r) => r['department_id'] == d['id'],
+                  );
                   final rs = inRange.where(
                     (r) => r['department_id'] == d['id'],
                   );
@@ -613,12 +751,14 @@ class FakeCloud implements CloudApi {
                     'name': d['name'],
                     'activities': rs.length,
                     'completed': rs
-                        .where((r) => r['status'] == 'completed')
+                        .where((r) => r['review'] == 'approved')
                         .length,
-                    'open': rs.where((r) => r['status'] != 'completed').length,
-                    'blocked': rs.where((r) => r['status'] == 'blocked').length,
-                    'escalated': rs
-                        .where((r) => r['status'] == 'escalated')
+                    'open': all.where((r) => r['status'] != 'done').length,
+                    'blocked': all
+                        .where((r) => r['status'] == 'blocked')
+                        .length,
+                    'awaiting': all
+                        .where((r) => r['review'] == 'submitted')
                         .length,
                     'people': rs.map((r) => r['user_id']).toSet().length,
                     'outputs': outputs,
@@ -642,27 +782,44 @@ class FakeCloud implements CloudApi {
                   'department_name': departments.firstWhere(
                     (d) => d['id'] == u.departmentId,
                   )['name'],
-                  'days_submitted': inRange
-                      .where((r) => r['user_id'] == u.id)
+                  'days_submitted': reports.values
+                      .where(
+                        (r) =>
+                            r['user_id'] == u.id &&
+                            _between(r['report_date'], from, to),
+                      )
                       .map((r) => r['report_date'])
                       .toSet()
                       .length,
-                  'entries': inRange.where((r) => r['user_id'] == u.id).length,
+                  'entries': reports.values
+                      .where(
+                        (r) =>
+                            r['user_id'] == u.id &&
+                            _between(r['report_date'], from, to),
+                      )
+                      .length,
+                  'open': reports.values
+                      .where(
+                        (r) => r['user_id'] == u.id && r['status'] != 'done',
+                      )
+                      .length,
                   'submitted_today': reports.values.any(
-                    (r) =>
-                        r['user_id'] == u.id && r['report_date'] == _day(today),
+                    (r) => r['user_id'] == u.id && r['report_date'] == t,
                   ),
                 },
           ],
           'overdue': [
-            for (final r in open)
-              if (r['due_date'] != null &&
-                  (r['due_date'] as String).compareTo(_day(today)) < 0)
+            for (final r in inView)
+              if (r['status'] != 'done' &&
+                  r['due_date'] != null &&
+                  (r['due_date'] as String).compareTo(t) < 0)
                 _reportJson(r),
           ],
           'attention': [
-            for (final r in open)
-              if (r['status'] == 'blocked' || r['status'] == 'escalated')
+            for (final r in inView)
+              if (r['status'] == 'blocked' ||
+                  r['review'] == 'returned' ||
+                  (r['urgency'] == 'urgent' && r['status'] != 'done'))
                 _reportJson(r),
           ],
         };
@@ -673,75 +830,173 @@ class FakeCloud implements CloudApi {
         if (id != null && before == null) {
           throw CloudException('unknown_report');
         }
-        if (before != null &&
-            before['user_id'] != uid &&
-            before['assigned_by'] != uid &&
-            me.role != UserRole.admin) {
-          throw CloudException('not_allowed');
+        var status = r['status'] as String? ?? 'to_do';
+        if (!['to_do', 'in_progress', 'blocked', 'done'].contains(status)) {
+          throw CloudException('bad_status');
         }
-        // Assigning a task to someone else.
-        final forId = before == null ? r['user_id'] as int? : null;
-        final owner = forId == null || forId == uid ? null : users[forId];
-        if (forId != null && forId != uid) {
-          if (owner == null) throw CloudException('unknown_user');
-          if (_scope(uid) == 'own' ||
-              !_canSee(uid, owner.id, owner.departmentId)) {
-            throw CloudException('not_allowed');
-          }
-          if (r['due_date'] == null) {
-            throw CloudException('due_date_required');
-          }
-        }
-        final dept =
-            before?['department_id'] ?? owner?.departmentId ?? me.departmentId;
-        if (dept == null) throw CloudException('no_department');
-        final date = r['report_date'] as String? ?? _day(today);
-        if (date.compareTo(_day(today)) > 0) {
-          throw CloudException('future_date');
-        }
-        final status = r['status'] as String? ?? 'completed';
-        if (status != 'completed' && r['due_date'] == null) {
-          throw CloudException('due_date_required');
+        final urgency = r['urgency'] as String? ?? 'normal';
+        if (!['low', 'normal', 'high', 'urgent'].contains(urgency)) {
+          throw CloudException('bad_urgency');
         }
         if ('${r['description'] ?? ''}'.trim().isEmpty) {
           throw CloudException('description_required');
         }
+        var submit = r['submit'] == true;
+        if (submit) status = 'done';
+        final forId = r['user_id'] as int?;
+        int owner;
+        int? assigned;
+        int? dept;
+        if (before != null) {
+          if (before['user_id'] != uid &&
+              before['assigned_by'] != uid &&
+              me.role != UserRole.admin) {
+            throw CloudException('not_allowed');
+          }
+          if (['submitted', 'approved'].contains(before['review']) &&
+              before['user_id'] == uid &&
+              before['assigned_by'] != uid &&
+              me.role != UserRole.admin) {
+            throw CloudException('already_submitted');
+          }
+          owner = before['user_id'] as int;
+          assigned = before['assigned_by'] as int?;
+          dept = before['department_id'] as int?;
+          if (forId != null &&
+              forId != owner &&
+              (assigned == uid || me.role == UserRole.admin)) {
+            final o = users[forId];
+            if (o == null || !o.active) throw CloudException('unknown_user');
+            owner = o.id;
+            dept = o.departmentId;
+          }
+        } else if (forId != null && forId != uid) {
+          if (_scope(uid) == 'own') throw CloudException('not_allowed');
+          final o = users[forId];
+          if (o == null || !o.active) throw CloudException('unknown_user');
+          owner = o.id;
+          dept = o.departmentId;
+          assigned = uid;
+          submit = false;
+          if (status == 'done') status = 'to_do';
+        } else {
+          owner = uid;
+          dept = me.departmentId;
+        }
+        if (status == 'blocked' && '${r['blocker'] ?? ''}'.trim().isEmpty) {
+          throw CloudException('blocker_required');
+        }
+        var reviewState = (before?['review'] as String?) ?? 'none';
+        var reportDate = before?['report_date'];
+        var submittedAt = before?['submitted_at'];
+        final now = _now();
+        if (submit) {
+          if (owner != uid) throw CloudException('not_allowed');
+          reviewState = 'submitted';
+          reportDate = t;
+          submittedAt = now;
+        } else if (status != 'done' && reviewState == 'approved') {
+          reviewState = 'none';
+        }
         final keys = [
-          for (final o
-              in departments.firstWhere((d) => d['id'] == dept)['outputs']!
-                  as List)
-            (o as Map)['key'],
+          if (dept != null)
+            for (final o
+                in departments.firstWhere((d) => d['id'] == dept)['outputs']!
+                    as List)
+              (o as Map)['key'],
           // An edit keeps keys the report already had.
           ...((before?['outputs'] as Map?) ?? const {}).keys,
         ];
         final saved = <String, Object?>{
-          'id': id ?? reports.length + 100,
-          'user_id': before?['user_id'] ?? owner?.id ?? uid,
-          'assigned_by': before?['assigned_by'] ?? (owner == null ? null : uid),
+          ...?before,
+          'id': id ?? _nextReport++,
+          'user_id': owner,
+          'assigned_by': assigned,
           'department_id': dept,
-          'report_date': date,
+          'report_date': reportDate,
           'description': '${r['description']}'.trim(),
-          'reference': r['reference'] ?? '',
+          'details': '${r['details'] ?? ''}'.trim(),
+          'reference': '${r['reference'] ?? ''}'.trim(),
           'outputs': {
             for (final e in ((r['outputs'] as Map?) ?? {}).entries)
               if (keys.contains(e.key) && (e.value as int) > 0) e.key: e.value,
           },
           'status': status,
-          'next_action': r['next_action'] ?? '',
-          'blocker': r['blocker'] ?? '',
-          'priority': r['priority'] ?? 'medium',
+          'blocker': status == 'blocked' ? '${r['blocker']}'.trim() : '',
+          'urgency': urgency,
           'due_date': r['due_date'],
-          'created_at': '2026-11-09T08:00:00Z',
-          'updated_at': '2026-11-09T08:00:00Z',
+          'review': reviewState,
+          'submitted_at': submittedAt,
+          'created_at': before?['created_at'] ?? now,
+          'updated_at': now,
         };
-        reports[saved['id'] as int] = saved;
+        final sid = saved['id'] as int;
+        reports[sid] = saved;
         reportChanges.add({
-          'report_id': saved['id'],
-          'action': before == null ? 'created' : 'edited',
+          'report_id': sid,
+          'action': before == null
+              ? 'created'
+              : submit
+              ? 'submitted'
+              : 'edited',
           'changed_by': me.fullName,
-          'changed_at': '2026-11-09T08:00:00Z',
+          'changed_at': now,
         });
+        final title = saved['description'] as String;
+        if (before == null) {
+          if (assigned != null) _notify(owner, 'assigned', sid, uid, title);
+        } else if (owner != before['user_id']) {
+          _notify(owner, 'assigned', sid, uid, title);
+          _notify(before['user_id'], 'reassigned', sid, uid, title);
+        }
+        if (status == 'blocked' && before?['status'] != 'blocked') {
+          _notify(assigned, 'blocked', sid, uid, saved['blocker'] as String);
+        }
+        if (submit) {
+          _comment(sid, uid, 'submitted', '${r['note'] ?? ''}'.trim());
+          _notify(assigned, 'submitted', sid, uid, title);
+        }
         return _reportJson(saved);
+      case 'report_review':
+        final id = p['p_report'] as int;
+        final r = reports[id];
+        if (r == null) throw CloudException('unknown_report');
+        if (!_canReview(uid, r)) throw CloudException('not_allowed');
+        final decision = p['p_decision'] as String;
+        if (!['approved', 'returned'].contains(decision)) {
+          throw CloudException('bad_decision');
+        }
+        if (r['review'] != 'submitted' &&
+            !(r['reviewed_by'] == uid &&
+                ['approved', 'returned'].contains(r['review']))) {
+          throw CloudException('not_submitted');
+        }
+        final note = '${p['p_comment'] ?? ''}'.trim();
+        if (decision == 'returned' && note.isEmpty) {
+          throw CloudException('comment_required');
+        }
+        final now = _now();
+        r
+          ..['review'] = decision
+          ..['status'] = decision == 'returned' ? 'in_progress' : 'done'
+          ..['reviewed_by'] = uid
+          ..['reviewed_at'] = now
+          ..['updated_at'] = now;
+        _comment(id, uid, decision, note);
+        reportChanges.add({
+          'report_id': id,
+          'action': decision,
+          'changed_by': me.fullName,
+          'changed_at': now,
+        });
+        _notify(
+          r['user_id'],
+          decision,
+          id,
+          uid,
+          note.isEmpty ? r['description'] as String : note,
+        );
+        return _reportJson(r);
       case 'report_delete':
         final id = p['p_report'] as int;
         final r = reports[id];
@@ -756,7 +1011,7 @@ class FakeCloud implements CloudApi {
           'report_id': id,
           'action': 'deleted',
           'changed_by': me.fullName,
-          'changed_at': '2026-11-09T09:00:00Z',
+          'changed_at': _now(),
         });
         return null;
       case 'report_history':
@@ -768,21 +1023,20 @@ class FakeCloud implements CloudApi {
       case 'report_comment_add':
         final rid = p['p_report'] as int;
         final r = reports[rid];
-        final visible =
-            r != null &&
-            _canSee(uid, r['user_id'] as int, r['department_id'] as int?);
+        final canSee = r != null && _canSeeTask(uid, r);
         if (name == 'report_comment_add') {
-          if (!visible) throw CloudException('not_allowed');
-          comments.add({
-            'id': comments.length + 1,
-            'report_id': rid,
-            'user_id': uid,
-            'user_name': me.fullName,
-            'body': (p['p_body'] as String).trim(),
-            'created_at': '2026-11-09T09:30:00Z',
-          });
+          if (!canSee) throw CloudException('not_allowed');
+          final body = (p['p_body'] as String).trim();
+          _comment(rid, uid, 'comment', body);
+          for (final who in {
+            r['user_id'],
+            r['assigned_by'],
+            r['reviewed_by'],
+          }) {
+            _notify(who, 'comment', rid, uid, body);
+          }
         }
-        if (!visible) return [];
+        if (!canSee) return [];
         return [
           for (final c in comments)
             if (c['report_id'] == rid) c,
@@ -1611,29 +1865,67 @@ void main() {
     int id,
     int userId,
     int dept, {
-    String status = 'completed',
-    String date = '2026-11-09',
+    String status = 'done',
+    String review = 'submitted',
+    String? date = '2026-11-09',
     String? due,
+    String urgency = 'normal',
+    int? assignedBy,
     Map<String, int> outputs = const {},
     String description = 'Work done',
   }) => cloud.reports[id] = {
     'id': id,
     'user_id': userId,
+    'assigned_by': assignedBy,
     'department_id': dept,
-    'report_date': date,
+    'report_date': status == 'done' ? date : null,
     'description': description,
+    'details': '',
     'reference': '',
     'outputs': outputs,
     'status': status,
-    'next_action': '',
     'blocker': status == 'blocked' ? 'Clinic closed' : '',
-    'priority': 'medium',
+    'urgency': urgency,
     'due_date': due,
-    'created_at': '2026-11-09T08:00:00Z',
-    'updated_at': '2026-11-09T08:00:00Z',
+    'review': status == 'done' ? review : 'none',
+    'submitted_at': status == 'done' ? '${date}T07:00:00Z' : null,
+    'created_at': '2026-11-09T07:00:00Z',
+    'updated_at': '2026-11-09T07:00:00Z',
   };
 
-  testWidgets('daily reports: an employee records their day', (tester) async {
+  /// A task card's title (it's rich text, after the #id).
+  Finder taskTitle(String text) =>
+      find.textContaining(text, findRichText: true);
+
+  /// The Daily reports tab whose label starts with [label].
+  Finder reportsTab(String label) => find.descendant(
+    of: find.byKey(const ValueKey('reports-tab')),
+    matching: find.byWidgetPredicate(
+      (w) => w is Text && (w.data ?? '').startsWith(label),
+    ),
+  );
+
+  Future<void> openReportsTab(WidgetTester tester, String label) async {
+    // On a phone the tabs scroll sideways.
+    await tester.ensureVisible(reportsTab(label));
+    await tester.pumpAndSettle();
+    await tester.tap(reportsTab(label));
+    await settle(tester);
+  }
+
+  /// Types [value] into a count stepper.
+  Future<void> enterCount(WidgetTester tester, String key, String value) =>
+      tester.enterText(
+        find.descendant(
+          of: find.byKey(ValueKey(key)),
+          matching: find.byType(TextField),
+        ),
+        value,
+      );
+
+  testWidgets('daily reports: an employee adds activity done and plans', (
+    tester,
+  ) async {
     cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
     final container = await pumpAccounts(
       tester,
@@ -1643,64 +1935,355 @@ void main() {
     await signIn(tester, 'amina', 'amina-pass-1');
     await settle(tester);
     expect(container.read(navTabProvider), AppTab.dailyReports);
-    expect(find.text('What I did today'), findsOneWidget);
-    // The page and the day's lists arrive in one call (the fake records
-    // what it does inside report_start too, so only count that).
+    // Everything the page opens with comes in one call.
     expect(cloud.calls.where((c) => c == 'report_start'), hasLength(1));
-    // Employees see only their own: no Overview.
-    expect(find.byKey(const ValueKey('reports-tab')), findsNothing);
+    expect(find.byKey(const ValueKey('my-today')), findsOneWidget);
+    expect(find.textContaining('nothing submitted yet'), findsOneWidget);
+    // Employees: My tasks and My submissions only.
+    expect(reportsTab('My submissions'), findsOneWidget);
+    expect(reportsTab('Team'), findsNothing);
+    expect(reportsTab('Review'), findsNothing);
 
+    // Add activity done: submitted at once, dated today.
     await tester.tap(find.byKey(const ValueKey('add-activity')));
     await tester.pumpAndSettle();
+    expect(find.text('Add activity'), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('report-description')),
       'Lodged visa applications',
     );
-    await tester.enterText(
-      find.byKey(const ValueKey('output-visa_lodgements')),
-      '3',
-    );
+    await enterCount(tester, 'output-visa_lodgements', '3');
+    await tester.tap(find.byKey(const ValueKey('urgency-high')));
+    await tester.pump();
     await tester.tap(find.byKey(const ValueKey('report-save')));
     await settle(tester);
-    expect(cloud.reports.values.single['outputs'], {'visa_lodgements': 3});
-    expect(cloud.reports.values.single['user_id'], 1);
-    expect(find.text('Lodged visa applications'), findsOneWidget);
-    expect(find.textContaining('Visa lodgements 3'), findsWidgets);
+    final done = cloud.reports.values.single;
+    expect(done['outputs'], {'visa_lodgements': 3});
+    expect(done['user_id'], 1);
+    expect(done['status'], 'done');
+    expect(done['review'], 'submitted');
+    expect(done['report_date'], '2026-11-09');
+    expect(done['urgency'], 'high');
+    expect(find.textContaining('1 submitted'), findsOneWidget);
 
-    // Something still open needs a due date.
-    await tester.tap(find.byKey(const ValueKey('add-activity')));
+    // Plan a task, then Save & add another.
+    await tester.tap(find.byKey(const ValueKey('add-task')));
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const ValueKey('report-description')),
-      'Waiting for medical results',
+      'Call the embassy',
     );
-    await tester.tap(find.byKey(const ValueKey('report-status')));
+    await tester.tap(find.byKey(const ValueKey('due-Tomorrow')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('report-save-another')));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('added-list')), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('report-description')),
+      'Chase medical results',
+    );
+    // Doing now instead of To do.
+    await tester.tap(find.text('Doing now'));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('report-save')));
+    await settle(tester);
+    final call = cloud.reports.values.firstWhere(
+      (r) => r['description'] == 'Call the embassy',
+    );
+    expect(call['status'], 'to_do');
+    expect(call['due_date'], '2026-11-10');
+    expect(call['report_date'], isNull);
+    final chase = cloud.reports.values.firstWhere(
+      (r) => r['description'] == 'Chase medical results',
+    );
+    expect(chase['status'], 'in_progress');
+    expect(find.byKey(const ValueKey('section-todo')), findsOneWidget);
+    expect(find.byKey(const ValueKey('section-doing')), findsOneWidget);
+
+    // Quick add with an urgency.
+    await tester.enterText(
+      find.byKey(const ValueKey('quick-task')),
+      'Print the COE letters',
+    );
+    await tester.tap(find.byKey(const ValueKey('quick-urgency')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Urgent').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('quick-add')));
+    await settle(tester);
+    final printIt = cloud.reports.values.firstWhere(
+      (r) => r['description'] == 'Print the COE letters',
+    );
+    expect(printIt['urgency'], 'urgent');
+    expect(printIt['status'], 'to_do');
+
+    // Start it: one tap.
+    await tester.tap(find.byKey(ValueKey('start-${call['id']}')));
+    await settle(tester);
+    expect(cloud.reports[call['id']]!['status'], 'in_progress');
+
+    // Blocked needs a reason.
+    await tester.tap(find.byKey(ValueKey('status-menu-${chase['id']}')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Blocked').last);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('report-save')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('report-error')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('report-due')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('OK'));
-    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('report-blocker')),
+      'Clinic closed until Thursday',
+    );
     await tester.tap(find.byKey(const ValueKey('report-save')));
     await settle(tester);
-    final blocked = cloud.reports.values.firstWhere(
-      (r) => r['status'] == 'blocked',
-    );
-    expect(blocked['due_date'], '2026-11-10');
-    expect(find.text('My open items'), findsOneWidget);
+    expect(cloud.reports[chase['id']]!['status'], 'blocked');
+    expect(find.byKey(const ValueKey('section-blocked')), findsOneWidget);
 
-    // Done later: one tap.
-    await tester.tap(find.text('Mark done'));
+    // Submit when done, with what was done and counts.
+    await tester.tap(find.byKey(ValueKey('submit-${call['id']}')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('submit-details')),
+      'Booked the interview for Monday',
+    );
+    await enterCount(tester, 'submit-output-visa_lodgements', '1');
+    await tester.enterText(
+      find.byKey(const ValueKey('submit-note')),
+      'Please check the date',
+    );
+    await tester.tap(find.byKey(const ValueKey('submit-confirm')));
     await settle(tester);
-    expect(cloud.reports[blocked['id']]!['status'], 'completed');
+    final sent = cloud.reports[call['id']]!;
+    expect(sent['review'], 'submitted');
+    expect(sent['status'], 'done');
+    expect(sent['report_date'], '2026-11-09');
+    expect(sent['details'], 'Booked the interview for Monday');
+    expect(cloud.comments.last, containsPair('body', 'Please check the date'));
+
+    // My submissions: grouped under today, with the totals.
+    await openReportsTab(tester, 'My submissions');
+    expect(find.byKey(const ValueKey('day-2026-11-09')), findsOneWidget);
+    expect(find.textContaining('2 tasks'), findsOneWidget);
+    expect(find.textContaining('Visa lodgements 4'), findsWidgets);
+    expect(taskTitle('Lodged visa applications'), findsOneWidget);
+    expect(find.textContaining('Submitted '), findsWidgets);
     container.dispose();
   });
 
-  testWidgets('daily reports: the manager’s overview, the head’s department', (
+  testWidgets('daily reports: assign, notify, submit, return, resubmit, '
+      'approve', (tester) async {
+    cloud.addUser('zawadi', 'zawadi-pass1', name: 'Zawadi', departmentId: 2);
+    cloud.addUser(
+      'grace',
+      'grace-pass-1',
+      name: 'Grace',
+      departmentId: 2,
+      reportAccess: ReportAccess.head,
+    );
+    cloud.addUser('otieno', 'otieno-pass-1', name: 'Otieno', departmentId: 1);
+    var container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1600, 2600),
+    );
+    await signIn(tester, 'grace', 'grace-pass-1');
+    await settle(tester);
+
+    // Grace assigns a task to two people at once, urgent, due tomorrow.
+    await openReportsTab(tester, 'Team');
+    await tester.tap(find.byKey(const ValueKey('assign-task')));
+    await tester.pumpAndSettle();
+    expect(find.text('Assign a task'), findsOneWidget);
+    // A department head can assign to anyone.
+    expect(find.byKey(const ValueKey('assign-3')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('assign-1')));
+    await tester.tap(find.byKey(const ValueKey('assign-3')));
+    await tester.pump();
+    await tester.enterText(
+      find.byKey(const ValueKey('report-description')),
+      'Audit January files',
+    );
+    await tester.tap(find.byKey(const ValueKey('urgency-urgent')));
+    await tester.tap(find.byKey(const ValueKey('due-Tomorrow')));
+    await tester.pump();
+    expect(find.text('Assign to 2'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('report-save')));
+    await settle(tester);
+    expect(cloud.reports, hasLength(2));
+    final task = cloud.reports.values.firstWhere((r) => r['user_id'] == 1);
+    final id = task['id'] as int;
+    expect(task['assigned_by'], 2);
+    expect(task['status'], 'to_do');
+    expect(task['urgency'], 'urgent');
+    expect(task['due_date'], '2026-11-10');
+    expect(
+      cloud.notifications.where((n) => n['kind'] == 'assigned'),
+      hasLength(2),
+    );
+    container.dispose();
+
+    // Zawadi: a notification, and the task on her list, from Grace.
+    await tester.pumpWidget(const SizedBox());
+    container = await pumpAccounts(tester, admin, size: const Size(1600, 2600));
+    await signIn(tester, 'zawadi', 'zawadi-pass1');
+    await settle(tester);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('report-bell')),
+        matching: find.text('1'),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('report-bell')));
+    await settle(tester);
+    expect(find.text('Grace assigned you a task #$id'), findsOneWidget);
+    expect(
+      cloud.notifications.every((n) => n['user_id'] != 1 || n['read'] == true),
+      isTrue,
+    );
+    await tester.tap(find.text('Close'));
+    await settle(tester);
+    expect(find.textContaining('From Grace', findRichText: true), findsWidgets);
+
+    // She submits it; it goes to Grace.
+    await tester.tap(find.byKey(ValueKey('submit-$id')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('to Grace to review'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('submit-details')),
+      'Checked 40 files',
+    );
+    await tester.tap(find.byKey(const ValueKey('submit-confirm')));
+    await settle(tester);
+    expect(cloud.reports[id]!['review'], 'submitted');
+    // Waiting for review: she can't change it now.
+    await tester.tap(find.byKey(const ValueKey('reports-refresh')));
+    await settle(tester);
+    expect(find.byKey(ValueKey('submit-$id')), findsNothing);
+    container.dispose();
+
+    // Grace: Review shows it; returning needs a comment.
+    await tester.pumpWidget(const SizedBox());
+    container = await pumpAccounts(tester, boss, size: const Size(1600, 2600));
+    await signIn(tester, 'grace', 'grace-pass-1');
+    await settle(tester);
+    expect(reportsTab('Review (1)'), findsOneWidget);
+    await openReportsTab(tester, 'Review');
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('review-waiting')),
+        matching: taskTitle('Audit January files'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Checked 40 files'), findsOneWidget);
+    await tester.tap(find.byKey(ValueKey('return-$id')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('review-confirm')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('review-error')), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('review-comment')),
+      'Include the February ones too',
+    );
+    await tester.tap(find.byKey(const ValueKey('review-confirm')));
+    await settle(tester);
+    expect(cloud.reports[id]!['review'], 'returned');
+    expect(cloud.reports[id]!['status'], 'in_progress');
+    container.dispose();
+
+    // Zawadi: returned, with the comment; she resubmits.
+    await tester.pumpWidget(const SizedBox());
+    container = await pumpAccounts(tester, admin, size: const Size(1600, 2600));
+    await signIn(tester, 'zawadi', 'zawadi-pass1');
+    await settle(tester);
+    expect(find.byKey(const ValueKey('section-returned')), findsOneWidget);
+    expect(
+      find.textContaining('Include the February ones too', findRichText: true),
+      findsWidgets,
+    );
+    await tester.tap(find.byKey(ValueKey('submit-$id')));
+    await tester.pumpAndSettle();
+    // The dialog repeats what to fix.
+    expect(
+      find.text('Returned: Include the February ones too'),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('submit-confirm')));
+    await settle(tester);
+    expect(cloud.reports[id]!['review'], 'submitted');
+    container.dispose();
+
+    // Grace approves it from the task itself; the timeline shows it all.
+    await tester.pumpWidget(const SizedBox());
+    container = await pumpAccounts(tester, boss, size: const Size(1600, 2600));
+    await signIn(tester, 'grace', 'grace-pass-1');
+    await settle(tester);
+    await openReportsTab(tester, 'Review');
+    await tester.tap(find.byKey(ValueKey('report-$id')));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('task-id')), findsOneWidget);
+    expect(
+      find.textContaining('Include the February ones too', findRichText: true),
+      findsWidgets,
+    );
+    await tester.tap(find.byKey(const ValueKey('approve-report')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('review-confirm')));
+    await settle(tester);
+    expect(cloud.reports[id]!['review'], 'approved');
+    expect(
+      [
+        for (final c in reportChangesFor(cloud, id))
+          if (c != 'created' && c != 'edited') c,
+      ],
+      ['submitted', 'returned', 'submitted', 'approved'],
+    );
+    expect(
+      cloud.notifications.where((n) => n['user_id'] == 1).map((n) => n['kind']),
+      containsAll(['assigned', 'returned', 'approved']),
+    );
+    container.dispose();
+  });
+
+  testWidgets('daily reports: search by words, a name or #id', (tester) async {
+    cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
+    cloud.addUser('otieno', 'otieno-pass-1', name: 'Otieno', departmentId: 1);
+    cloud.addUser(
+      'ruth',
+      'ruth-pass-1',
+      name: 'Ruth',
+      reportAccess: ReportAccess.manager,
+    );
+    seedReport(10, 1, 2, description: 'Visa lodgement for Zoë');
+    seedReport(11, 2, 1, description: 'Offer letters sent');
+    seedReport(12, 2, 1, status: 'to_do', description: 'Phone the bank');
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1600, 2600),
+    );
+    await signIn(tester, 'ruth', 'ruth-pass-1');
+    await settle(tester);
+    Future<void> search(String text) async {
+      await tester.enterText(find.byKey(const ValueKey('task-search')), text);
+      await tester.pump(const Duration(milliseconds: 400));
+      await settle(tester);
+    }
+
+    await search('#11');
+    expect(find.text('1 task matching “#11”'), findsOneWidget);
+    expect(taskTitle('Offer letters sent'), findsOneWidget);
+    await search('otieno');
+    expect(find.text('2 tasks matching “otieno”'), findsOneWidget);
+    await search('visa');
+    expect(taskTitle('Visa lodgement for Zoë'), findsOneWidget);
+    await search('nothing like this');
+    expect(find.textContaining('Nothing matches'), findsOneWidget);
+    container.dispose();
+  });
+
+  testWidgets('daily reports: the team view, the head’s department', (
     tester,
   ) async {
     cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
@@ -1723,7 +2306,6 @@ void main() {
       1,
       2,
       status: 'blocked',
-      date: '2026-11-07',
       due: '2026-11-08',
       description: 'Waiting on clinic',
     );
@@ -1742,19 +2324,34 @@ void main() {
     );
     await signIn(tester, 'ruth', 'ruth-pass-1');
     await settle(tester);
-    // No department of her own: straight to the Overview.
-    expect(find.text('Submission compliance'), findsOneWidget);
+    // No department of her own: straight to Team.
+    expect(find.text('Who has reported'), findsOneWidget);
     expect(find.text('1 of 3 today'), findsOneWidget);
-    expect(find.textContaining('Otieno · Admissions'), findsWidgets);
-    expect(find.text('Waiting on clinic'), findsOneWidget); // needs attention
     expect(find.textContaining('Applications submitted 4'), findsWidgets);
+    Finder stat(String key, String value) => find.descendant(
+      of: find.byKey(ValueKey(key)),
+      matching: find.text(value),
+    );
+    expect(stat('stat-total', '1'), findsOneWidget);
+    expect(stat('stat-overdue', '1'), findsOneWidget);
+    // Open tasks list: the blocked one, red note.
+    expect(taskTitle('Waiting on clinic'), findsOneWidget);
+    expect(
+      find.textContaining('Clinic closed', findRichText: true),
+      findsOneWidget,
+    );
+
+    // A department: the figures follow.
+    await tester.tap(find.text('Admissions & Applications').last);
+    await settle(tester);
     expect(
       find.descendant(
-        of: find.byKey(const ValueKey('stat-overdue')),
-        matching: find.text('1'),
+        of: find.byKey(const ValueKey('report-department')),
+        matching: find.text('Admissions & Applications'),
       ),
       findsOneWidget,
     );
+    expect(stat('stat-overdue', '0'), findsOneWidget);
     container.dispose();
 
     // The Visa head sees Visa only.
@@ -1762,12 +2359,11 @@ void main() {
     container = await pumpAccounts(tester, admin, size: const Size(1600, 2600));
     await signIn(tester, 'grace', 'grace-pass-1');
     await settle(tester);
-    await tester.tap(find.text('Overview'));
-    await settle(tester);
+    await openReportsTab(tester, 'Team');
     expect(find.text('Visa Processing & Documentation'), findsWidgets);
     expect(find.text('Admissions & Applications'), findsNothing);
-    expect(find.text('Submitted applications'), findsNothing);
-    expect(find.text('Waiting on clinic'), findsWidgets);
+    expect(taskTitle('Submitted applications'), findsNothing);
+    expect(taskTitle('Waiting on clinic'), findsWidgets);
     container.dispose();
   });
 
@@ -1818,7 +2414,8 @@ void main() {
       'to': '2026-11-09',
       'today': '2026-11-09',
       'working_days': 5,
-      'status': {'completed': 1, 'blocked': 1},
+      'status': {'done': 1, 'blocked': 1},
+      'review': {'approved': 1},
       'departments': [
         {
           'id': 1,
@@ -1827,7 +2424,7 @@ void main() {
           'completed': 1,
           'open': 1,
           'blocked': 1,
-          'escalated': 0,
+          'awaiting': 0,
           'people': 1,
           'outputs': {'applications_submitted': 4},
         },
@@ -1855,8 +2452,10 @@ void main() {
       'report_date': '2026-11-09',
       'description': 'Submitted applications — Zoë’s file',
       'outputs': {'applications_submitted': 4},
-      'status': 'completed',
-      'priority': 'high',
+      'status': 'done',
+      'review': 'approved',
+      'urgency': 'high',
+      'submitted_at': '2026-11-09T09:00:00Z',
     });
     final report = OperationsReport(
       title: 'Weekly Performance Report',
@@ -1891,7 +2490,8 @@ void main() {
       containsAll(['Summary', 'Departments', 'Entries', 'Compliance']),
     );
     final entries = xlsx.tables['Entries']!;
-    expect(entries.rows[1][1]?.value.toString(), 'Otieno');
+    expect(entries.rows[1][0]?.value.toString(), '#1');
+    expect(entries.rows[1][2]?.value.toString(), 'Otieno');
 
     ByteData font(String f) =>
         ByteData.sublistView(File('assets/fonts/$f').readAsBytesSync());
@@ -1917,17 +2517,22 @@ void main() {
       10,
       1,
       2,
-      status: 'escalated',
+      status: 'in_progress',
+      urgency: 'urgent',
       due: '2026-11-08',
-      description: 'A long description of a visa case that is escalated',
+      description: 'A long description of a visa case that is urgent and late',
     );
     const phone = Size(360, 780);
     var container = await pumpAccounts(tester, boss, size: phone);
     await signIn(tester, 'amina', 'amina-pass-1');
     await settle(tester);
+    // Search sits in the top bar on phones.
+    expect(find.byKey(const ValueKey('phone-search')), findsOneWidget);
+    expect(find.byKey(const ValueKey('task-search')), findsOneWidget);
+    expect(find.byKey(const ValueKey('section-doing')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('add-activity')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('report-status')), findsOneWidget);
+    expect(find.byKey(const ValueKey('task-mode')), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     container.dispose();
@@ -1936,8 +2541,7 @@ void main() {
     container = await pumpAccounts(tester, admin, size: phone);
     await signIn(tester, 'ruth', 'ruth-pass-1');
     await settle(tester);
-    await tester.tap(find.text('Overview'));
-    await settle(tester);
+    await openReportsTab(tester, 'Team');
     expect(find.byKey(const ValueKey('stat-total')), findsOneWidget);
     await tester.drag(
       find.byType(SingleChildScrollView).first,
@@ -1960,16 +2564,16 @@ void main() {
     );
     await signIn(tester, 'amina', 'amina-pass-1');
     await settle(tester);
-    expect(find.textContaining('Monday, 9 November 2026'), findsOneWidget);
+    expect(find.textContaining('Mon 9 Nov'), findsOneWidget);
 
     // Left open overnight: the app notices the new day (data version).
     cloud.reportsToday = DateTime(2026, 11, 10);
     container.read(dataVersionProvider.notifier).bump();
     await tester.pump(const Duration(milliseconds: 500));
     await settle(tester);
-    expect(find.textContaining('Tuesday, 10 November 2026'), findsOneWidget);
+    expect(find.textContaining('Tue 10 Nov'), findsOneWidget);
 
-    // A new entry now goes on the new day.
+    // Work done now is submitted for the new day.
     await tester.tap(find.byKey(const ValueKey('add-activity')));
     await tester.pumpAndSettle();
     await tester.enterText(
@@ -1979,58 +2583,40 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('report-save')));
     await settle(tester);
     expect(cloud.reports.values.single['report_date'], '2026-11-10');
+
+    // Refresh picks up a task assigned meanwhile.
+    seedReport(50, 1, 2, status: 'to_do', description: 'Assigned meanwhile');
+    await tester.tap(find.byKey(const ValueKey('reports-refresh')));
+    await settle(tester);
+    expect(taskTitle('Assigned meanwhile'), findsOneWidget);
     container.dispose();
   });
 
-  testWidgets('daily reports: filters stay in step; one person’s figures', (
+  testWidgets('daily reports: the page opens at once from this device', (
     tester,
   ) async {
     cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
-    cloud.addUser('otieno', 'otieno-pass-1', name: 'Otieno', departmentId: 1);
-    cloud.addUser(
-      'ruth',
-      'ruth-pass-1',
-      name: 'Ruth',
-      reportAccess: ReportAccess.manager,
-    );
-    seedReport(10, 1, 2, status: 'blocked', due: '2026-11-08');
-    seedReport(11, 2, 1);
-    seedReport(12, 2, 1);
-    final container = await pumpAccounts(
+    seedReport(10, 1, 2, status: 'to_do', description: 'Remembered task');
+    var container = await pumpAccounts(
       tester,
       boss,
-      size: const Size(1600, 2600),
+      size: const Size(1600, 1400),
     );
-    await signIn(tester, 'ruth', 'ruth-pass-1');
+    await signIn(tester, 'amina', 'amina-pass-1', remember: true);
     await settle(tester);
-    Finder stat(String value) => find.descendant(
-      of: find.byKey(const ValueKey('stat-total')),
-      matching: find.text(value),
-    );
-    expect(stat('3'), findsOneWidget);
+    expect(taskTitle('Remembered task'), findsOneWidget);
+    container.dispose();
 
-    // Tapping a department row: the dropdown says so too.
-    await tester.tap(find.text('Admissions & Applications').last);
+    // Offline next time: the copy saved on this device still shows.
+    cloud.offline = true;
+    await tester.pumpWidget(const SizedBox());
+    container = await pumpAccounts(tester, boss, size: const Size(1600, 1400));
     await settle(tester);
-    expect(
-      find.descendant(
-        of: find.byKey(const ValueKey('report-department')),
-        matching: find.text('Admissions & Applications'),
-      ),
-      findsOneWidget,
-    );
-    expect(stat('2'), findsOneWidget);
-
-    // Back to all, then one person: the figures are that person's.
-    await tester.tap(find.byKey(const ValueKey('report-department')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('All departments').last);
+    expect(container.read(currentUserProvider)?.username, 'amina');
+    container.read(navTabProvider.notifier).set(AppTab.dailyReports);
     await settle(tester);
-    await tester.tap(find.byKey(const ValueKey('report-person')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Amina').last);
-    await settle(tester);
-    expect(stat('1'), findsOneWidget);
+    expect(find.byKey(const ValueKey('reports-skeleton')), findsNothing);
+    expect(taskTitle('Remembered task'), findsOneWidget);
     container.dispose();
   });
 
@@ -2042,7 +2628,7 @@ void main() {
       10,
       1,
       2,
-      status: 'pending',
+      status: 'in_progress',
       outputs: {'visa_grants': 2, 'visa_lodgements': 1},
       description: 'Old style report',
       due: '2024-01-15',
@@ -2054,8 +2640,8 @@ void main() {
     );
     await signIn(tester, 'amina', 'amina-pass-1');
     await settle(tester);
-    await tester.tap(find.text('Old style report').first);
-    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('report-10')));
+    await settle(tester);
     await tester.tap(find.byKey(const ValueKey('edit-report')));
     await tester.pumpAndSettle();
     // A due date far in the past still opens the picker.
@@ -2236,9 +2822,10 @@ void main() {
     expect(cloud.reports.values.single['description'], 'Weekly visa audit');
     expect(find.byKey(const ValueKey('report-due-dot')), findsNothing);
 
-    // Add again today: a copy to start from.
-    await tester.tap(find.text('Weekly visa audit'));
-    await tester.pumpAndSettle();
+    // Add again: a copy to start from.
+    await openReportsTab(tester, 'My submissions');
+    await tester.tap(taskTitle('Weekly visa audit'));
+    await settle(tester);
     await tester.tap(find.byKey(const ValueKey('repeat-report')));
     await tester.pumpAndSettle();
     expect(
@@ -2251,8 +2838,12 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('report-save')));
     await settle(tester);
     expect(cloud.reports, hasLength(2));
+    expect(cloud.reports.values.last['review'], 'submitted');
+    await tester.tap(find.text('Close').last);
+    await settle(tester);
 
     // Cancel after typing asks first.
+    await openReportsTab(tester, 'My tasks');
     await tester.tap(find.byKey(const ValueKey('add-activity')));
     await tester.pumpAndSettle();
     await tester.enterText(
@@ -2261,7 +2852,7 @@ void main() {
     );
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
-    expect(find.text('Discard your changes?'), findsOneWidget);
+    expect(find.text('Discard what you typed?'), findsOneWidget);
     await tester.tap(find.text('Keep editing'));
     await tester.pumpAndSettle();
     expect(find.text('Half typed'), findsOneWidget);
@@ -2269,7 +2860,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('discard-report')));
     await tester.pumpAndSettle();
-    expect(find.text('Add activity').hitTestable(), findsOneWidget);
+    expect(find.text('Add activity'), findsNothing);
     expect(cloud.reports, hasLength(2));
     container.dispose();
   });
@@ -2320,9 +2911,7 @@ void main() {
 
   // ------------------------------------------------ team: daily reports ---
 
-  testWidgets('team: a head assigns a task; the person works it; comments', (
-    tester,
-  ) async {
+  testWidgets('team: comments go both ways and notify', (tester) async {
     cloud.addUser('zawadi', 'zawadi-pass1', name: 'Zawadi', departmentId: 2);
     cloud.addUser(
       'grace',
@@ -2331,6 +2920,14 @@ void main() {
       departmentId: 2,
       reportAccess: ReportAccess.head,
     );
+    seedReport(
+      10,
+      1,
+      2,
+      status: 'to_do',
+      assignedBy: 2,
+      description: 'Audit January files',
+    );
     var container = await pumpAccounts(
       tester,
       boss,
@@ -2338,34 +2935,9 @@ void main() {
     );
     await signIn(tester, 'grace', 'grace-pass-1');
     await settle(tester);
-    await tester.tap(find.text('Overview'));
+    await openReportsTab(tester, 'Team');
+    await tester.tap(find.byKey(const ValueKey('report-10')));
     await settle(tester);
-
-    // Grace assigns Zawadi a task, due tomorrow (one tap).
-    await tester.tap(find.byKey(const ValueKey('assign-task')));
-    await tester.pumpAndSettle();
-    expect(find.text('Assign a task'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('assign-person')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('Zawadi ·').last);
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey('report-description')),
-      'Audit January files',
-    );
-    await tester.tap(find.byKey(const ValueKey('due-Tomorrow')));
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('report-save')));
-    await settle(tester);
-    final task = cloud.reports.values.single;
-    expect(task['user_id'], 1);
-    expect(task['assigned_by'], 2);
-    expect(task['status'], 'pending');
-    expect(task['due_date'], '2026-11-10');
-
-    // Grace asks a question on it.
-    await tester.tap(find.text('Audit January files').first);
-    await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const ValueKey('comment-field')),
       'Start with the Australian ones',
@@ -2376,25 +2948,19 @@ void main() {
       find.textContaining('Start with the Australian ones', findRichText: true),
       findsOneWidget,
     );
+    expect(
+      cloud.notifications.single,
+      allOf(containsPair('user_id', 1), containsPair('kind', 'comment')),
+    );
     container.dispose();
 
-    // Zawadi sees it among her open items, assigned by Grace, with the
-    // comment, and moves it on in one tap.
+    // Zawadi replies; Grace hears.
     await tester.pumpWidget(const SizedBox());
     container = await pumpAccounts(tester, admin, size: const Size(1600, 2600));
     await signIn(tester, 'zawadi', 'zawadi-pass1');
     await settle(tester);
-    expect(find.textContaining('Assigned by Grace'), findsWidgets);
-    await tester.tap(find.byKey(ValueKey('status-menu-${task['id']}')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('In progress').last);
+    await tester.tap(find.byKey(const ValueKey('report-10')));
     await settle(tester);
-    expect(cloud.reports[task['id']]!['status'], 'in_progress');
-    expect(cloud.reports[task['id']]!['assigned_by'], 2);
-
-    // She replies.
-    await tester.tap(find.text('Audit January files').first);
-    await tester.pumpAndSettle();
     expect(
       find.textContaining('Start with the Australian ones', findRichText: true),
       findsOneWidget,
@@ -2406,38 +2972,61 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('comment-send')));
     await settle(tester);
     expect(cloud.comments, hasLength(2));
+    expect(
+      cloud.notifications.last,
+      allOf(containsPair('user_id', 2), containsPair('kind', 'comment')),
+    );
     container.dispose();
   });
 
-  testWidgets('team: My week adds up the person’s own week', (tester) async {
-    cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
-    cloud.addUser('otieno', 'otieno-pass-1', name: 'Otieno', departmentId: 1);
-    seedReport(10, 1, 2, date: '2026-11-09', outputs: {'visa_lodgements': 3});
-    seedReport(11, 1, 2, date: '2026-11-09', outputs: {'visa_lodgements': 2});
-    seedReport(12, 1, 2, status: 'pending', due: '2026-11-12');
-    seedReport(13, 2, 1, date: '2026-11-09'); // someone else's
-    seedReport(14, 1, 2, date: '2026-11-08'); // Sunday: last week
-    final container = await pumpAccounts(
-      tester,
-      boss,
-      size: const Size(1600, 2200),
-    );
-    await signIn(tester, 'amina', 'amina-pass-1');
-    await settle(tester);
-    final week = find.byKey(const ValueKey('my-week'));
-    expect(week, findsOneWidget);
-    // 9 Nov 2026 is a Monday: one working day so far and reported, 3
-    // entries this week, 2 completed.
-    expect(
-      find.descendant(of: week, matching: find.text('1 of 1')),
-      findsOneWidget,
-    );
-    expect(find.descendant(of: week, matching: find.text('3')), findsOneWidget);
-    expect(find.descendant(of: week, matching: find.text('2')), findsOneWidget);
-    expect(
-      find.descendant(of: week, matching: find.text('Visa lodgements 5')),
-      findsOneWidget,
-    );
-    container.dispose();
+  test('daily reports: the model reads the server’s tasks', () {
+    final t = ActivityReport.fromJson({
+      'id': 42,
+      'user_id': 1,
+      'user_name': 'Amina',
+      'department_id': 2,
+      'report_date': '2026-11-09',
+      'description': 'Lodged visas',
+      'details': 'Three files',
+      'outputs': {'visa_lodgements': 3},
+      'status': 'done',
+      'urgency': 'urgent',
+      'review': 'returned',
+      'submitted_at': '2026-11-09T11:30:00Z',
+      'last_review_note': 'Add the receipts',
+      'assigned_by': 2,
+      'assigned_by_name': 'Grace',
+    });
+    expect(t.ref, '#42');
+    expect(t.urgency, TaskUrgency.urgent);
+    expect(t.review, ReviewState.returned);
+    expect(t.isOpen, isTrue); // returned work is open again
+    expect(t.isSubmitted, isFalse);
+    expect(t.submittedAt, isNotNull);
+    expect(t.lastReviewNote, 'Add the receipts');
+    final save = t.toSaveJson(submit: true, note: 'Done now');
+    expect(save['submit'], true);
+    expect(save['note'], 'Done now');
+    expect(save['urgency'], 'urgent');
+    expect(save['status'], 'done');
+    // Unknown codes from a newer server don't break older screens.
+    final odd = ActivityReport.fromJson({
+      'description': 'x',
+      'status': 'something_new',
+      'urgency': 'extreme',
+      'review': 'later',
+    });
+    expect(odd.status, ReportStatus.toDo);
+    expect(odd.urgency, TaskUrgency.normal);
+    expect(odd.review, ReviewState.none);
+    // Every urgency has its own colour.
+    expect({
+      for (final u in TaskUrgency.values) u.color(Brightness.light),
+    }, hasLength(TaskUrgency.values.length));
   });
 }
+
+List<String> reportChangesFor(FakeCloud cloud, int id) => [
+  for (final c in cloud.reportChanges)
+    if (c['report_id'] == id) c['action'] as String,
+];

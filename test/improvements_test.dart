@@ -71,7 +71,7 @@ void main() {
 
   test('staff added mid-week join this week, and holidays stay holidays', () {
     final weeks = WeekRepository(db);
-    final week = weeks.createWeekFor(DateTime.now());
+    final week = weeks.createWeekFor(workingWeekDay());
     final days = weeks.getDays(week.id);
     // Make Monday a holiday for everyone currently on the team.
     final timeOff = TimeOffRepository(db);
@@ -93,7 +93,7 @@ void main() {
     final repo = StaffRepository(db);
     final joy = staffId('Joy');
     repo.setActive(joy, false);
-    final current = weeks.createWeekFor(DateTime.now());
+    final current = weeks.createWeekFor(workingWeekDay());
     expect(staffOnWeek(current.id), isNot(contains(joy)));
 
     repo.setActive(joy, true);
@@ -361,4 +361,13 @@ void main() {
       expect(tester.takeException(), isNull, reason: page);
     }
   }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+}
+
+/// A day in the week still open for entries: this week on weekdays, next
+/// week at the weekend (the Mon–Fri week is over by Saturday).
+DateTime workingWeekDay() {
+  final now = DateTime.now();
+  return now.weekday >= DateTime.saturday
+      ? now.add(Duration(days: 8 - now.weekday))
+      : now;
 }

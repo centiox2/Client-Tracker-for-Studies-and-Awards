@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.3.2';
+  static const version = '1.4.0';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,33 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.4.0', 'November 2026', [
+      'Daily reports rebuilt around tasks. Tabs: My tasks, My submissions, '
+          'Review (for whoever reviews work) and Team.',
+      'My tasks: a to-do list. Add what you are going to do or are doing, '
+          'set Doing or Blocked in one tap, and Submit each task when it is '
+          'done. Managers see the status.',
+      'Add activity: choose Done today, Doing now or To do; set urgency, a '
+          'due date in one tap, counts with − and + buttons, and use '
+          '"Save & add another" for several in a row.',
+      'Directors, managers and department heads assign tasks to anyone, to '
+          'several people at once, with a colour for urgency: grey Low, blue '
+          'Normal, orange High, red Urgent.',
+      'Review: approve submitted work, or return it with a comment. The '
+          'person sees why, fixes it and resubmits; the timeline keeps every '
+          'step and comment.',
+      'Every task has a number (#123), and the day and time it was '
+          'submitted is filled in automatically.',
+      'Search tasks by words, a person, a department or #number, from the '
+          'box at the top. On phones and tablets search is in the top bar.',
+      'Notifications (the bell): new tasks, returned or approved work, '
+          'comments, blocked tasks, things due today or overdue, and a 4 pm '
+          'reminder if you have not submitted anything.',
+      'Daily reports opens straight away: what you saw last is kept on '
+          'this device and updated in the background.',
+      'Older versions of the app can no longer use Daily reports. Install '
+          'this version on every computer and phone.',
+    ]),
     Release('1.3.2', 'November 2026', [
       'Applications: "Needs attention" is now "No change in 14+ days". Any '
           'change in Airtable counts as work (status, notes, follow-up, '

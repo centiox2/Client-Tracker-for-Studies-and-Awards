@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'design/app_theme.dart';
 import 'screens/daily_reports/daily_reports_screen.dart';
+import 'screens/daily_reports/notifications_sheet.dart';
 import 'services/daily_reports_service.dart';
 import 'screens/dashboard/dashboard_screen.dart';
 import 'screens/history/history_screen.dart';
@@ -533,6 +534,46 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     );
   }
 
+  /// The Daily reports menu item's badge: a count, else a dot when
+  /// nothing has been submitted today.
+  static Widget _reportBadge(bool on, int count, bool due, Widget icon) {
+    if (!on || (count == 0 && !due)) return icon;
+    return count > 0
+        ? Badge.count(
+            key: const ValueKey('report-count'),
+            count: count,
+            child: icon,
+          )
+        : Badge(smallSize: 8, child: icon);
+  }
+
+  /// Shows the newest unread notification for a few seconds.
+  Future<void> _announceNotification() async {
+    try {
+      final items = await ref.read(dailyReportsProvider).notifications();
+      final n = items.where((i) => !i.read).firstOrNull;
+      if (n == null || !mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          key: const ValueKey('notification-snack'),
+          content: Text(
+            n.detail.isEmpty ? n.title : '${n.title}: ${n.detail}',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          action: SnackBarAction(
+            label: 'View',
+            onPressed: () {
+              if (mounted) showReportNotifications(context, ref);
+            },
+          ),
+        ),
+      );
+    } catch (_) {
+      // Offline for a moment: the bell still shows the count.
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isViewer = !ref.watch(canEditProvider);
@@ -540,8 +581,20 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     ref.watch(currentUserProvider);
     final requested = ref.watch(navTabProvider);
     final allowed = _tabs;
-    // Nothing recorded today yet: a dot on Daily reports.
-    final reportDue = ref.watch(reportDueTodayProvider).value ?? false;
+    // Daily reports: a count of unread notifications and work to review,
+    // or a dot when nothing has been submitted today.
+    final badge = ref.watch(reportBadgeProvider);
+    final reportCount = badge?.count ?? 0;
+    final reportDue =
+        badge != null && badge.needsReport && !badge.submittedToday;
+    // Keeps the Daily reports page's data loaded in the background, so
+    // the page opens at once.
+    ref.listen(reportStartProvider, (_, _) {});
+    // A new notification: say so, wherever the person is.
+    ref.listen(reportBadgeProvider, (before, after) {
+      if (before == null || after == null) return;
+      if (after.unread > before.unread) _announceNotification();
+    });
     // Never render a page this profile may not see, whatever the nav state.
     final tab = allowed.any((t) => t.tab == requested)
         ? requested
@@ -611,10 +664,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           destinations: [
             for (final item in barTabs)
               NavigationDestination(
-                icon: Badge(
-                  isLabelVisible: reportDue && item.tab == AppTab.dailyReports,
-                  smallSize: 8,
-                  child: Icon(item.icon),
+                icon: _reportBadge(
+                  item.tab == AppTab.dailyReports,
+                  reportCount,
+                  reportDue,
+                  Icon(item.icon),
                 ),
                 selectedIcon: Icon(item.icon),
                 label: item.shortLabel ?? item.label,
@@ -622,12 +676,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
               ),
             if (useMore)
               NavigationDestination(
-                icon: Badge(
-                  isLabelVisible:
-                      reportDue &&
-                      moreTabs.any((t) => t.tab == AppTab.dailyReports),
-                  smallSize: 8,
-                  child: const Icon(Icons.menu),
+                icon: _reportBadge(
+                  moreTabs.any((t) => t.tab == AppTab.dailyReports),
+                  reportCount,
+                  reportDue,
+                  const Icon(Icons.menu),
                 ),
                 selectedIcon: const Icon(Icons.menu),
                 label: barIndex >= 0
@@ -669,6 +722,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             child: RepaintBoundary(
               child: _AppSidebar(
                 reportDue: reportDue,
+                reportCount: reportCount,
                 tabs: _tabs,
                 selected: tab,
                 onSelect: (value) =>
@@ -698,6 +752,7 @@ class _AppTabInfo {
 class _AppSidebar extends ConsumerWidget {
   const _AppSidebar({
     this.reportDue = false,
+    this.reportCount = 0,
     required this.tabs,
     required this.selected,
     required this.onSelect,
@@ -707,6 +762,9 @@ class _AppSidebar extends ConsumerWidget {
 
   /// Nothing recorded today yet: a dot on Daily reports.
   final bool reportDue;
+
+  /// Unread notifications plus work to review.
+  final int reportCount;
   final AppTab selected;
   final ValueChanged<AppTab> onSelect;
 
@@ -747,9 +805,17 @@ class _AppSidebar extends ConsumerWidget {
     final theme = Theme.of(context);
     final c = context.clarity;
     final active = selected == item.tab;
-    final dot = item.tab == AppTab.dailyReports && reportDue
+    final dot = item.tab == AppTab.dailyReports && reportCount > 0
         ? Tooltip(
-            message: 'Nothing recorded today yet',
+            message: 'New notifications or work to review',
+            child: Badge.count(
+              key: const ValueKey('report-count'),
+              count: reportCount,
+            ),
+          )
+        : item.tab == AppTab.dailyReports && reportDue
+        ? Tooltip(
+            message: 'Nothing submitted today yet',
             child: Container(
               key: const ValueKey('report-due-dot'),
               width: 8,
@@ -1252,6 +1318,16 @@ class _MobileTopBar extends ConsumerWidget {
           Text(Dt.appName, style: Theme.of(context).textTheme.titleSmall),
           const Spacer(),
           const SyncStatusBadge(compact: true),
+          IconButton(
+            key: const ValueKey('phone-search'),
+            tooltip: 'Search',
+            visualDensity: VisualDensity.compact,
+            onPressed: () => showQuickSearch(context),
+            icon: const Icon(Icons.search, size: 22),
+          ),
+          if (ref.watch(accountsEnabledProvider) &&
+              ref.watch(currentUserProvider) != null)
+            const ReportBell(compact: true),
           PopupMenuButton<String>(
             key: const ValueKey('phone-menu'),
             tooltip: 'More options',

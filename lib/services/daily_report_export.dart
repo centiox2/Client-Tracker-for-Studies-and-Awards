@@ -96,9 +96,14 @@ Uint8List operationsReportToExcel(OperationsReport report) {
   ]);
   row(summary, r++, ['Working days in period', s.workingDays]);
   r++;
-  row(summary, r++, ['Status', 'Activities'], style: header);
-  row(summary, r++, ['Total', s.total], style: bold);
-  for (final status in ReportStatus.values) {
+  row(summary, r++, ['Submitted in the period', 'Tasks'], style: header);
+  row(summary, r++, ['Total submitted', s.submitted], style: bold);
+  for (final review in ReviewState.values.skip(1)) {
+    row(summary, r++, [review.label, s.reviewed(review)]);
+  }
+  r++;
+  row(summary, r++, ['Open now', 'Tasks'], style: header);
+  for (final status in ReportStatus.working) {
     row(summary, r++, [status.label, s.count(status)]);
   }
   row(summary, r++, ['Overdue (open, past due date)', s.overdue.length]);
@@ -110,11 +115,11 @@ Uint8List operationsReportToExcel(OperationsReport report) {
   r = 0;
   row(depts, r++, [
     'Department',
-    'Activities',
-    'Completed',
+    'Submitted',
+    'Approved',
     'Open',
     'Blocked',
-    'Escalated',
+    'To review',
     'People reporting',
     'Outputs',
   ], style: header);
@@ -125,7 +130,7 @@ Uint8List operationsReportToExcel(OperationsReport report) {
       d.completed,
       d.open,
       d.blocked,
-      d.escalated,
+      d.awaiting,
       d.people,
       report.outputsText(d.id, d.outputs),
     ]);
@@ -135,32 +140,38 @@ Uint8List operationsReportToExcel(OperationsReport report) {
 
   // ---- Entries ------------------------------------------------------------------
   const entryHeader = [
-    'Date',
+    'Task',
+    'Submitted for',
     'Person',
     'Department',
-    'Activity / task',
+    'Task / activity',
+    'What was done',
     'Reference',
     'Outputs',
     'Status',
-    'Priority',
-    'Next action',
-    'Challenge / blocker',
-    'Due / follow-up',
-    'Submitted',
+    'Review',
+    'Urgency',
+    'Blocker',
+    'Due',
+    'Assigned by',
+    'Submitted at',
   ];
   List<Object?> entryRow(ActivityReport e) => [
+    e.ref,
     _d(e.date),
     e.userName,
     e.departmentName,
     e.description,
+    e.details,
     e.reference,
     report.outputsText(e.departmentId, e.outputs),
     e.status.label,
-    e.priority.label,
-    e.nextAction,
+    e.review.label,
+    e.urgency.label,
     e.blocker,
     _d(e.dueDate),
-    e.createdAt == null ? '' : _stamp.format(e.createdAt!),
+    e.assignedByName,
+    e.submittedAt == null ? '' : _stamp.format(e.submittedAt!),
   ];
   void entriesSheet(String name, List<ActivityReport> list) {
     final sheet = excel[name];
@@ -169,18 +180,23 @@ Uint8List operationsReportToExcel(OperationsReport report) {
     for (final e in list) {
       row(sheet, i++, entryRow(e));
     }
-    sheet.setColumnWidth(1, 20);
-    sheet.setColumnWidth(2, 28);
-    sheet.setColumnWidth(3, 50);
-    sheet.setColumnWidth(5, 40);
-    sheet.setColumnWidth(8, 36);
-    sheet.setColumnWidth(9, 36);
+    sheet.setColumnWidth(2, 20);
+    sheet.setColumnWidth(3, 28);
+    sheet.setColumnWidth(4, 50);
+    sheet.setColumnWidth(5, 50);
+    sheet.setColumnWidth(7, 40);
+    sheet.setColumnWidth(11, 36);
   }
 
   entriesSheet('Entries', report.entries);
-  final open = {
-    for (final e in [...s.overdue, ...s.attention]) e.id: e,
-  }.values.toList()..sort((a, b) => a.date.compareTo(b.date));
+  final open =
+      {
+        for (final e in [...s.overdue, ...s.attention]) e.id: e,
+      }.values.toList()..sort(
+        (a, b) => (a.dueDate ?? DateTime(9999)).compareTo(
+          b.dueDate ?? DateTime(9999),
+        ),
+      );
   entriesSheet('Open & overdue', open);
 
   // ---- Compliance -----------------------------------------------------------------
@@ -301,29 +317,30 @@ Future<Uint8List> operationsReportToPdf(
   );
 
   List<String> entryCells(ActivityReport e) => [
-    _d(e.date),
+    '${e.ref}\n${_d(e.date)}',
     e.userName,
     e.departmentName,
     [
       e.description,
+      if (e.details.isNotEmpty) e.details,
       if (e.reference.isNotEmpty) 'Ref: ${e.reference}',
     ].join('\n'),
     report.outputsText(e.departmentId, e.outputs),
-    '${e.status.label}\n${e.priority.label}',
+    '${e.status.label}\n${e.review == ReviewState.none ? e.urgency.label : e.review.label}',
     [
-      if (e.nextAction.isNotEmpty) 'Next: ${e.nextAction}',
       if (e.blocker.isNotEmpty) 'Blocker: ${e.blocker}',
+      if (e.isAssigned) 'From ${e.assignedByName}',
     ].join('\n'),
     _d(e.dueDate),
   ];
   const entryHeaders = [
-    'Date',
+    'Task / date',
     'Person',
     'Department',
-    'Activity / task',
+    'Task / what was done',
     'Outputs',
     'Status',
-    'Next action / blocker',
+    'Blocker / from',
     'Due',
   ];
   const entryWidths = {
@@ -336,9 +353,14 @@ Future<Uint8List> operationsReportToPdf(
     6: pw.FlexColumnWidth(2.4),
     7: pw.FixedColumnWidth(48),
   };
-  final open = {
-    for (final e in [...s.overdue, ...s.attention]) e.id: e,
-  }.values.toList()..sort((a, b) => a.date.compareTo(b.date));
+  final open =
+      {
+        for (final e in [...s.overdue, ...s.attention]) e.id: e,
+      }.values.toList()..sort(
+        (a, b) => (a.dueDate ?? DateTime(9999)).compareTo(
+          b.dueDate ?? DateTime(9999),
+        ),
+      );
 
   doc.addPage(
     pw.MultiPage(
@@ -408,16 +430,11 @@ Future<Uint8List> operationsReportToPdf(
       build: (context) => [
         pw.Row(
           children: [
-            stat('Activities', s.total),
-            stat('Completed', s.count(ReportStatus.completed)),
-            stat(
-              'In progress / pending',
-              s.count(ReportStatus.inProgress) + s.count(ReportStatus.pending),
-            ),
-            stat(
-              'Blocked / escalated',
-              s.count(ReportStatus.blocked) + s.count(ReportStatus.escalated),
-            ),
+            stat('Submitted', s.submitted),
+            stat('Approved', s.reviewed(ReviewState.approved)),
+            stat('To review', s.reviewed(ReviewState.submitted)),
+            stat('Open now', s.open),
+            stat('Blocked', s.count(ReportStatus.blocked)),
             stat('Overdue', s.overdue.length),
           ],
         ),
@@ -425,11 +442,11 @@ Future<Uint8List> operationsReportToPdf(
         table(
           [
             'Department',
-            'Activities',
-            'Completed',
+            'Submitted',
+            'Approved',
             'Open',
             'Blocked',
-            'Escalated',
+            'To review',
             'People',
             'Outputs',
           ],
@@ -441,7 +458,7 @@ Future<Uint8List> operationsReportToPdf(
                 '${d.completed}',
                 '${d.open}',
                 '${d.blocked}',
-                '${d.escalated}',
+                '${d.awaiting}',
                 '${d.people}',
                 report.outputsText(d.id, d.outputs),
               ],
@@ -451,7 +468,7 @@ Future<Uint8List> operationsReportToPdf(
             7: pw.FlexColumnWidth(3.5),
           },
         ),
-        heading('Needs attention: overdue, blocked and escalated'),
+        heading('Needs attention: overdue, blocked, returned and urgent'),
         table(entryHeaders, [
           for (final e in open) entryCells(e),
         ], widths: entryWidths),
