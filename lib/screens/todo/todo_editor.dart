@@ -21,19 +21,24 @@ String todoDayLabel(DateTime d) {
   return taskDay(day, today: today);
 }
 
-/// Opens an item to change anything about it.
-Future<void> showTodoEditor(
+/// Opens an item to change anything about it. With [isNew], [item] isn't
+/// on the list yet: Add puts it there. Returns whether it was saved.
+Future<bool> showTodoEditor(
   BuildContext context,
   WidgetRef ref,
-  TodoItem item,
-) => showDialog<void>(
-  context: context,
-  builder: (_) => _TodoEditor(item: item),
-);
+  TodoItem item, {
+  bool isNew = false,
+}) async =>
+    await showDialog<bool>(
+      context: context,
+      builder: (_) => _TodoEditor(item: item, isNew: isNew),
+    ) ??
+    false;
 
 class _TodoEditor extends ConsumerStatefulWidget {
-  const _TodoEditor({required this.item});
+  const _TodoEditor({required this.item, this.isNew = false});
   final TodoItem item;
+  final bool isNew;
 
   @override
   ConsumerState<_TodoEditor> createState() => _TodoEditorState();
@@ -45,9 +50,7 @@ class _TodoEditorState extends ConsumerState<_TodoEditor> {
   late final _title = TextEditingController(text: widget.item.title);
   late final _notes = TextEditingController(text: widget.item.notes);
   final _step = TextEditingController();
-  late DateTime? _day = widget.item.later
-      ? null
-      : (widget.item.day ?? todoToday());
+  late DateTime? _day = widget.item.planned;
   late bool _later = widget.item.later;
   late DateTime? _due = widget.item.due;
   late bool _dueTime = widget.item.dueTime;
@@ -75,7 +78,7 @@ class _TodoEditorState extends ConsumerState<_TodoEditor> {
   _DayChoice get _dayChoice {
     if (_later || _day == null) return _DayChoice.later;
     final diff = dateOnly(_day!).difference(todoToday()).inDays;
-    return diff <= 0
+    return diff == 0
         ? _DayChoice.today
         : diff == 1
         ? _DayChoice.tomorrow
@@ -153,14 +156,12 @@ class _TodoEditorState extends ConsumerState<_TodoEditor> {
       }
     }
     final keepClient = _clientKey != null;
-    ref.read(todoListProvider.notifier).edit([t.key], (x) {
-      final today = todoToday();
+    final list = ref.read(todoListProvider.notifier);
+    TodoItem apply(TodoItem x) {
       return x.copyWith(
         title: title.length > 300 ? title.substring(0, 300) : title,
         notes: _notes.text.trim(),
-        day: _later || _day == null || !dateOnly(_day!).isAfter(today)
-            ? null
-            : dateOnly(_day!),
+        day: _later || _day == null ? null : dateOnly(_day!),
         later: _later,
         due: _due,
         dueTime: _due != null && _dueTime,
@@ -172,8 +173,14 @@ class _TodoEditorState extends ConsumerState<_TodoEditor> {
         clientName: keepClient ? x.clientName : null,
         isNew: false,
       );
-    });
-    Navigator.pop(context);
+    }
+
+    if (widget.isNew) {
+      list.add(apply(t));
+    } else {
+      list.edit([t.key], apply);
+    }
+    Navigator.pop(context, true);
   }
 
   void _delete() {
@@ -399,7 +406,9 @@ class _TodoEditorState extends ConsumerState<_TodoEditor> {
           children: [
             Expanded(
               child: Text(
-                t.team ? 'Team to-do' : 'To-do',
+                widget.isNew
+                    ? (t.team ? 'New team to-do' : 'New to-do')
+                    : (t.team ? 'Team to-do' : 'To-do'),
                 style: theme.textTheme.titleMedium,
               ),
             ),
@@ -511,16 +520,17 @@ class _TodoEditorState extends ConsumerState<_TodoEditor> {
         actions: [
           Wrap(
             children: [
-              IconButton(
-                key: const ValueKey('todo-edit-delete'),
-                tooltip: 'Delete',
-                onPressed: _delete,
-                icon: Icon(
-                  Icons.delete_outline,
-                  color: theme.colorScheme.error,
+              if (!widget.isNew)
+                IconButton(
+                  key: const ValueKey('todo-edit-delete'),
+                  tooltip: 'Delete',
+                  onPressed: _delete,
+                  icon: Icon(
+                    Icons.delete_outline,
+                    color: theme.colorScheme.error,
+                  ),
                 ),
-              ),
-              if (online && !t.team)
+              if (online && !t.team && !widget.isNew)
                 IconButton(
                   key: const ValueKey('todo-edit-give'),
                   tooltip: 'Give to a colleague',
@@ -539,7 +549,7 @@ class _TodoEditorState extends ConsumerState<_TodoEditor> {
               FilledButton(
                 key: const ValueKey('todo-edit-save'),
                 onPressed: _save,
-                child: const Text('Save'),
+                child: Text(widget.isNew ? 'Add' : 'Save'),
               ),
             ],
           ),

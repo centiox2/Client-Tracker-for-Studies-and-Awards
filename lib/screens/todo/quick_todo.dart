@@ -58,7 +58,7 @@ class _QuickTodoState extends ConsumerState<_QuickTodo> {
         id: 0,
         title: d.title.length > 300 ? d.title.substring(0, 300) : d.title,
         team: d.team,
-        day: d.day,
+        day: d.later ? null : (d.day ?? todoToday()),
         later: d.later,
         due: d.due,
         dueTime: d.dueTime,

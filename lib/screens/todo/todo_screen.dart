@@ -37,6 +37,16 @@ class _TodoScreenState extends ConsumerState<TodoScreen> {
   Timer? _seen;
   bool _history = false;
   bool _toTeam = false;
+
+  // Chosen beside the box for what's added next (typed words win).
+  DateTime? _optDay;
+  bool _optLater = false;
+  DateTime? _optDue;
+  bool _optDueTime = false;
+  TodoRepeat _optRepeat = TodoRepeat.none;
+  bool _optStar = false;
+  bool _optNotesOpen = false;
+  final _optNotes = TextEditingController();
   bool _showLater = false;
   final _selected = <String>{};
   bool _selecting = false;
@@ -46,6 +56,8 @@ class _TodoScreenState extends ConsumerState<TodoScreen> {
   void initState() {
     super.initState();
     _input.addListener(() => setState(() {}));
+    _inputFocus.addListener(() => setState(() {}));
+    _optNotes.addListener(() => setState(() {}));
     // Changes made on another device show up while the page is open.
     Future.microtask(() {
       if (mounted) ref.read(todoListProvider.notifier).refresh();
@@ -60,6 +72,7 @@ class _TodoScreenState extends ConsumerState<TodoScreen> {
     _live?.cancel();
     _seen?.cancel();
     _input.dispose();
+    _optNotes.dispose();
     _inputFocus.dispose();
     _pageFocus.dispose();
     super.dispose();
@@ -75,8 +88,115 @@ class _TodoScreenState extends ConsumerState<TodoScreen> {
   }
 
   void _addLines(List<String> lines) {
-    _list.addLines(lines, team: _toTeam);
+    final added = _list.addLines(lines, team: _toTeam, shape: _shape);
     _input.clear();
+    if (added.isNotEmpty) _resetOptions();
+  }
+
+  bool get _optionsSet =>
+      _optDay != null ||
+      _optLater ||
+      _optDue != null ||
+      _optRepeat != TodoRepeat.none ||
+      _optStar ||
+      _optNotes.text.trim().isNotEmpty;
+
+  void _resetOptions() => setState(() {
+    _optDay = null;
+    _optLater = false;
+    _optDue = null;
+    _optDueTime = false;
+    _optRepeat = TodoRepeat.none;
+    _optStar = false;
+    _optNotesOpen = false;
+    _optNotes.clear();
+  });
+
+  /// Adds what was chosen beside the box; words typed in the line win.
+  TodoItem _shape(TodoItem t, TodoDraft typed) {
+    final typedDay = typed.later || typed.day != null;
+    final notes = _optNotes.text.trim();
+    return t.copyWith(
+      day: typedDay ? t.day : (_optLater ? null : (_optDay ?? t.day)),
+      later: typedDay ? t.later : _optLater,
+      due: typed.due ?? _optDue,
+      dueTime: typed.due != null ? typed.dueTime : _optDueTime,
+      repeat: typed.repeat != TodoRepeat.none ? typed.repeat : _optRepeat,
+      starred: typed.starred || _optStar,
+      notes: notes.isEmpty ? t.notes : notes,
+    );
+  }
+
+  Future<void> _pickOptDay() async {
+    final today = todoToday();
+    final d = await showDatePicker(
+      context: context,
+      initialDate: _optDay ?? today,
+      firstDate: today,
+      lastDate: DateTime(today.year + 2),
+    );
+    if (d != null) {
+      setState(() {
+        _optDay = d;
+        _optLater = false;
+      });
+    }
+    _inputFocus.requestFocus();
+  }
+
+  Future<void> _pickOptDue() async {
+    final today = todoToday();
+    final d = await showDatePicker(
+      context: context,
+      initialDate: _optDue ?? _optDay ?? today,
+      firstDate: today,
+      lastDate: DateTime(today.year + 2),
+      helpText: 'Deadline',
+    );
+    if (d == null || !mounted) {
+      _inputFocus.requestFocus();
+      return;
+    }
+    final time = await showTimePicker(
+      context: context,
+      initialTime: const TimeOfDay(hour: 17, minute: 0),
+      helpText: 'Deadline time (Cancel for none)',
+    );
+    setState(() {
+      _optDue = time == null
+          ? d
+          : DateTime(d.year, d.month, d.day, time.hour, time.minute);
+      _optDueTime = time != null;
+    });
+    _inputFocus.requestFocus();
+  }
+
+  /// The full form for a new item, with what's typed and chosen so far.
+  Future<void> _addWithForm() async {
+    final line = _input.text.trim();
+    final d = parseTodoLine(line, allowTeam: _list.teamName != null);
+    final today = todoToday();
+    final draft = _shape(
+      TodoItem(
+        id: 0,
+        title: line.isEmpty ? '' : d.title,
+        team: _toTeam || d.team,
+        day: d.later ? null : (d.day ?? today),
+        later: d.later,
+        due: d.due,
+        dueTime: d.dueTime,
+        starred: d.starred,
+        repeat: d.repeat,
+      ),
+      d,
+    );
+    final added = await showTodoEditor(context, ref, draft, isNew: true);
+    if (!mounted) return;
+    if (added) {
+      _input.clear();
+      _resetOptions();
+    }
+    _inputFocus.requestFocus();
   }
 
   void _delete(Iterable<String> keys) {
@@ -252,6 +372,7 @@ class _TodoScreenState extends ConsumerState<TodoScreen> {
     final online = sync != TodoSync.device;
     final pad = clarityHPad(context);
     final today = todoToday();
+    final yesterday = DateTime(today.year, today.month, today.day - 1);
 
     // The end-of-day reminder's Review: open Send with today's done items.
     if (ref.watch(todoSendRequestProvider)) {
@@ -529,6 +650,186 @@ class _TodoScreenState extends ConsumerState<TodoScreen> {
     final parsed = _input.text.trim().isEmpty
         ? null
         : parseTodoLine(_input.text, allowTeam: teamName != null);
+    final today0 = todoToday();
+    final tomorrow = DateTime(today0.year, today0.month, today0.day + 1);
+    final showOptions =
+        _inputFocus.hasFocus ||
+        _input.text.isNotEmpty ||
+        _optionsSet ||
+        _optNotesOpen;
+    Widget chip(
+      String key,
+      String text, {
+      required bool selected,
+      required VoidCallback onTap,
+      IconData? icon,
+    }) => ChoiceChip(
+      key: ValueKey(key),
+      label: Text(text),
+      avatar: icon == null ? null : Icon(icon, size: 16),
+      selected: selected,
+      showCheckmark: false,
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      onSelected: (_) {
+        onTap();
+        _inputFocus.requestFocus();
+      },
+    );
+    final dayIsToday = !_optLater && (_optDay == null || _optDay == today0);
+    final options = Padding(
+      key: const ValueKey('todo-options'),
+      padding: const EdgeInsets.fromLTRB(2, 6, 0, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              chip(
+                'todo-opt-today',
+                'Today',
+                selected: dayIsToday,
+                onTap: () => setState(() {
+                  _optDay = null;
+                  _optLater = false;
+                }),
+              ),
+              chip(
+                'todo-opt-tomorrow',
+                'Tomorrow',
+                selected: !_optLater && _optDay == tomorrow,
+                onTap: () => setState(() {
+                  _optDay = tomorrow;
+                  _optLater = false;
+                }),
+              ),
+              chip(
+                'todo-opt-pick',
+                !_optLater &&
+                        _optDay != null &&
+                        _optDay != today0 &&
+                        _optDay != tomorrow
+                    ? todoDayLabel(_optDay!)
+                    : 'Pick a day…',
+                selected:
+                    !_optLater &&
+                    _optDay != null &&
+                    _optDay != today0 &&
+                    _optDay != tomorrow,
+                onTap: _pickOptDay,
+              ),
+              chip(
+                'todo-opt-later',
+                'Later',
+                selected: _optLater,
+                onTap: () => setState(() {
+                  _optLater = true;
+                  _optDay = null;
+                }),
+              ),
+              Container(width: 1, height: 20, color: c.border),
+              InputChip(
+                key: const ValueKey('todo-opt-due'),
+                avatar: const Icon(Icons.schedule, size: 16),
+                label: Text(
+                  _optDue == null
+                      ? 'Deadline'
+                      : 'Due ${todoDayLabel(_optDue!)}'
+                            '${_optDueTime ? ' ${DateFormat('HH:mm').format(_optDue!)}' : ''}',
+                ),
+                selected: _optDue != null,
+                showCheckmark: false,
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                onPressed: _pickOptDue,
+                onDeleted: _optDue == null
+                    ? null
+                    : () => setState(() {
+                        _optDue = null;
+                        _optDueTime = false;
+                      }),
+              ),
+              PopupMenuButton<TodoRepeat>(
+                key: const ValueKey('todo-opt-repeat'),
+                tooltip: 'Repeat',
+                onSelected: (r) {
+                  setState(() => _optRepeat = r);
+                  _inputFocus.requestFocus();
+                },
+                itemBuilder: (_) => [
+                  for (final r in TodoRepeat.values)
+                    PopupMenuItem(
+                      key: ValueKey('todo-opt-repeat-${r.name}'),
+                      value: r,
+                      child: Text(r == TodoRepeat.none ? 'Never' : r.label),
+                    ),
+                ],
+                child: IgnorePointer(
+                  child: ChoiceChip(
+                    avatar: const Icon(Icons.repeat, size: 16),
+                    label: Text(
+                      _optRepeat == TodoRepeat.none
+                          ? 'Repeat'
+                          : _optRepeat.label,
+                    ),
+                    selected: _optRepeat != TodoRepeat.none,
+                    showCheckmark: false,
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onSelected: (_) {},
+                  ),
+                ),
+              ),
+              chip(
+                'todo-opt-star',
+                _optStar ? 'Starred' : 'Star',
+                icon: _optStar ? Icons.star : Icons.star_border,
+                selected: _optStar,
+                onTap: () => setState(() => _optStar = !_optStar),
+              ),
+              chip(
+                'todo-opt-notes',
+                'Notes',
+                icon: Icons.notes,
+                selected: _optNotesOpen || _optNotes.text.trim().isNotEmpty,
+                onTap: () => setState(() => _optNotesOpen = !_optNotesOpen),
+              ),
+              TextButton(
+                key: const ValueKey('todo-opt-more'),
+                onPressed: _addWithForm,
+                child: const Text('More…'),
+              ),
+              if (_optionsSet)
+                IconButton(
+                  key: const ValueKey('todo-opt-clear'),
+                  tooltip: 'Clear the choices',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: _resetOptions,
+                  icon: Icon(Icons.close, size: 16, color: c.textMuted),
+                ),
+            ],
+          ),
+          if (_optNotesOpen || _optNotes.text.trim().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: TextField(
+                key: const ValueKey('todo-opt-notes-field'),
+                controller: _optNotes,
+                minLines: 1,
+                maxLines: 4,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  hintText: 'Notes for this to-do',
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
     final input = Container(
       padding: const EdgeInsets.fromLTRB(10, 4, 6, 4),
       decoration: BoxDecoration(
@@ -622,6 +923,11 @@ class _TodoScreenState extends ConsumerState<TodoScreen> {
                 style: muted?.copyWith(color: theme.colorScheme.primary),
               ),
             ),
+          if (showOptions) ...[
+            Divider(height: 1, color: c.border),
+            // Taps here keep the box focused, so the choices stay open.
+            TextFieldTapRegion(child: options),
+          ],
         ],
       ),
     );
@@ -778,7 +1084,7 @@ class _TodoScreenState extends ConsumerState<TodoScreen> {
         Padding(padding: const EdgeInsets.only(top: 10), child: selectBar),
       if (earlier.isNotEmpty) ...[
         heading(
-          'Unfinished from earlier (${earlier.length})',
+          '${earlier.every((t) => t.planned == yesterday) ? 'Yesterday’s unfinished' : 'Unfinished from earlier'} (${earlier.length})',
           key: const ValueKey('todo-earlier'),
           icon: Icons.history_toggle_off,
           color: c.warningFg,

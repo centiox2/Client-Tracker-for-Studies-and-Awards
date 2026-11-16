@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.8.0';
+  static const version = '1.8.1';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,14 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.8.1', 'November 2026', [
+      'To-do: what you don\'t finish moves to the next day, under '
+          '"Yesterday’s unfinished" at the top, until you bring it to today '
+          'or move it to later.',
+      'To-do: click the box and the choices show straight away (day, '
+          'deadline, repeat, star, notes), so you set them before adding. '
+          'More… opens the whole form for a new to-do.',
+    ]),
     Release('1.8.0', 'November 2026', [
       'To-do: anything not finished yesterday waits at the top, ready to '
           'bring to today or move to later. Overdue items come first.',

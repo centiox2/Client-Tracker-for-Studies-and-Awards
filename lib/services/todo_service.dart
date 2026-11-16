@@ -245,14 +245,15 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
         'p_item': {
           'title': t.title,
           for (final e in t.extra.entries)
-            if (const {
-              'notes',
-              'day',
-              'due',
-              'starred',
-              'steps',
-              'client',
-            }.contains(e.key))
+            if (e.key == 'day'
+                ? !(t.planned ?? todoToday()).isBefore(todoToday())
+                : const {
+                    'notes',
+                    'due',
+                    'starred',
+                    'steps',
+                    'client',
+                  }.contains(e.key))
               e.key: e.value,
         },
       });
@@ -269,7 +270,12 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
   }
 
   /// Adds a line each (typed words understood: see [parseTodoLine]).
-  List<TodoItem> addLines(List<String> lines, {bool team = false}) {
+  /// [shape] adds what was chosen beside the box (typed words win).
+  List<TodoItem> addLines(
+    List<String> lines, {
+    bool team = false,
+    TodoItem Function(TodoItem item, TodoDraft typed)? shape,
+  }) {
     final added = <TodoItem>[];
     final now = todoClock();
     for (final raw in lines) {
@@ -280,20 +286,19 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
       final d = parseTodoLine(line, allowTeam: _teamName != null);
       var title = d.title;
       if (title.length > 300) title = title.substring(0, 300);
-      added.add(
-        TodoItem(
-          id: _nextId(added.length),
-          title: title,
-          changedAt: now,
-          team: team || d.team,
-          day: d.day,
-          later: d.later,
-          due: d.due,
-          dueTime: d.dueTime,
-          starred: d.starred,
-          repeat: d.repeat,
-        ),
+      final item = TodoItem(
+        id: _nextId(added.length),
+        title: title,
+        changedAt: now,
+        team: team || d.team,
+        day: d.later ? null : (d.day ?? todoToday()),
+        later: d.later,
+        due: d.due,
+        dueTime: d.dueTime,
+        starred: d.starred,
+        repeat: d.repeat,
       );
+      added.add(shape == null ? item : shape(item, d));
     }
     if (added.isNotEmpty) _change([...state, ...added], added);
     return added;
@@ -397,7 +402,7 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
   void star(String key) => edit([key], (t) => t.copyWith(starred: !t.starred));
 
   void moveToToday(Iterable<String> keys) =>
-      edit(keys, (t) => t.copyWith(day: null, later: false));
+      edit(keys, (t) => t.copyWith(day: todoToday(), later: false));
 
   void moveToLater(Iterable<String> keys) =>
       edit(keys, (t) => t.copyWith(day: null, later: true));

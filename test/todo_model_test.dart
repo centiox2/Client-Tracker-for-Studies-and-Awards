@@ -132,6 +132,21 @@ void main() {
       expect(back.pos, 3.5);
     });
 
+    test('without a day, belongs to the day it was added', () {
+      todoClock = () => now;
+      final monday = DateTime(2026, 11, 16, 9).microsecondsSinceEpoch;
+      final friday = DateTime(2026, 11, 13, 9).microsecondsSinceEpoch;
+      expect(TodoItem(id: monday, title: 'a').planned, DateTime(2026, 11, 16));
+      expect(TodoItem(id: friday, title: 'a').planned, DateTime(2026, 11, 13));
+      expect(
+        TodoItem(id: friday, title: 'a', day: DateTime(2026, 11, 16)).planned,
+        DateTime(2026, 11, 16),
+      );
+      expect(TodoItem(id: friday, title: 'a', later: true).planned, isNull);
+      // Old small ids: today.
+      expect(TodoItem(id: 3, title: 'a').planned, DateTime(2026, 11, 16));
+    });
+
     test('is overdue only once its deadline has passed', () {
       todoClock = () => now;
       expect(

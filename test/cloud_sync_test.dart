@@ -2986,6 +2986,172 @@ void main() {
     container.dispose();
   });
 
+  testWidgets('to-do: what is not finished moves to the next day as '
+      'yesterday’s unfinished', (tester) async {
+    // Tuesday 17 November, 9:00.
+    var now = DateTime(2026, 11, 17, 9);
+    todoClock = () => now;
+    addTearDown(() => todoClock = DateTime.now);
+    cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1400, 1000),
+    );
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    container.read(appActionsProvider).selectTab(AppTab.todo);
+    await settle(tester);
+    final input = find.byKey(const ValueKey('todo-input'));
+    for (final line in ['Call the embassy', 'Print COE letters']) {
+      await tester.enterText(input, line);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+    }
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    final ids = {
+      for (final t in container.read(todoListProvider)) t.title: t.id,
+    };
+    await tester.tap(
+      find.byKey(ValueKey('todo-tick-${ids['Print COE letters']}')),
+    );
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(find.text('Today (1)'), findsOneWidget);
+
+    // The next morning: the unfinished one waits at the top.
+    now = DateTime(2026, 11, 18, 8);
+    await tester.pump(const Duration(seconds: 31));
+    await settle(tester);
+    expect(find.text('Yesterday’s unfinished (1)'), findsOneWidget);
+    expect(find.byKey(const ValueKey('todo-today')), findsNothing);
+    expect(find.text('Yesterday'), findsOneWidget);
+    // The one finished yesterday is not carried over.
+    expect(
+      container
+          .read(todoListProvider)
+          .singleWhere((t) => t.title == 'Print COE letters')
+          .done,
+      isTrue,
+    );
+    // Opening it doesn't move it; bringing it to today does.
+    await tester.tap(find.text('Call the embassy'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('todo-edit-save')));
+    await settle(tester);
+    expect(find.text('Yesterday’s unfinished (1)'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('todo-carry-today')));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('todo-earlier')), findsNothing);
+    expect(find.text('Today (1)'), findsOneWidget);
+    // And it stays on today after the next sync.
+    await tester.pump(const Duration(seconds: 31));
+    await settle(tester);
+    expect(find.text('Today (1)'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    container.dispose();
+  });
+
+  testWidgets('to-do: choices show under the box before adding', (
+    tester,
+  ) async {
+    // Wednesday 18 November, 9:00.
+    todoClock = () => DateTime(2026, 11, 18, 9);
+    addTearDown(() => todoClock = DateTime.now);
+    final aminaId = cloud
+        .addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2)
+        .id;
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1400, 1000),
+    );
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    container.read(appActionsProvider).selectTab(AppTab.todo);
+    await settle(tester);
+    TodoItem item(String title) =>
+        container.read(todoListProvider).singleWhere((t) => t.title == title);
+    final input = find.byKey(const ValueKey('todo-input'));
+    final options = find.byKey(const ValueKey('todo-options'));
+
+    // Hidden until the box is used.
+    expect(options, findsNothing);
+    await tester.tap(input);
+    await tester.pump();
+    expect(options, findsOneWidget);
+
+    // Choose, then type: the choices go with it.
+    await tester.tap(find.byKey(const ValueKey('todo-opt-tomorrow')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('todo-opt-star')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('todo-opt-repeat')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('todo-opt-repeat-weekly')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('todo-opt-notes')));
+    await tester.pump();
+    await tester.enterText(
+      find.byKey(const ValueKey('todo-opt-notes-field')),
+      'Ask about the CAS',
+    );
+    await tester.pump();
+    expect(options, findsOneWidget);
+    await tester.enterText(input, 'Call the embassy');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    final call = item('Call the embassy');
+    expect(call.planned, DateTime(2026, 11, 19));
+    expect(call.starred, isTrue);
+    expect(call.repeat, TodoRepeat.weekly);
+    expect(call.notes, 'Ask about the CAS');
+    expect(
+      (cloud.todos[aminaId]![call.id]!['extra'] as Map)['notes'],
+      'Ask about the CAS',
+    );
+    // Cleared for the next one.
+    expect(find.byKey(const ValueKey('todo-opt-clear')), findsNothing);
+    expect(find.byKey(const ValueKey('todo-opt-notes-field')), findsNothing);
+
+    // Words typed win over a choice.
+    await tester.tap(find.byKey(const ValueKey('todo-opt-later')));
+    await tester.pump();
+    await tester.enterText(input, 'Print letters friday');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(item('Print letters').planned, DateTime(2026, 11, 20));
+    expect(item('Print letters').later, isFalse);
+
+    // More… opens the whole form for a new one; Add puts it on the list.
+    await tester.enterText(input, 'Book interview');
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('todo-opt-more')));
+    await tester.pumpAndSettle();
+    expect(find.text('New to-do'), findsOneWidget);
+    expect(find.byKey(const ValueKey('todo-edit-delete')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('todo-step-input')));
+    await tester.enterText(
+      find.byKey(const ValueKey('todo-step-input')),
+      'Bring the passport',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('todo-edit-save')));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    final booked = item('Book interview');
+    expect(booked.steps.single.title, 'Bring the passport');
+    expect(booked.planned, DateTime(2026, 11, 18));
+    expect(find.text('Book interview'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    container.dispose();
+  });
+
   testWidgets('to-do: select many, give to a colleague, a gift shows as '
       'new', (tester) async {
     final aminaId = cloud

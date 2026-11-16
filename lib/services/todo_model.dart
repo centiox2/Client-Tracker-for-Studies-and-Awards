@@ -178,8 +178,19 @@ class TodoItem {
   bool get hasDetails =>
       notes.isNotEmpty || steps.isNotEmpty || outputs.isNotEmpty;
 
-  /// The day it belongs to on the list (null: Later).
-  DateTime? get planned => later ? null : (day ?? todoToday());
+  /// The day it belongs to on the list (null: Later). Items without a day
+  /// belong to the day they were added (new ids are the time they were
+  /// made), so what isn't finished moves on as unfinished the next day.
+  DateTime? get planned {
+    if (later) return null;
+    if (day != null) return day;
+    if (id > 1000000000000000) {
+      final added = dateOnly(DateTime.fromMicrosecondsSinceEpoch(id));
+      final today = todoToday();
+      return added.isAfter(today) ? today : added;
+    }
+    return todoToday();
+  }
 
   bool get overdue {
     final d = due;
