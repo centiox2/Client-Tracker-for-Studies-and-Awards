@@ -2026,9 +2026,14 @@ void main() {
     expect(done['urgency'], 'high');
     expect(find.textContaining('1 submitted'), findsOneWidget);
 
-    // Plan a task, then Save & add another.
-    await tester.tap(find.byKey(const ValueKey('add-task')));
+    // Plan a task (status from the drop-down), then Save & add another.
+    await tester.tap(find.byKey(const ValueKey('add-activity')));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('task-mode')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('To do').last);
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AlertDialog, 'Add a task'), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('report-description')),
       'Call the embassy',
@@ -2061,8 +2066,10 @@ void main() {
       'Chase medical results',
     );
     // Doing now instead of To do.
-    await tester.tap(find.text('Doing now'));
-    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('task-mode')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Doing now').last);
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('report-save')));
     await settle(tester);
     final call = cloud.reports.values.firstWhere(
@@ -2078,17 +2085,33 @@ void main() {
     expect(find.byKey(const ValueKey('section-todo')), findsOneWidget);
     expect(find.byKey(const ValueKey('section-doing')), findsOneWidget);
 
-    // Quick add with an urgency.
+    // The list card: typed items wait there with a status drop-down
+    // each, until they're saved together.
     await tester.enterText(
       find.byKey(const ValueKey('quick-task')),
       'Print the COE letters',
     );
-    await tester.tap(find.byKey(const ValueKey('quick-urgency')));
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await settle(tester);
+    expect(find.byKey(const ValueKey('draft-1')), findsOneWidget);
+    expect(
+      cloud.reports.values.where(
+        (r) => r['description'] == 'Print the COE letters',
+      ),
+      isEmpty,
+    );
+    await tester.tap(find.byKey(const ValueKey('draft-mode-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('To do').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('draft-urgency-1')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Urgent').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('quick-add')));
+    expect(find.text('Add 1 to my list'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('draft-save')));
     await settle(tester);
+    expect(find.byKey(const ValueKey('draft-1')), findsNothing);
     final printIt = cloud.reports.values.firstWhere(
       (r) => r['description'] == 'Print the COE letters',
     );
@@ -2974,11 +2997,32 @@ void main() {
       await settle(tester);
     }
 
-    // "done" and a count: submitted at once, the count in its place.
+    Future<void> saveAll() async {
+      await tester.tap(find.byKey(const ValueKey('draft-save')));
+      await settle(tester);
+    }
+
+    // "done" and a count: on the list as Done today, the count in its
+    // place; sent with Submit.
     await type('Lodged visas 3 done');
-    expect(find.byKey(const ValueKey('quick-preview')), findsOneWidget);
-    expect(find.textContaining('Visa lodgements 3'), findsOneWidget);
     await enter();
+    expect(cloud.reports, isEmpty);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('draft-mode-1')),
+        matching: find.text('Done today'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('draft-count-1-visa_lodgements')),
+        matching: find.text('3'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Submit 1'), findsOneWidget);
+    await saveAll();
     final lodged = cloud.reports.values.single;
     expect(lodged['description'], 'Lodged visas');
     expect(lodged['outputs'], {'visa_lodgements': 3});
@@ -2988,9 +3032,16 @@ void main() {
     await settle(tester);
     expect(cloud.reports, isEmpty);
 
-    // A due day and an urgency in words.
+    // New items start as To do once that's chosen; a due day and an
+    // urgency in words.
+    await tester.tap(find.byKey(const ValueKey('draft-default-mode')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('To do').last);
+    await tester.pumpAndSettle();
     await type('Call embassy tomorrow urgent');
     await enter();
+    expect(find.text('Add 1 to my list'), findsOneWidget);
+    await saveAll();
     final call = cloud.reports.values.single;
     expect(call['description'], 'Call embassy');
     expect(call['urgency'], 'urgent');
@@ -3001,12 +3052,21 @@ void main() {
     // A pasted list: a task per line.
     await type('Book flights\nRenew passport\n- Email the school');
     await settle(tester);
+    expect(find.text('Add 3 to my list'), findsOneWidget);
+    // One is removed, with Undo.
+    await tester.tap(find.byKey(const ValueKey('draft-remove-4')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('draft-4')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('report-undo')));
+    await tester.pumpAndSettle();
+    expect(find.text('Add 3 to my list'), findsOneWidget);
+    await saveAll();
     expect(cloud.reports, hasLength(4));
     expect(
       cloud.reports.values.map((r) => r['description']),
       containsAll(['Book flights', 'Renew passport', 'Email the school']),
     );
-    expect(find.text('Added 3 tasks'), findsOneWidget);
+    expect(find.text('Added 3 to your list'), findsOneWidget);
     expect(tester.widget<TextField>(quick).controller!.text, isEmpty);
     int idOf(String title) =>
         cloud.reports.values.firstWhere((r) => r['description'] == title)['id']
@@ -3080,6 +3140,7 @@ void main() {
     cloud.offline = true;
     await type('Scanned passports done');
     await enter();
+    await saveAll();
     expect(
       cloud.reports.values.where(
         (r) => r['description'] == 'Scanned passports',
@@ -3109,15 +3170,15 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
     await tester.pumpAndSettle();
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'quick line');
-    // Enter adds; Ctrl+Enter adds it as done.
+    // Enter puts it on the list; Ctrl+Enter saves the whole list.
     await tester.enterText(quick, 'Ring the bank');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await settle(tester);
     expect(
       cloud.reports.values.where((r) => r['description'] == 'Ring the bank'),
-      hasLength(1),
+      isEmpty,
     );
-    await tester.enterText(quick, 'Filed the receipts');
+    await tester.enterText(quick, 'Filed the receipts done');
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
@@ -3128,6 +3189,13 @@ void main() {
       )['review'],
       'submitted',
     );
+    expect(
+      cloud.reports.values.firstWhere(
+        (r) => r['description'] == 'Ring the bank',
+      )['status'],
+      'to_do',
+    );
+    expect(find.text('Submitted 1, added 1 to your list'), findsOneWidget);
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'quick line');
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump();
@@ -3188,6 +3256,101 @@ void main() {
     container.dispose();
   });
 
+  testWidgets('daily reports: the list card keeps items until they are '
+      'saved together', (tester) async {
+    cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
+    var container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1600, 1600),
+    );
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    final quick = find.byKey(const ValueKey('quick-task'));
+    await tester.tap(find.byKey(const ValueKey('draft-default-mode')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('To do').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(quick, 'Renewed passports 2 done');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.enterText(quick, 'Book the interview');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await settle(tester);
+    // Kept on this device: still there after closing the app.
+    await tester.pump(const Duration(seconds: 1));
+    container.dispose();
+    await tester.pumpWidget(const SizedBox());
+    container = await pumpAccounts(tester, boss, size: const Size(1600, 1600));
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    expect(find.byKey(const ValueKey('draft-summary')), findsOneWidget);
+    expect(find.text('Submit 1, add 1'), findsOneWidget);
+
+    // Clear, with Undo.
+    await tester.tap(find.byKey(const ValueKey('draft-clear')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('draft-summary')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('report-undo')));
+    await tester.pumpAndSettle();
+    expect(find.text('Submit 1, add 1'), findsOneWidget);
+
+    // A blank title stops it; nothing is sent.
+    final titles = find.byWidgetPredicate(
+      (w) =>
+          w is TextField &&
+          (w.key is ValueKey<String>) &&
+          (w.key! as ValueKey<String>).value.startsWith('draft-title-'),
+    );
+    expect(titles, findsNWidgets(2));
+    await tester.enterText(titles.last, '');
+    await tester.tap(find.byKey(const ValueKey('draft-save')));
+    await settle(tester);
+    expect(find.text('Give it a title.'), findsOneWidget);
+    expect(cloud.reports, isEmpty);
+    await tester.enterText(titles.last, 'Book the visa interview');
+    await tester.pump();
+
+    // The done one goes for review with its count, the other to the list
+    // with a due day.
+    final dueMenus = find.byWidgetPredicate(
+      (w) =>
+          w.key is ValueKey<String> &&
+          (w.key! as ValueKey<String>).value.startsWith('draft-due-'),
+    );
+    expect(dueMenus, findsOneWidget);
+    await tester.tap(dueMenus);
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Tomorrow').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('draft-save')));
+    await settle(tester);
+    final renewed = cloud.reports.values.firstWhere(
+      (r) => r['description'] == 'Renewed passports',
+    );
+    expect(renewed['review'], 'submitted');
+    expect(renewed['outputs'], {'visa_lodgements': 2});
+    final book = cloud.reports.values.firstWhere(
+      (r) => r['description'] == 'Book the visa interview',
+    );
+    expect(book['status'], 'to_do');
+    expect(book['due_date'], '2026-11-10');
+    expect(find.byKey(const ValueKey('draft-summary')), findsNothing);
+    expect(find.byKey(const ValueKey('section-today')), findsOneWidget);
+    container.dispose();
+
+    // On a phone the item's menus wrap under its title.
+    await tester.pumpWidget(const SizedBox());
+    container = await pumpAccounts(tester, boss, size: const Size(360, 780));
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    await tester.enterText(quick, 'Scan the offer letters tomorrow urgent');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await settle(tester);
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('draft-save')), findsOneWidget);
+    container.dispose();
+  });
+
   testWidgets('daily reports: one tap finishes a task when there are no '
       'counts', (tester) async {
     cloud.addUser('ken', 'ken-pass-1', name: 'Ken');
@@ -3206,13 +3369,22 @@ void main() {
     expect(find.byType(AlertDialog), findsNothing);
     expect(cloud.reports[5]!['review'], 'submitted');
     expect(cloud.reports[5]!['report_date'], '2026-11-09');
-    expect(find.byKey(const ValueKey('report-5')), findsNothing);
+    // Off the list, into Submitted today.
+    expect(find.byKey(const ValueKey('tick-5')), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('section-today')),
+        matching: find.byKey(const ValueKey('report-5')),
+      ),
+      findsOneWidget,
+    );
     // Undo: back on the list as Doing.
     await tester.tap(find.byKey(const ValueKey('report-undo')));
     await settle(tester);
     expect(cloud.reports[5]!['review'], 'none');
     expect(cloud.reports[5]!['status'], 'in_progress');
     expect(find.byKey(const ValueKey('report-5')), findsOneWidget);
+    expect(find.byKey(const ValueKey('section-today')), findsNothing);
     expect(
       cloud.comments.where(
         (c) => c['report_id'] == 5 && c['kind'] == 'submitted',

@@ -14,8 +14,8 @@ import '../../widgets/clarity.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/panels.dart';
 import 'notifications_sheet.dart';
-import 'quick_entry.dart';
 import 'report_editor.dart';
+import 'task_composer.dart';
 import 'wrap_up.dart';
 
 /// Daily reports, as tasks.
@@ -441,14 +441,11 @@ class _MyTasks extends ConsumerStatefulWidget {
 }
 
 class _MyTasksState extends ConsumerState<_MyTasks> {
-  final _quick = TextEditingController();
   final _quickFocus = FocusNode(debugLabel: 'quick line');
 
   /// The list itself: Esc in the quick line comes here, so N, / and the
   /// arrow keys work.
   final _pageFocus = FocusNode(debugLabel: 'my tasks', skipTraversal: true);
-  TaskUrgency? _quickUrgency;
-  bool _adding = false;
 
   /// One per card, for moving between them with the arrow keys.
   final Map<int, FocusNode> _cardFocus = {};
@@ -458,7 +455,6 @@ class _MyTasksState extends ConsumerState<_MyTasks> {
   @override
   void initState() {
     super.initState();
-    _quick.addListener(_onQuickChanged);
     if (ref.read(reportFocusProvider) == ReportFocus.quickLine) {
       _focusQuickLine();
     }
@@ -466,89 +462,12 @@ class _MyTasksState extends ConsumerState<_MyTasks> {
 
   @override
   void dispose() {
-    _quick.dispose();
     _quickFocus.dispose();
     _pageFocus.dispose();
     for (final f in _cardFocus.values) {
       f.dispose();
     }
     super.dispose();
-  }
-
-  String _lastQuick = '';
-  void _onQuickChanged() {
-    if (_quick.text != _lastQuick) {
-      _lastQuick = _quick.text;
-      setState(() {});
-    }
-  }
-
-  TaskUrgency get _urgency =>
-      _quickUrgency ?? ref.read(reportChoicesProvider).urgency;
-
-  QuickEntry _parse(String line) =>
-      parseQuickEntry(line, today: meta.today, department: meta.myDepartment);
-
-  ActivityReport _fromEntry(QuickEntry e, {bool submit = false}) =>
-      ActivityReport(
-        description: e.title,
-        status: e.done || submit ? ReportStatus.done : ReportStatus.toDo,
-        urgency: e.urgency ?? _urgency,
-        dueDate: e.due,
-        outputs: e.outputs,
-      );
-
-  /// Adds what's in the quick line ([submit]: Ctrl+Enter, as done work).
-  Future<void> _quickAdd({bool submit = false}) async {
-    final text = _quick.text.trim();
-    if (text.isEmpty || _adding) return;
-    await _addLines([text], submit: submit);
-  }
-
-  /// Adds each line as a task (a pasted list makes one per line).
-  Future<void> _addLines(List<String> lines, {bool submit = false}) async {
-    final entries = [
-      for (final l in lines)
-        if (l.trim().isNotEmpty)
-          _parse(l.replaceFirst(RegExp(r'^\s*([-*•]|\d+[.)])\s+'), '')),
-    ];
-    if (entries.isEmpty || _adding) return;
-    setState(() => _adding = true);
-    final actions = TaskActions(context, ref);
-    final done = <SaveOutcome>[];
-    try {
-      for (final e in entries) {
-        final asDone = e.done || submit;
-        done.add(
-          await actions.save(_fromEntry(e, submit: asDone), submit: asDone),
-        );
-      }
-      if (!mounted) return;
-      _quick.clear();
-      if (done.length == 1) {
-        final o = done.single;
-        o.task.isSubmitted ||
-                (o.task.pending && o.task.status == ReportStatus.done)
-            ? actions.submitted(o, created: true)
-            : actions.added(o);
-      } else {
-        final queued = done.where((o) => o.queued).length;
-        actions.snack(
-          'Added ${done.length} tasks'
-          '${queued == 0 ? '' : ' ($queued waiting to send)'}',
-          onUndo: () => actions.undoAll(done, created: true),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      if (done.isNotEmpty) {
-        // Some went in: keep only the lines that didn't.
-        _quick.text = lines.skip(done.length).join('\n');
-      }
-      actions.error(e);
-    } finally {
-      if (mounted) setState(() => _adding = false);
-    }
   }
 
   Future<void> _add(TaskMode? mode) async {
@@ -662,33 +581,6 @@ class _MyTasksState extends ConsumerState<_MyTasks> {
     );
   }
 
-  /// Enter adds, Ctrl+Enter adds it as done, Down goes to the first card;
-  /// a pasted list adds a task per line.
-  KeyEventResult _quickKey(KeyEvent event, List<ActivityReport> order) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    final key = event.logicalKey;
-    final ctrl =
-        HardwareKeyboard.instance.isControlPressed ||
-        HardwareKeyboard.instance.isMetaPressed;
-    if ((key == LogicalKeyboardKey.enter ||
-            key == LogicalKeyboardKey.numpadEnter) &&
-        !HardwareKeyboard.instance.isShiftPressed) {
-      _quickAdd(submit: ctrl);
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.arrowDown && order.isNotEmpty) {
-      _focusFor(order.first).requestFocus();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.escape) {
-      _pageFocus.requestFocus();
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
-  }
-
-  void _onPasteLines(List<String> lines) => _addLines(lines);
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -717,154 +609,25 @@ class _MyTasksState extends ConsumerState<_MyTasks> {
     final needsReport = meta.myDepartmentId != null;
     // Finished work saved offline, not sent yet.
     final waiting = widget.start.submissions.where((s) => s.pending).toList();
-    final urgency = _urgency;
-    final entry = _parse(_quick.text);
-
-    final quickAdd = Container(
-      padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.border),
-        borderRadius: BorderRadius.circular(Dt.rMd),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Focus(
-                  canRequestFocus: false,
-                  skipTraversal: true,
-                  onKeyEvent: (_, e) => _quickKey(e, order),
-                  child: TextField(
-                    key: const ValueKey('quick-task'),
-                    controller: _quick,
-                    focusNode: _quickFocus,
-                    readOnly: _adding,
-                    // Several lines can be pasted: each becomes a task.
-                    minLines: 1,
-                    maxLines: null,
-                    keyboardType: TextInputType.text,
-                    textCapitalization: TextCapitalization.sentences,
-                    textInputAction: TextInputAction.done,
-                    inputFormatters: [
-                      _LinesFormatter(
-                        onEnter: () => _quickAdd(),
-                        onLines: _onPasteLines,
-                      ),
-                    ],
-                    onSubmitted: (_) => _quickAdd(),
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      filled: false,
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      disabledBorder: InputBorder.none,
-                      prefixIcon: Icon(Icons.add_task, size: 18),
-                      hintText:
-                          'Add a task, e.g. “Call embassy tomorrow urgent” '
-                          'or “Lodged visas 3 done”',
-                      hintMaxLines: 2,
-                    ),
-                  ),
-                ),
-              ),
-              PopupMenuButton<TaskUrgency>(
-                key: const ValueKey('quick-urgency'),
-                tooltip: 'Urgency',
-                initialValue: urgency,
-                onSelected: (u) {
-                  setState(() => _quickUrgency = u);
-                  ref.read(reportChoicesProvider.notifier).remember(urgency: u);
-                },
-                itemBuilder: (_) => [
-                  for (final u in TaskUrgency.values)
-                    PopupMenuItem(
-                      value: u,
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.circle,
-                            size: 12,
-                            color: u.color(theme.brightness),
-                          ),
-                          const SizedBox(width: 10),
-                          Text(u.label),
-                        ],
-                      ),
-                    ),
-                ],
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: UrgencyPill(entry.urgency ?? urgency),
-                ),
-              ),
-              IconButton(
-                key: const ValueKey('quick-add'),
-                tooltip: entry.done ? 'Submit (Enter)' : 'Add (Enter)',
-                onPressed: _adding ? null : _quickAdd,
-                icon: _adding
-                    ? const SizedBox.square(
-                        dimension: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.keyboard_return, size: 18),
-              ),
-            ],
-          ),
-          if (entry.understood && _quick.text.trim().isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
-              child: Wrap(
-                key: const ValueKey('quick-preview'),
-                spacing: 6,
-                runSpacing: 4,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  Text('“${entry.title}”', style: muted),
-                  if (entry.done)
-                    TaskPill(
-                      'Done today: submitted on Enter',
-                      Dt.statusGreen(theme.brightness),
-                      icon: Icons.check_circle_outline,
-                    ),
-                  for (final e in entry.outputs.entries)
-                    TaskPill(
-                      '${meta.myDepartment?.outputLabel(e.key) ?? e.key} ${e.value}',
-                      c.textSecondary,
-                      icon: Icons.tag,
-                    ),
-                  if (entry.urgency != null) UrgencyPill(entry.urgency!),
-                  if (entry.due != null)
-                    TaskPill(
-                      'Due ${taskDay(entry.due!, today: today)}',
-                      c.textSecondary,
-                      icon: Icons.event,
-                    ),
-                ],
-              ),
-            ),
-        ],
-      ),
+    final submittedToday = doneToday.where((s) => !s.pending).toList();
+    final quickAdd = TaskComposer(
+      meta: meta,
+      inputFocus: _quickFocus,
+      onDown: order.isEmpty
+          ? null
+          : () => _focusFor(order.first).requestFocus(),
+      onEscape: _pageFocus.requestFocus,
     );
 
     final buttons = Wrap(
       spacing: 8,
       runSpacing: 8,
       children: [
-        FilledButton.icon(
+        OutlinedButton.icon(
           key: const ValueKey('add-activity'),
           onPressed: () => _add(null),
-          icon: const Icon(Icons.add, size: 16),
-          label: const Text('Add activity'),
-        ),
-        OutlinedButton.icon(
-          key: const ValueKey('add-task'),
-          onPressed: () => _add(TaskMode.todo),
-          icon: const Icon(Icons.playlist_add, size: 16),
-          label: const Text('Plan a task'),
+          icon: const Icon(Icons.edit_note, size: 16),
+          label: const Text('Add with details'),
         ),
         if (order.any((t) => !t.pending))
           OutlinedButton.icon(
@@ -897,8 +660,8 @@ class _MyTasksState extends ConsumerState<_MyTasks> {
             child: Text(
               doneToday.isEmpty
                   ? 'Today, ${taskDay(today, today: today)}: nothing '
-                        'submitted yet. Tick each task as you finish it, '
-                        'or type what you’ve done below.'
+                        'submitted yet. List what you’ve done below and submit '
+                        'it, or tick tasks as you finish them.'
                   : 'Today, ${taskDay(today, today: today)}: '
                         '${doneToday.length} submitted '
                         '(${doneToday.where((s) => s.review == ReviewState.approved).length} approved).',
@@ -984,6 +747,21 @@ class _MyTasksState extends ConsumerState<_MyTasks> {
               icon: Icons.radio_button_unchecked,
               children: [for (final t in todo) _card(t, order)],
             ),
+          if (submittedToday.isNotEmpty)
+            _Section(
+              key: const ValueKey('section-today'),
+              title: 'Submitted today (${submittedToday.length})',
+              icon: Icons.task_alt,
+              color: Dt.statusGreen(theme.brightness),
+              trailing: Text(
+                '${submittedToday.where((s) => s.review == ReviewState.approved).length} approved',
+                style: muted,
+              ),
+              children: [
+                for (final t in submittedToday)
+                  TaskCard(task: t, meta: meta, onTap: () => _open(t)),
+              ],
+            ),
         ],
       ),
     );
@@ -1014,44 +792,6 @@ class _MyTasksState extends ConsumerState<_MyTasks> {
       '${queued == 0 ? '' : ' ($queued waiting to send)'}',
       onUndo: () => actions.undoAll(all),
     );
-  }
-}
-
-/// Enter (a newline typed) adds; a pasted list of lines adds one task per
-/// line. The quick line never keeps a newline itself.
-class _LinesFormatter extends TextInputFormatter {
-  _LinesFormatter({required this.onEnter, required this.onLines});
-
-  final VoidCallback onEnter;
-  final ValueChanged<List<String>> onLines;
-
-  @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    final text = newValue.text.replaceAll('\r', '');
-    if (!text.contains('\n')) return newValue;
-    final lines = [
-      for (final l in text.split('\n'))
-        if (l.trim().isNotEmpty) l.trim(),
-    ];
-    final typedNewline =
-        text.length == oldValue.text.length + 1 &&
-        text.replaceFirst('\n', '') == oldValue.text;
-    if (typedNewline) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => onEnter());
-      return oldValue;
-    }
-    if (lines.length <= 1) {
-      final one = lines.isEmpty ? '' : lines.single;
-      return TextEditingValue(
-        text: one,
-        selection: TextSelection.collapsed(offset: one.length),
-      );
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) => onLines(lines));
-    return TextEditingValue.empty;
   }
 }
 

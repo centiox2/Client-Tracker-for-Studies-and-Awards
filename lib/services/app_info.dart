@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.5.0';
+  static const version = '1.6.0';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,20 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.6.0', 'November 2026', [
+      'Daily reports: My tasks opens with Today’s list. Type each thing '
+          'you did or plan to do and press Enter; it waits on the list '
+          'until you submit, so you can add several and check them first.',
+      'Each item’s status is a drop-down (Done today, Doing now or To do), '
+          'with its urgency and due day beside it. Done items go for review '
+          'with their counts; the rest go on your list. One button saves '
+          'them all, with Undo.',
+      'Today’s list is kept on this device until you submit it, even if '
+          'you close the app.',
+      'Add with details has a Status drop-down instead of three buttons.',
+      'A "Submitted today" section shows what you have sent today and how '
+          'many are approved.',
+    ]),
     Release('1.5.0', 'November 2026', [
       'Daily reports, quicker: tick a task to submit it. The submit window '
           'only opens when your department records counts, or with '

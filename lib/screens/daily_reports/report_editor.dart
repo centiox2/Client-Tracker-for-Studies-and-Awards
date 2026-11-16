@@ -665,6 +665,13 @@ class TaskCard extends StatelessWidget {
 // -------------------------------------------------------------- Editor ---
 
 /// What a new task of your own is, chosen at the top of the editor.
+/// The status a new task of that kind gets.
+ReportStatus statusOf(TaskMode m) => switch (m) {
+  TaskMode.done => ReportStatus.done,
+  TaskMode.doing => ReportStatus.inProgress,
+  TaskMode.todo => ReportStatus.toDo,
+};
+
 enum TaskMode {
   done('Done today', Icons.check_circle_outline),
   doing('Doing now', Icons.timelapse),
@@ -898,11 +905,7 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
   }
 
   ReportStatus get _savedStatus => _isNew && !_assign
-      ? switch (_mode) {
-          TaskMode.done => ReportStatus.done,
-          TaskMode.doing => ReportStatus.inProgress,
-          TaskMode.todo => ReportStatus.toDo,
-        }
+      ? statusOf(_mode)
       : _assign
       ? ReportStatus.toDo
       : _status;
@@ -1063,21 +1066,37 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
                 ),
               ),
             if (_isNew && !_assign) ...[
-              SegmentedButton<TaskMode>(
+              DropdownButtonFormField<TaskMode>(
                 key: const ValueKey('task-mode'),
-                segments: [
+                initialValue: _mode,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Status'),
+                items: [
                   for (final m in TaskMode.values)
-                    ButtonSegment(
+                    DropdownMenuItem(
                       value: m,
-                      icon: Icon(m.icon, size: 16),
-                      label: Text(m.label),
+                      child: Row(
+                        children: [
+                          Icon(
+                            m.icon,
+                            size: 16,
+                            color: statusColor(statusOf(m), theme),
+                          ),
+                          const SizedBox(width: 10),
+                          Flexible(
+                            child: Text(
+                              m.label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                 ],
-                selected: {_mode},
-                showSelectedIcon: false,
-                onSelectionChanged: _busy
+                onChanged: _busy
                     ? null
-                    : (v) => setState(() => _mode = v.first),
+                    : (v) => setState(() => _mode = v ?? _mode),
               ),
               const SizedBox(height: 6),
               Text(switch (_mode) {

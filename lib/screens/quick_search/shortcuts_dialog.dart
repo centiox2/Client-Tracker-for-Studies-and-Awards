@@ -15,15 +15,19 @@ const _shortcuts = <(String, String)>[
   (
     'N',
     'Revenue: new payment · Weekly tracker, History: new week · Daily '
-        'reports: the quick line',
+        'reports: Today’s list',
   ),
   ('Ctrl N', 'New week'),
   ('Ctrl Z', 'Undo the last number you changed'),
   ('Ctrl V', 'Revenue: read a pasted screenshot or payment message'),
   ('?', 'This list of shortcuts'),
-  ('Enter', 'Weekly tracker: move to the next field'),
-  ('Esc', 'Close a dialog · Daily reports: leave the quick line'),
-  ('Ctrl Enter', 'Daily reports: add as done · Save a task or a submit'),
+  (
+    'Enter',
+    'Weekly tracker: move to the next field · Daily reports: put it on '
+        'Today’s list',
+  ),
+  ('Esc', 'Close a dialog · Daily reports: leave Today’s list'),
+  ('Ctrl Enter', 'Daily reports: submit Today’s list · Save a task'),
   ('↑ ↓, Space', 'Daily reports: move between tasks, tick one'),
 ];
 
