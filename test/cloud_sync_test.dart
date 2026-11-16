@@ -517,8 +517,10 @@ class FakeCloud implements CloudApi {
 
   final comments = <Map<String, Object?>>[];
 
-  /// Personal to-do items per person (as the server's todo_items).
+  /// Personal to-do items per person (as the server's todo_items), and
+  /// each department's shared list.
   final todos = <int, Map<int, Map<String, Object?>>>{};
+  final teamTodos = <int, Map<int, Map<String, Object?>>>{};
 
   void _notify(Object? user, String kind, int? rid, int? actor, String body) {
     if (user == null || user == actor) return;
@@ -584,30 +586,96 @@ class FakeCloud implements CloudApi {
     ];
     Future<Object?> again(String fn, [Map<String, Object?> more = const {}]) =>
         callFunction(fn, {'p_token': p['p_token'], ...more});
-    List<Map<String, Object?>> todoList() {
-      final mine = todos[uid] ?? {};
-      return [
-        for (final id in (mine.keys.toList()..sort()))
-          if (mine[id]!['deleted'] != true) {...mine[id]!}..remove('deleted'),
-      ];
+    final teamId = me.departmentId;
+    List<Map<String, Object?>> rows(Map<int, Map<String, Object?>> m) => [
+      for (final id in (m.keys.toList()..sort()))
+        if (m[id]!['deleted'] != true)
+          {
+            ...m[id]!,
+            if (m[id]!['sent_id'] != null &&
+                reports[m[id]!['sent_id']] != null) ...{
+              'report_review': reports[m[id]!['sent_id']]!['review'],
+              'report_status': reports[m[id]!['sent_id']]!['status'],
+            },
+          }..remove('deleted'),
+    ];
+    void upsert(Map<int, Map<String, Object?>> into, Map<String, Object?> i) {
+      final id = (i['id'] as num).toInt();
+      final old = into[id];
+      final at = i['changed_at'] as String;
+      if (old != null && at.compareTo(old['changed_at'] as String) < 0) {
+        return;
+      }
+      into[id] = {
+        ...i,
+        'sent_id': i['sent_id'] ?? old?['sent_id'],
+        if (i['team'] == true) 'changed_by_name': me.fullName,
+      };
     }
 
     switch (name) {
-      case 'todo_list':
-        return todoList();
-      case 'todo_save':
+      case 'todo_sync':
         final mine = todos.putIfAbsent(uid, () => {});
-        for (final i in (p['p_items'] as List).cast<Map>()) {
+        final shared = teamId == null
+            ? null
+            : teamTodos.putIfAbsent(teamId, () => {});
+        for (final i in (p['p_items'] as List? ?? const []).cast<Map>()) {
           final item = i.cast<String, Object?>();
-          final id = (item['id'] as num).toInt();
-          final old = mine[id];
-          final at = item['changed_at'] as String;
-          if (old != null && at.compareTo(old['changed_at'] as String) < 0) {
-            continue;
+          if (item['team'] == true) {
+            if (shared != null) upsert(shared, item);
+          } else {
+            upsert(mine, item);
           }
-          mine[id] = {...item, 'sent_id': item['sent_id'] ?? old?['sent_id']};
         }
-        return todoList();
+        // Sent and finished in Daily reports: ticked here too.
+        for (final t in mine.values) {
+          final r = reports[t['sent_id']];
+          final x = (t['extra'] as Map?)?.cast<String, Object?>() ?? {};
+          if (t['done'] != true &&
+              r != null &&
+              r['status'] == 'done' &&
+              x['auto_ticked'] != true) {
+            t['done'] = true;
+            t['done_at'] = DateTime.now().toUtc().toIso8601String();
+            t['extra'] = {...x, 'auto_ticked': true};
+            t['changed_at'] = DateTime.now().toUtc().toIso8601String();
+          }
+        }
+        return {
+          'items': rows(mine),
+          'team': shared == null
+              ? null
+              : {
+                  'id': teamId,
+                  'name': departments.firstWhere(
+                    (d) => d['id'] == teamId,
+                  )['name'],
+                  'items': rows(shared),
+                },
+        };
+      case 'todo_people':
+        return [
+          for (final u in users.values)
+            if (u.id != uid && u.active)
+              {'id': u.id, 'name': u.fullName, 'department': null},
+        ];
+      case 'todo_give':
+        final to = (p['p_user'] as num).toInt();
+        final item = (p['p_item'] as Map).cast<String, Object?>();
+        final id = DateTime.now().microsecondsSinceEpoch;
+        todos.putIfAbsent(to, () => {})[id] = {
+          'id': id,
+          'title': item['title'],
+          'done': false,
+          'changed_at': DateTime.now().toUtc().toIso8601String(),
+          'extra': {
+            for (final e in item.entries)
+              if (e.key != 'title') e.key: e.value,
+            'from': {'id': uid, 'name': me.fullName},
+            'new': true,
+          },
+        };
+        return null;
       case 'report_start':
         // As the server: everything the page opens with, in one call.
         return {
@@ -2667,19 +2735,16 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
     await settle(tester);
-    expect(find.text('3 to do · 0 done'), findsOneWidget);
+    expect(find.text('0 of 3 done today'), findsOneWidget);
     // Saved with the account, not only here.
     expect(cloud.todos[aminaId]!.values, hasLength(3));
-    expect(
-      find.text('Your own list, the same on all your devices.'),
-      findsOneWidget,
-    );
+    expect(find.text('The same on all your devices.'), findsOneWidget);
 
     final ids = container.read(todoListProvider).map((t) => t.id).toList();
     await tester.tap(find.byKey(ValueKey('todo-tick-${ids[0]}')));
     await tester.pump(const Duration(seconds: 1));
     await settle(tester);
-    expect(find.text('2 to do · 1 done'), findsOneWidget);
+    expect(find.text('1 of 3 done today'), findsOneWidget);
     expect(find.text('Done (1)'), findsOneWidget);
 
     // Delete with Undo.
@@ -2703,7 +2768,7 @@ void main() {
     await settle(tester);
     container.read(appActionsProvider).selectTab(AppTab.todo);
     await settle(tester);
-    expect(find.text('2 to do · 1 done'), findsOneWidget);
+    expect(find.text('1 of 3 done today'), findsOneWidget);
     expect(find.text('Call the embassy'), findsOneWidget);
 
     // Send to Daily reports: done ones are submitted, the rest listed.
@@ -2738,11 +2803,410 @@ void main() {
     await tester.pumpAndSettle();
 
     // Clear done, with Undo.
+    await tester.ensureVisible(find.byKey(const ValueKey('todo-clear-done')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('todo-clear-done')));
     await tester.pump(const Duration(seconds: 1));
     await settle(tester);
     expect(find.text('Call the embassy'), findsNothing);
-    expect(cloud.todos[aminaId]![ids[0]]!['deleted'], isTrue);
+    // Cleared, not deleted: it stays in History.
+    expect(
+      (cloud.todos[aminaId]![ids[0]]!['extra'] as Map)['archived'],
+      isTrue,
+    );
+    await tester.tap(find.byKey(const ValueKey('todo-history')));
+    await settle(tester);
+    expect(find.text('Call the embassy'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    container.dispose();
+  });
+
+  testWidgets('to-do: earlier, overdue, repeats, stars, the team list and '
+      'History', (tester) async {
+    // Wednesday 18 November, 10:00.
+    todoClock = () => DateTime(2026, 11, 18, 10);
+    addTearDown(() => todoClock = DateTime.now);
+    final aminaId = cloud
+        .addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2)
+        .id;
+    const old = '2026-01-01T00:00:00.000Z';
+    cloud.todos[aminaId] = {
+      1: {
+        'id': 1,
+        'title': 'Old task',
+        'done': false,
+        'changed_at': old,
+        'extra': {'day': '2026-11-16'},
+      },
+      2: {
+        'id': 2,
+        'title': 'Late visa',
+        'done': false,
+        'changed_at': old,
+        'extra': {'due': '2026-11-17'},
+      },
+      3: {
+        'id': 3,
+        'title': 'Check email',
+        'done': false,
+        'changed_at': old,
+        'extra': {'repeat': 'weekdays'},
+      },
+      4: {
+        'id': 4,
+        'title': 'Plan trip',
+        'done': false,
+        'changed_at': old,
+        'extra': {'later': true},
+      },
+    };
+    cloud.teamTodos[2] = {
+      10: {
+        'id': 10,
+        'title': 'Restock paper',
+        'done': false,
+        'changed_at': old,
+        'extra': {},
+        'team': true,
+      },
+    };
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1400, 1100),
+    );
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    container.read(appActionsProvider).selectTab(AppTab.todo);
+    await settle(tester);
+    List<TodoItem> items() => container.read(todoListProvider);
+    TodoItem item(int id, {bool team = false}) =>
+        items().singleWhere((t) => t.id == id && t.team == team);
+
+    expect(find.text('Unfinished from earlier (1)'), findsOneWidget);
+    expect(find.text('Overdue (1)'), findsOneWidget);
+    expect(find.byKey(const ValueKey('todo-due-2')), findsOneWidget);
+    expect(find.text('Today (1)'), findsOneWidget);
+    expect(
+      find.text('Team list · Visa Processing & Documentation (1)'),
+      findsOneWidget,
+    );
+    // Later is folded away until asked for.
+    expect(find.text('Plan trip'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('todo-later-toggle')));
+    await tester.pumpAndSettle();
+    expect(find.text('Plan trip'), findsOneWidget);
+
+    // Bring the unfinished one to today.
+    await tester.tap(find.byKey(const ValueKey('todo-carry-today')));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('todo-earlier')), findsNothing);
+    expect(item(1).planned, DateTime(2026, 11, 18));
+    expect(find.text('Today (2)'), findsOneWidget);
+
+    // A star keeps it at the top and is saved.
+    await tester.tap(find.byKey(const ValueKey('todo-star-1')));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect((cloud.todos[aminaId]![1]!['extra'] as Map)['starred'], isTrue);
+
+    // Ticking a weekday item puts the next one on tomorrow, once.
+    await tester.tap(find.byKey(const ValueKey('todo-tick-3')));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    final next = items().singleWhere(
+      (t) => t.title == 'Check email' && !t.done,
+    );
+    expect(next.planned, DateTime(2026, 11, 19));
+    expect(next.repeat, TodoRepeat.weekdays);
+    expect(
+      cloud.todos[aminaId]!.values.where((t) => t['title'] == 'Check email'),
+      hasLength(2),
+    );
+    expect(find.text('1 of 3 done today'), findsOneWidget);
+    // Untick and tick again: no second copy.
+    await tester.tap(find.byKey(const ValueKey('todo-tick-3')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('todo-tick-3')));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(items().where((t) => t.title == 'Check email'), hasLength(2));
+
+    // The team list: ticked for everyone, with who did it.
+    await tester.tap(find.byKey(const ValueKey('todo-tick-10')));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(cloud.teamTodos[2]![10]!['done'], isTrue);
+    expect((cloud.teamTodos[2]![10]!['extra'] as Map)['done_by'], 'Amina');
+    expect(find.text('Done by Amina'), findsOneWidget);
+    // #team in the box adds to it.
+    await tester.enterText(
+      find.byKey(const ValueKey('todo-input')),
+      '#team Order toner',
+    );
+    await tester.pump();
+    expect(find.byKey(const ValueKey('todo-understood')), findsOneWidget);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(
+      cloud.teamTodos[2]!.values.map((t) => t['title']),
+      contains('Order toner'),
+    );
+    expect(
+      cloud.todos[aminaId]!.values.map((t) => t['title']),
+      isNot(contains('Order toner')),
+    );
+
+    // Typed words: a deadline with a time.
+    await tester.enterText(
+      find.byKey(const ValueKey('todo-input')),
+      'Call the embassy by friday 3pm',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    final call = items().singleWhere((t) => t.title == 'Call the embassy');
+    expect(call.due, DateTime(2026, 11, 20, 15));
+    expect(find.text('Due Fri 20 Nov 15:00'), findsOneWidget);
+
+    // History: what got done, by day.
+    await tester.tap(find.byKey(const ValueKey('todo-history')));
+    await settle(tester);
+    expect(
+      find.byKey(const ValueKey('todo-history-2026-11-18')),
+      findsOneWidget,
+    );
+    expect(
+      find.text('2 done this week · 2 in the last two weeks'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+    container.dispose();
+  });
+
+  testWidgets('to-do: select many, give to a colleague, a gift shows as '
+      'new', (tester) async {
+    final aminaId = cloud
+        .addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2)
+        .id;
+    final zawadiId = cloud
+        .addUser('zawadi', 'zawadi-pass1', name: 'Zawadi', departmentId: 2)
+        .id;
+    const old = '2026-01-01T00:00:00.000Z';
+    cloud.todos[aminaId] = {
+      1: {
+        'id': 1,
+        'title': 'Scan passports',
+        'done': false,
+        'changed_at': old,
+        'extra': {},
+      },
+      2: {
+        'id': 2,
+        'title': 'File receipts',
+        'done': false,
+        'changed_at': old,
+        'extra': {},
+      },
+      3: {
+        'id': 3,
+        'title': 'Email Otieno',
+        'done': false,
+        'changed_at': old,
+        'extra': {'notes': 'About the COE'},
+      },
+      4: {
+        'id': 4,
+        'title': 'Check the CAS',
+        'done': false,
+        'changed_at': old,
+        'extra': {
+          'from': {'id': zawadiId, 'name': 'Zawadi'},
+          'new': true,
+        },
+      },
+    };
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1400, 1000),
+    );
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    // A colleague's gift shows as a count before the page is opened.
+    expect(find.byKey(const ValueKey('todo-new-count')), findsWidgets);
+    container.read(appActionsProvider).selectTab(AppTab.todo);
+    await settle(tester);
+    expect(find.byKey(const ValueKey('todo-new-4')), findsOneWidget);
+    expect(find.text('From Zawadi'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('todo-new-4')), findsNothing);
+    expect(find.byKey(const ValueKey('todo-new-count')), findsNothing);
+    expect((cloud.todos[aminaId]![4]!['extra'] as Map)['new'], isNot(true));
+
+    // Select two and tick them together.
+    await tester.tap(find.byKey(const ValueKey('todo-page-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Select items'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('todo-select-1')));
+    await tester.tap(find.byKey(const ValueKey('todo-select-2')));
+    await tester.pump();
+    expect(find.text('2 selected'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('todo-bulk-done')));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(cloud.todos[aminaId]![1]!['done'], isTrue);
+    expect(cloud.todos[aminaId]![2]!['done'], isTrue);
+    expect(cloud.todos[aminaId]![3]!['done'], isFalse);
+    // Then delete two at once, with Undo.
+    expect(find.byKey(const ValueKey('todo-select-bar')), findsNothing);
+    await tester.longPress(find.text('Scan passports'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('todo-select-2')));
+    await tester.pump();
+    expect(find.text('2 selected'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('todo-bulk-delete')));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(find.text('Scan passports'), findsNothing);
+    expect(cloud.todos[aminaId]![1]!['deleted'], isTrue);
+    await tester.tap(find.byKey(const ValueKey('report-undo')));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(find.text('Scan passports'), findsOneWidget);
+    expect(cloud.todos[aminaId]![1]!['deleted'], isNot(true));
+
+    // Give one to Zawadi: it lands on her list, from Amina, with the notes.
+    await tester.tap(find.byKey(const ValueKey('todo-menu-3')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Give to a colleague'));
+    await settle(tester);
+    await tester.tap(find.byKey(ValueKey('todo-person-$zawadiId')));
+    await settle(tester);
+    final gift = cloud.todos[zawadiId]!.values.single;
+    expect(gift['title'], 'Email Otieno');
+    final extra = gift['extra'] as Map;
+    expect(extra['notes'], 'About the COE');
+    expect(extra['new'], isTrue);
+    expect((extra['from'] as Map)['name'], 'Amina');
+    expect(tester.takeException(), isNull);
+    container.dispose();
+  });
+
+  testWidgets('to-do: quick add from any page, the end-of-day reminder and '
+      'ticked by itself when its task is done', (tester) async {
+    // Monday 16 November, 16:00.
+    var now = DateTime(2026, 11, 16, 16);
+    todoClock = () => now;
+    addTearDown(() => todoClock = DateTime.now);
+    final aminaId = cloud
+        .addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2)
+        .id;
+    const old = '2026-01-01T00:00:00.000Z';
+    seedReport(77, aminaId, 2, status: 'to_do', description: 'Book interview');
+    cloud.todos[aminaId] = {
+      1: {
+        'id': 1,
+        'title': 'Book interview',
+        'done': false,
+        'changed_at': old,
+        'sent_id': 77,
+        'extra': {},
+      },
+    };
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1400, 1000),
+    );
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+
+    // T on any page: a to-do, with its words understood.
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('quick-todo-input')),
+      'Print COE letters tomorrow',
+    );
+    await tester.pump();
+    expect(find.text('Tomorrow'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('quick-todo-add')));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    final added = container
+        .read(todoListProvider)
+        .singleWhere((t) => t.title == 'Print COE letters');
+    expect(added.planned, DateTime(2026, 11, 17));
+    expect(
+      cloud.todos[aminaId]!.values.map((t) => t['title']),
+      contains('Print COE letters'),
+    );
+    // And the button in the top bar.
+    await tester.tap(find.byKey(const ValueKey('quick-todo')).first);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('quick-todo-input')),
+      'Water the plants',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(
+      container.read(todoListProvider).map((t) => t.title),
+      contains('Water the plants'),
+    );
+    await tester.tap(find.byKey(const ValueKey('quick-todo-open')));
+    await settle(tester);
+    expect(container.read(navTabProvider), AppTab.todo);
+    expect(find.byKey(const ValueKey('todo-sent-1')), findsOneWidget);
+    expect(find.text('#77 · On your Daily list'), findsOneWidget);
+
+    // Finished in Daily reports: ticked here too.
+    cloud.reports[77]!['status'] = 'done';
+    cloud.reports[77]!['review'] = 'submitted';
+    await tester.pump(const Duration(seconds: 31));
+    await settle(tester);
+    final booked = container
+        .read(todoListProvider)
+        .singleWhere((t) => t.id == 1);
+    expect(booked.done, isTrue);
+    expect(booked.autoTicked, isTrue);
+    expect(find.text('#77 · Awaiting review'), findsOneWidget);
+
+    // Done but not sent; at 16:30 the reminder offers to send it.
+    final plants = container
+        .read(todoListProvider)
+        .singleWhere((t) => t.title == 'Water the plants');
+    await tester.tap(find.byKey(ValueKey('todo-tick-${plants.id}')));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('todo-reminder')), findsNothing);
+    now = DateTime(2026, 11, 16, 16, 31);
+    await tester.pump(const Duration(seconds: 61));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('todo-reminder')), findsOneWidget);
+    expect(
+      find.text('You finished 1 thing today. Send it to Daily reports?'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Review'));
+    await settle(tester);
+    expect(find.byKey(ValueKey('todo-send-${plants.id}')), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await settle(tester);
+    // Only once a day.
+    ScaffoldMessenger.of(
+      tester.element(find.byKey(const ValueKey('todo-input'))),
+    ).clearSnackBars();
+    await tester.pump(const Duration(seconds: 61));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('todo-reminder')), findsNothing);
     expect(tester.takeException(), isNull);
     container.dispose();
   });

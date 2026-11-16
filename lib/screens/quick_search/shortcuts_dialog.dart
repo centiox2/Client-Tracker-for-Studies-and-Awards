@@ -20,6 +20,7 @@ const _shortcuts = <(String, String)>[
   ('Ctrl N', 'New week'),
   ('Ctrl Z', 'Undo the last number you changed'),
   ('Ctrl V', 'Revenue: read a pasted screenshot or payment message'),
+  ('T', 'Add a to-do from any page'),
   ('?', 'This list of shortcuts'),
   (
     'Enter',
@@ -29,6 +30,8 @@ const _shortcuts = <(String, String)>[
   ('Esc', 'Close a dialog · Daily reports: leave Today’s list'),
   ('Ctrl Enter', 'Daily reports: submit Today’s list · Save a task'),
   ('↑ ↓, Space', 'Daily reports: move between tasks, tick one'),
+  ('↑ ↓, Space, E', 'To-do: move, tick, open an item'),
+  ('S, X, Delete', 'To-do: star, select, delete the item you are on'),
 ];
 
 class _ShortcutsDialog extends StatelessWidget {

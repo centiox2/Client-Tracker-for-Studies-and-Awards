@@ -1,3 +1,5 @@
+import '../screens/todo/quick_todo.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -84,7 +86,13 @@ class _AppPageHeaderState extends ConsumerState<AppPageHeader> {
     return PageHeader(
       eyebrow: eyebrow,
       title: widget.title ?? pageTitle(widget.tab),
-      actions: [if (sync) const SyncStatusBadge(), ...widget.actions],
+      actions: [
+        if (sync) const SyncStatusBadge(),
+        if (MediaQuery.sizeOf(context).width >= 1050 &&
+            widget.tab != AppTab.todo)
+          const QuickTodoButton(),
+        ...widget.actions,
+      ],
     );
   }
 }

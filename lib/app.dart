@@ -21,7 +21,9 @@ import 'screens/revenue/revenue_screen.dart';
 import 'screens/revenue/scan_payments.dart';
 import 'services/share_receiver.dart';
 import 'screens/settings/settings_screen.dart';
+import 'screens/todo/quick_todo.dart';
 import 'screens/todo/todo_screen.dart';
+import 'services/todo_service.dart';
 import 'screens/staff_management/staff_management_screen.dart';
 import 'screens/weekly_tracker/new_week_dialog.dart';
 import 'screens/weekly_tracker/weekly_tracker_screen.dart';
@@ -205,10 +207,27 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
+  late final _todoReminder = TodoReminder(ref, (text, onSend) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        key: const ValueKey('todo-reminder'),
+        content: Text(text),
+        duration: const Duration(seconds: 15),
+        persist: false,
+        action: SnackBarAction(label: 'Review', onPressed: onSend),
+      ),
+    );
+  });
+  int _ticks = 0;
+
   @override
   void initState() {
     super.initState();
+    _todoReminder.start();
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
+      // The to-do list: things given to you arrive, now and then.
+      if (++_ticks % 2 == 0) ref.read(todoListProvider.notifier).refresh();
       final now = _dateOnly(DateTime.now());
       if (now != _today) {
         // A new day: the daily report reminder checks again.
@@ -334,6 +353,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   @override
   void dispose() {
     _clock?.cancel();
+    _todoReminder.stop();
     _focusNode.dispose();
     super.dispose();
   }
@@ -378,6 +398,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     }
     if (char == '?') {
       showShortcutsDialog(context);
+      return KeyEventResult.handled;
+    }
+    // T: add a to-do, from any page.
+    if (key == LogicalKeyboardKey.keyT &&
+        !HardwareKeyboard.instance.isAltPressed) {
+      showQuickTodo(context);
       return KeyEventResult.handled;
     }
     // Daily reports: N puts the cursor in the quick line (for everyone).
@@ -614,6 +640,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // Keeps the Daily reports page's data loaded in the background, so
     // the page opens at once.
     ref.listen(reportStartProvider, (_, _) {});
+    // The to-do list stays loaded (its badge, the end-of-day reminder).
+    ref.listen(todoListProvider, (_, _) {});
     // A message about the page being left (its Undo included) doesn't
     // follow to the next page.
     ref.listen(navTabProvider, (before, after) {
@@ -693,12 +721,14 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           destinations: [
             for (final item in barTabs)
               NavigationDestination(
-                icon: _reportBadge(
-                  item.tab == AppTab.dailyReports,
-                  reportCount,
-                  reportDue,
-                  Icon(item.icon),
-                ),
+                icon: item.tab == AppTab.todo
+                    ? TodoNewBadge(child: Icon(item.icon))
+                    : _reportBadge(
+                        item.tab == AppTab.dailyReports,
+                        reportCount,
+                        reportDue,
+                        Icon(item.icon),
+                      ),
                 selectedIcon: Icon(item.icon),
                 label: item.shortLabel ?? item.label,
                 tooltip: item.label,
@@ -709,7 +739,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                   moreTabs.any((t) => t.tab == AppTab.dailyReports),
                   reportCount,
                   reportDue,
-                  const Icon(Icons.menu),
+                  moreTabs.any((t) => t.tab == AppTab.todo)
+                      ? const TodoNewBadge(child: Icon(Icons.menu))
+                      : const Icon(Icons.menu),
                 ),
                 selectedIcon: const Icon(Icons.menu),
                 label: barIndex >= 0
@@ -855,6 +887,8 @@ class _AppSidebar extends ConsumerWidget {
               ),
             ),
           )
+        : item.tab == AppTab.todo
+        ? const TodoNewBadge()
         : null;
     final icon = Icon(
       item.icon,
@@ -1344,9 +1378,17 @@ class _MobileTopBar extends ConsumerWidget {
         children: [
           const _BrandMark(),
           const SizedBox(width: 8),
-          Text(Dt.appName, style: Theme.of(context).textTheme.titleSmall),
-          const Spacer(),
+          // The name gives way on narrow phones, never the buttons.
+          Expanded(
+            child: Text(
+              Dt.appName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          ),
           const SyncStatusBadge(compact: true),
+          const QuickTodoButton(compact: true),
           IconButton(
             key: const ValueKey('phone-search'),
             tooltip: 'Search',

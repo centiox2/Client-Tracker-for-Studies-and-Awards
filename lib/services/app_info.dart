@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.7.0';
+  static const version = '1.8.0';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,28 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.8.0', 'November 2026', [
+      'To-do: anything not finished yesterday waits at the top, ready to '
+          'bring to today or move to later. Overdue items come first.',
+      'To-do: plan items for today, a day, or later, give them a deadline '
+          'with a time, star the important ones and drag to reorder.',
+      'To-do: type naturally: "Call the embassy tomorrow 3pm !" sets the '
+          'day, the deadline and a star for you.',
+      'To-do: notes, small steps, counts and a linked client on each item; '
+          'repeating items (every day, weekdays, weekly, monthly).',
+      'To-do: add one from any page with the new button at the top or the '
+          'T key, or from a client’s card ("Add to my to-do").',
+      'To-do: select many to tick, move, send or delete together; swipe '
+          'right to tick and left to delete on phones; keyboard keys too.',
+      'To-do: see where sent items are (awaiting review, approved, '
+          'returned) and open the task; items finished in Daily reports '
+          'tick themselves.',
+      'To-do: a reminder at the end of the day to send what you finished '
+          '(choose the time in To-do settings), a progress bar, and a '
+          'History of what you got done.',
+      'To-do: give an item to a colleague, and share a team list with '
+          'your department.',
+    ]),
     Release('1.7.0', 'November 2026', [
       'New To-do page for everyone: a personal list for your day. It is '
           'saved with your account, so it is the same on all your devices, '

@@ -6,73 +6,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../state/app_state.dart';
 import '../state/cloud_sync.dart';
+import 'todo_model.dart';
 
-/// One line on the personal to-do list.
-class TodoItem {
-  const TodoItem({
-    required this.id,
-    required this.title,
-    this.done = false,
-    this.doneAt,
-    this.sentId,
-    this.deleted = false,
-    this.changedAt,
-  });
-
-  final int id;
-  final String title;
-  final bool done;
-  final DateTime? doneAt;
-
-  /// The Daily reports task it was sent as, once sent (-1: waiting to go).
-  final int? sentId;
-
-  /// Only on changes waiting to be saved online: it was deleted.
-  final bool deleted;
-
-  /// When it was last changed (decides which device's change wins).
-  final DateTime? changedAt;
-
-  bool get sent => sentId != null;
-
-  TodoItem copyWith({
-    String? title,
-    bool? done,
-    DateTime? doneAt,
-    bool clearDoneAt = false,
-    int? sentId,
-    bool? deleted,
-    DateTime? changedAt,
-  }) => TodoItem(
-    id: id,
-    title: title ?? this.title,
-    done: done ?? this.done,
-    doneAt: clearDoneAt ? null : (doneAt ?? this.doneAt),
-    sentId: sentId ?? this.sentId,
-    deleted: deleted ?? this.deleted,
-    changedAt: changedAt ?? this.changedAt,
-  );
-
-  Map<String, Object?> toJson() => {
-    'id': id,
-    'title': title,
-    'done': done,
-    'done_at': doneAt?.toUtc().toIso8601String(),
-    'sent_id': sentId,
-    if (deleted) 'deleted': true,
-    'changed_at': changedAt?.toUtc().toIso8601String(),
-  };
-
-  factory TodoItem.fromJson(Map<String, Object?> j) => TodoItem(
-    id: (j['id'] as num).toInt(),
-    title: j['title'] as String? ?? '',
-    done: j['done'] as bool? ?? false,
-    doneAt: DateTime.tryParse(j['done_at'] as String? ?? '')?.toLocal(),
-    sentId: (j['sent_id'] as num?)?.toInt(),
-    deleted: j['deleted'] as bool? ?? false,
-    changedAt: DateTime.tryParse(j['changed_at'] as String? ?? '')?.toLocal(),
-  );
-}
+export 'todo_model.dart';
 
 /// Whether the list is kept with the account online, and how that's going.
 enum TodoSync {
@@ -89,9 +25,17 @@ enum TodoSync {
   offline,
 }
 
-/// The personal to-do list. Signed in, it's kept with the account so every
-/// device shows the same list (a copy stays on the device for offline use);
-/// otherwise it stays on this device.
+/// Someone a to-do can be given to.
+class TodoPerson {
+  const TodoPerson(this.id, this.name, this.department);
+  final int id;
+  final String name;
+  final String? department;
+}
+
+/// The to-do list: yours plus your department's shared list. Signed in,
+/// it's kept with the account so every device shows the same (a copy stays
+/// on the device for offline use); otherwise it stays on this device.
 final todoListProvider = NotifierProvider<TodoListNotifier, List<TodoItem>>(
   TodoListNotifier.new,
 );
@@ -101,9 +45,10 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
   bool _loaded = false;
   bool _online = false;
   TodoSync _sync = TodoSync.device;
+  String? _teamName;
 
-  /// Changes not saved online yet, by id (deleted ones included).
-  final _dirty = <int, TodoItem>{};
+  /// Changes not saved online yet, by key (deleted ones included).
+  final _dirty = <String, TodoItem>{};
   Timer? _pushTimer;
   Future<void>? _syncing;
 
@@ -115,6 +60,7 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
     _online = _owner != null && ref.watch(accountsEnabledProvider);
     _sync = _online ? TodoSync.saved : TodoSync.device;
     _loaded = false;
+    _teamName = null;
     _dirty.clear();
     _pushTimer?.cancel();
     ref.onDispose(() => _pushTimer?.cancel());
@@ -127,11 +73,16 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
 
   TodoSync get sync => _sync;
 
+  /// The department's shared list, when this person has one.
+  String? get teamName => _teamName;
+
   void _setSync(TodoSync s) {
     if (s == _sync) return;
     _sync = s;
     ref.notifyListeners();
   }
+
+  String get _myName => ref.read(currentUserProvider)?.fullName ?? 'Me';
 
   // ------------------------------------------------------ On the device ---
 
@@ -143,12 +94,13 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
       if (owner != _owner) return;
       if (raw != null) {
         final data = jsonDecode(raw);
-        // Plain list: an older copy. Else {items, dirty}.
+        // Plain list: an older copy. Else {items, dirty, team}.
         final items = data is List ? data : (data as Map)['items'] as List;
         final dirty = data is Map ? (data['dirty'] as List? ?? []) : [];
+        if (data is Map) _teamName = data['team'] as String?;
         for (final j in dirty.cast<Map>()) {
           final t = TodoItem.fromJson(j.cast<String, Object?>());
-          _dirty[t.id] = t;
+          _dirty[t.key] = t;
         }
         state = _sorted([
           for (final j in items.cast<Map>())
@@ -157,6 +109,7 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
       }
     } catch (_) {}
     _loaded = true;
+    _tidy();
     ref.notifyListeners();
     if (_online) unawaited(refresh());
   }
@@ -169,27 +122,56 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
       jsonEncode({
         'items': [for (final t in state) t.toJson()],
         'dirty': [for (final t in _dirty.values) t.toJson()],
+        'team': _teamName,
       }),
     );
   }
 
   static List<TodoItem> _sorted(List<TodoItem> items) =>
-      items..sort((a, b) => a.id.compareTo(b.id));
+      items..sort((a, b) => a.order.compareTo(b.order));
 
-  /// Applies a change on this device, then saves it (online soon after).
+  /// Applies changes on this device, then saves them (online soon after).
   void _change(List<TodoItem> items, Iterable<TodoItem> changed) {
     state = _sorted(items);
     if (_online) {
       for (final t in changed) {
-        _dirty[t.id] = t;
+        _dirty[t.key] = t;
       }
       _setSync(TodoSync.pending);
-      _pushTimer?.cancel();
-      _pushTimer = Timer(const Duration(milliseconds: 700), () {
-        unawaited(refresh());
-      });
+      _schedulePush();
     }
     unawaited(_store());
+  }
+
+  void _schedulePush() {
+    _pushTimer?.cancel();
+    _pushTimer = Timer(const Duration(milliseconds: 700), () {
+      unawaited(refresh());
+    });
+  }
+
+  /// Clears done items as the person chose (Settings on the page).
+  void _tidy() {
+    final days = ref.read(todoPrefsProvider).clearAfterDays;
+    if (days == null) return;
+    final cutoff = todoToday().subtract(Duration(days: days - 1));
+    final now = todoClock();
+    final changed = <TodoItem>[];
+    final items = <TodoItem>[];
+    for (final t in state) {
+      if (t.done &&
+          !t.archived &&
+          !t.team &&
+          t.doneAt != null &&
+          dateOnly(t.doneAt!).isBefore(cutoff)) {
+        final n = t.copyWith(archived: true, changedAt: now);
+        changed.add(n);
+        items.add(n);
+      } else {
+        items.add(t);
+      }
+    }
+    if (changed.isNotEmpty) _change(items, changed);
   }
 
   // ------------------------------------------------------------- Online ---
@@ -206,116 +188,271 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
     if (!sync.enabled) return;
     final sending = Map.of(_dirty);
     try {
-      final result = sending.isEmpty
-          ? await sync.callAsUser('todo_list')
-          : await sync.callAsUser('todo_save', {
-              'p_items': [for (final t in sending.values) t.toJson()],
-            });
+      final result = await sync.callAsUser('todo_sync', {
+        'p_items': [for (final t in sending.values) t.toJson()],
+      }) as Map;
       if (owner != _owner) return;
-      // Sent: no longer waiting (unless changed again meanwhile).
-      sending.forEach((id, t) {
-        if (identical(_dirty[id], t)) _dirty.remove(id);
+      sending.forEach((k, t) {
+        if (identical(_dirty[k], t)) _dirty.remove(k);
       });
+      final team = (result['team'] as Map?)?.cast<String, Object?>();
+      _teamName = team?['name'] as String?;
       final server = [
-        for (final j in (result as List).cast<Map>())
+        for (final j in (result['items'] as List).cast<Map>())
           TodoItem.fromJson(j.cast<String, Object?>()),
+        for (final j in (team?['items'] as List? ?? const []).cast<Map>())
+          TodoItem.fromJson({...j.cast<String, Object?>(), 'team': true}),
       ];
       // What's online, with changes made here since laid on top.
-      final byId = {for (final t in server) t.id: t};
+      final byKey = {for (final t in server) t.key: t};
       for (final t in _dirty.values) {
         if (t.deleted) {
-          byId.remove(t.id);
+          byKey.remove(t.key);
         } else {
-          byId[t.id] = t;
+          byKey[t.key] = t;
         }
       }
-      state = _sorted(byId.values.toList());
+      state = _sorted(byKey.values.toList());
       _setSync(_dirty.isEmpty ? TodoSync.saved : TodoSync.pending);
+      ref.notifyListeners();
       unawaited(_store());
-      if (_dirty.isNotEmpty) {
-        _pushTimer?.cancel();
-        _pushTimer = Timer(const Duration(milliseconds: 700), () {
-          unawaited(refresh());
-        });
-      }
+      _tidy();
+      if (_dirty.isNotEmpty) _schedulePush();
     } catch (_) {
       if (owner == _owner) _setSync(TodoSync.offline);
     }
   }
 
+  /// Everyone a to-do can be given to.
+  Future<List<TodoPerson>> people() async {
+    final rows =
+        await ref.read(cloudSyncProvider.notifier).callAsUser('todo_people')
+            as List;
+    return [
+      for (final r in rows.cast<Map>())
+        TodoPerson(
+          (r['id'] as num).toInt(),
+          r['name'] as String? ?? '',
+          r['department'] as String?,
+        ),
+    ];
+  }
+
+  /// Puts a copy of [t] on [person]'s list.
+  Future<void> give(TodoItem t, TodoPerson person) =>
+      ref.read(cloudSyncProvider.notifier).callAsUser('todo_give', {
+        'p_user': person.id,
+        'p_item': {
+          'title': t.title,
+          for (final e in t.extra.entries)
+            if (const {
+              'notes',
+              'day',
+              'due',
+              'starred',
+              'steps',
+              'client',
+            }.contains(e.key))
+              e.key: e.value,
+        },
+      });
+
   // ------------------------------------------------------------ Changes ---
 
-  int _nextId() {
-    var id = DateTime.now().microsecondsSinceEpoch;
-    while (state.any((t) => t.id == id) || _dirty.containsKey(id)) {
+  int _nextId([int extra = 0]) {
+    var id = todoClock().microsecondsSinceEpoch + extra;
+    while (state.any((t) => t.id == id) ||
+        _dirty.values.any((t) => t.id == id)) {
       id++;
     }
     return id;
   }
 
-  /// Adds each non-empty line; returns what was added.
-  List<TodoItem> add(List<String> titles) {
+  /// Adds a line each (typed words understood: see [parseTodoLine]).
+  List<TodoItem> addLines(List<String> lines, {bool team = false}) {
     final added = <TodoItem>[];
-    final now = DateTime.now();
-    for (final raw in titles) {
-      var title = raw
+    final now = todoClock();
+    for (final raw in lines) {
+      final line = raw
           .replaceFirst(RegExp(r'^\s*([-*•]|\d+[.)]|\[ ?\])\s+'), '')
           .trim();
-      if (title.isEmpty) continue;
+      if (line.isEmpty) continue;
+      final d = parseTodoLine(line, allowTeam: _teamName != null);
+      var title = d.title;
       if (title.length > 300) title = title.substring(0, 300);
       added.add(
-        TodoItem(id: _nextId() + added.length, title: title, changedAt: now),
+        TodoItem(
+          id: _nextId(added.length),
+          title: title,
+          changedAt: now,
+          team: team || d.team,
+          day: d.day,
+          later: d.later,
+          due: d.due,
+          dueTime: d.dueTime,
+          starred: d.starred,
+          repeat: d.repeat,
+        ),
       );
     }
     if (added.isNotEmpty) _change([...state, ...added], added);
     return added;
   }
 
-  void _update(int id, TodoItem Function(TodoItem) f) {
-    final now = DateTime.now();
-    TodoItem? changed;
-    final items = [
-      for (final t in state)
-        if (t.id == id) changed = f(t).copyWith(changedAt: now) else t,
-    ];
-    if (changed != null) _change(items, [changed]);
+  /// Adds one item made elsewhere (quick add, a client's card).
+  TodoItem add(TodoItem t) {
+    final item = TodoItem.fromJson({
+      ...t.toJson(),
+      'id': _nextId(),
+      'changed_at': todoClock().toUtc().toIso8601String(),
+    });
+    _change([...state, item], [item]);
+    return item;
   }
 
-  void toggle(int id) => _update(
-    id,
-    (t) => t.copyWith(
-      done: !t.done,
-      doneAt: t.done ? null : DateTime.now(),
-      clearDoneAt: t.done,
-    ),
-  );
+  TodoItem? byKey(String key) => state.where((t) => t.key == key).firstOrNull;
 
-  void rename(int id, String title) {
+  /// Changes the items with these keys.
+  void edit(Iterable<String> keys, TodoItem Function(TodoItem) f) {
+    final now = todoClock();
+    final changed = <TodoItem>[];
+    final items = <TodoItem>[];
+    for (final t in state) {
+      if (keys.contains(t.key)) {
+        final n = f(t).copyWith(changedAt: now);
+        changed.add(n);
+        items.add(n);
+      } else {
+        items.add(t);
+      }
+    }
+    if (changed.isNotEmpty) _change(items, changed);
+  }
+
+  /// Ticks or unticks; a repeating item makes its next one when ticked.
+  void toggle(String key) {
+    final t = byKey(key);
+    if (t == null) return;
+    setDone([key], !t.done);
+  }
+
+  void setDone(Iterable<String> keys, bool done) {
+    final now = todoClock();
+    final spawn = <TodoItem>[];
+    final changed = <TodoItem>[];
+    final items = <TodoItem>[];
+    for (final t in state) {
+      if (!keys.contains(t.key) || t.done == done) {
+        items.add(t);
+        continue;
+      }
+      var next = t.copyWith(
+        done: done,
+        doneAt: done ? now : null,
+        doneBy: done && t.team ? _myName : null,
+        archived: false,
+        changedAt: now,
+      );
+      if (done && t.repeat != TodoRepeat.none && t.spawned == null) {
+        final base = t.planned ?? todoToday();
+        final from = base.isBefore(todoToday()) ? todoToday() : base;
+        final day = t.repeat.next(from);
+        final shift = day.difference(dateOnly(base));
+        final copy = TodoItem(
+          id: _nextId(spawn.length + 1),
+          title: t.title,
+          changedAt: now,
+          team: t.team,
+          notes: t.notes,
+          day: day,
+          due: t.due?.add(shift),
+          dueTime: t.dueTime,
+          starred: t.starred,
+          repeat: t.repeat,
+          steps: [for (final s in t.steps) s.copyWith(done: false)],
+          clientKey: t.clientKey,
+          clientName: t.clientName,
+        );
+        spawn.add(copy);
+        next = next.copyWith(spawned: copy.id);
+      }
+      items.add(next);
+      changed.add(next);
+    }
+    if (changed.isEmpty) return;
+    _change([...items, ...spawn], [...changed, ...spawn]);
+  }
+
+  void rename(String key, String title) {
     final clean = title.trim();
     if (clean.isEmpty) return;
-    _update(
-      id,
+    edit(
+      [key],
       (t) => t.copyWith(
         title: clean.length > 300 ? clean.substring(0, 300) : clean,
       ),
     );
   }
 
-  void markSent(int id, int reportId) =>
-      _update(id, (t) => t.copyWith(sentId: reportId));
+  void star(String key) => edit([key], (t) => t.copyWith(starred: !t.starred));
 
-  /// Removes [ids]; returns what was removed with where it was (for Undo).
-  List<(int, TodoItem)> remove(Iterable<int> ids) {
+  void moveToToday(Iterable<String> keys) =>
+      edit(keys, (t) => t.copyWith(day: null, later: false));
+
+  void moveToLater(Iterable<String> keys) =>
+      edit(keys, (t) => t.copyWith(day: null, later: true));
+
+  void markSent(String key, int reportId) =>
+      edit([key], (t) => t.copyWith(sentId: reportId));
+
+  /// Given items, now seen.
+  void markSeen() {
+    final keys = [
+      for (final t in state)
+        if (t.isNew) t.key,
+    ];
+    if (keys.isNotEmpty) edit(keys, (t) => t.copyWith(isNew: false));
+  }
+
+  /// Moves [key] to sit between [before] and [after] (keys or null).
+  void place(String key, {String? before, String? after}) {
+    final a = before == null ? null : byKey(before)?.order;
+    final b = after == null ? null : byKey(after)?.order;
+    final double pos;
+    if (a != null && b != null) {
+      pos = (a + b) / 2;
+    } else if (a != null) {
+      pos = a + 1;
+    } else if (b != null) {
+      pos = b - 1;
+    } else {
+      return;
+    }
+    edit([key], (t) => t.copyWith(pos: pos));
+  }
+
+  /// Done items off the list (kept in History).
+  List<(int, TodoItem)> archive(Iterable<String> keys) {
+    final gone = [
+      for (final (i, t) in state.indexed)
+        if (keys.contains(t.key)) (i, t),
+    ];
+    edit(keys, (t) => t.copyWith(archived: true));
+    return gone;
+  }
+
+  /// Removes [keys]; returns what was removed (for Undo with [restore]).
+  List<(int, TodoItem)> remove(Iterable<String> keys) {
     final gone = <(int, TodoItem)>[];
     for (final (i, t) in state.indexed) {
-      if (ids.contains(t.id)) gone.add((i, t));
+      if (keys.contains(t.key)) gone.add((i, t));
     }
     if (gone.isNotEmpty) {
-      final now = DateTime.now();
+      final now = todoClock();
       _change(
         [
           for (final t in state)
-            if (!ids.contains(t.id)) t,
+            if (!keys.contains(t.key)) t,
         ],
         [for (final (_, t) in gone) t.copyWith(deleted: true, changedAt: now)],
       );
@@ -323,12 +460,95 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
     return gone;
   }
 
-  /// Puts back what [remove] took.
+  /// Puts back what [remove] or [archive] took, as it was.
   void restore(List<(int, TodoItem)> gone) {
-    final now = DateTime.now();
+    final now = todoClock();
     final back = [
       for (final (_, t) in gone) t.copyWith(deleted: false, changedAt: now),
     ];
-    _change([...state, ...back], back);
+    final keys = {for (final t in back) t.key};
+    _change([
+      for (final t in state)
+        if (!keys.contains(t.key)) t,
+      ...back,
+    ], back);
+  }
+}
+
+// ---------------------------------------------------------- Preferences ---
+
+/// The person's to-do choices (on this device).
+class TodoPrefs {
+  const TodoPrefs({
+    this.reminderMinutes = 16 * 60 + 30,
+    this.clearAfterDays = 1,
+  });
+
+  /// When to offer sending the day's done items (minutes after midnight;
+  /// null: never).
+  final int? reminderMinutes;
+
+  /// Done items leave the list this many days after (null: never).
+  final int? clearAfterDays;
+
+  Map<String, Object?> toJson() => {
+    'reminder': reminderMinutes,
+    'clear': clearAfterDays,
+  };
+}
+
+final todoPrefsProvider = NotifierProvider<TodoPrefsNotifier, TodoPrefs>(
+  TodoPrefsNotifier.new,
+);
+
+class TodoPrefsNotifier extends Notifier<TodoPrefs> {
+  int? _owner;
+  static String _key(int? user) => 'todo_prefs_${user ?? 'device'}';
+
+  @override
+  TodoPrefs build() {
+    _owner = ref.watch(currentUserProvider)?.id;
+    unawaited(_load(_owner));
+    return const TodoPrefs();
+  }
+
+  Future<void> _load(int? owner) async {
+    try {
+      final raw = (await SharedPreferences.getInstance()).getString(
+        _key(owner),
+      );
+      if (raw == null || owner != _owner) return;
+      final j = (jsonDecode(raw) as Map).cast<String, Object?>();
+      state = TodoPrefs(
+        reminderMinutes: (j['reminder'] as num?)?.toInt(),
+        clearAfterDays: (j['clear'] as num?)?.toInt(),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> set(TodoPrefs p) async {
+    state = p;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_key(_owner), jsonEncode(p.toJson()));
+  }
+}
+
+/// Asks the To-do page to open "Send to Daily reports" (from the end of
+/// day reminder).
+final todoSendRequestProvider = NotifierProvider<TodoSendRequest, bool>(
+  TodoSendRequest.new,
+);
+
+class TodoSendRequest extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void request() => state = true;
+
+  /// True once, when asked.
+  bool take() {
+    final asked = state;
+    if (asked) state = false;
+    return asked;
   }
 }

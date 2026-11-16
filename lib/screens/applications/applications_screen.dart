@@ -1,3 +1,5 @@
+import '../todo/quick_todo.dart';
+
 import 'dart:convert';
 
 import 'package:desktop_drop/desktop_drop.dart';
@@ -1400,6 +1402,17 @@ Future<void> showApplicationDetails(
           ),
         ),
         actions: [
+          TextButton.icon(
+            key: const ValueKey('application-todo'),
+            onPressed: () => showQuickTodo(
+              context,
+              title: 'Follow up ${a.student} ',
+              clientKey: a.key,
+              clientName: a.student,
+            ),
+            icon: const Icon(Icons.add_task, size: 16),
+            label: const Text('Add to my to-do'),
+          ),
           TextButton.icon(
             key: const ValueKey('application-print'),
             onPressed: () => savePrintable(
