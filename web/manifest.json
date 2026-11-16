@@ -6,7 +6,7 @@
     "background_color": "#FBF9F4",
     "theme_color": "#001A45",
     "description": "Weekly client tracking for Studies and Awards Limited.",
-    "orientation": "portrait-primary",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {

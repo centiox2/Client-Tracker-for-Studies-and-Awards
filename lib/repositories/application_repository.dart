@@ -729,7 +729,7 @@ class ApplicationRepository {
   /// hold commas, quotes ("") and line breaks.
   static List<List<String>> parseCsv(String text) {
     var s = text;
-    if (s.startsWith('﻿')) s = s.substring(1);
+    if (s.startsWith('\uFEFF')) s = s.substring(1); // Excel's byte-order mark
     final rows = <List<String>>[];
     var row = <String>[];
     final field = StringBuffer();

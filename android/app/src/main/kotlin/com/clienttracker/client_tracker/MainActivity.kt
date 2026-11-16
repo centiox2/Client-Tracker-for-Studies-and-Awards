@@ -97,20 +97,32 @@ class MainActivity : FlutterActivity() {
             intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)
         } ?: emptyList()
 
-    private fun copyToCache(uri: Uri): String? = try {
-        val dir = File(cacheDir, "shared").apply { mkdirs() }
-        val ext = when (contentResolver.getType(uri)) {
-            "image/png" -> "png"
-            "image/webp" -> "webp"
-            "image/heic" -> "heic"
-            else -> "jpg"
+    /** Copies a shared photo into the cache; nothing is left behind if
+     *  the copy fails or comes out empty. */
+    private fun copyToCache(uri: Uri): String? {
+        var file: File? = null
+        return try {
+            val dir = File(cacheDir, "shared").apply { mkdirs() }
+            val ext = when (contentResolver.getType(uri)) {
+                "image/png" -> "png"
+                "image/webp" -> "webp"
+                "image/heic" -> "heic"
+                else -> "jpg"
+            }
+            val out = File(dir, "shared_${System.nanoTime()}.$ext")
+            file = out
+            contentResolver.openInputStream(uri)?.use { input ->
+                out.outputStream().use { input.copyTo(it) }
+            }
+            if (out.length() > 0) {
+                out.absolutePath
+            } else {
+                out.delete()
+                null
+            }
+        } catch (e: Exception) {
+            file?.delete()
+            null
         }
-        val file = File(dir, "shared_${System.nanoTime()}.$ext")
-        contentResolver.openInputStream(uri)?.use { input ->
-            file.outputStream().use { input.copyTo(it) }
-        }
-        if (file.length() > 0) file.absolutePath else null
-    } catch (e: Exception) {
-        null
     }
 }

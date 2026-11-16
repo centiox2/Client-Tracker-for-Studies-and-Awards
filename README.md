@@ -30,17 +30,16 @@ Values are **cumulative per day**: if Joy has `New = 3` at 10 AM and you type `5
 | **Staff Management** | Add, rename, deactivate, reactivate, delete (with confirmation), reorder by dragging. Deactivated staff keep all historical numbers and are excluded from new weeks only. |
 | **Settings** | Light/Dark/System theme, **Export week → .xlsx**, **Backup / Restore** (portable JSON). |
 
-## Design system — "Editorial"
+## Design system — "Clarity"
 
-The UI follows an **Editorial** direction: a warm, print-inspired look (think a well-set newspaper or annual report) for a daily-use data-entry tool. All tokens live in one file — `lib/design/app_theme.dart` — which both screens and widgets import; no screen hardcodes colors or spacing. Shared editorial building blocks (page scaffolds, headers, stat strips, mini bar charts, chips, leaderboard/mix rows) live in `lib/widgets/editorial.dart`.
+Calm, light-first and data-focused: white cards on a soft grey page, with the Studies and Awards **navy** (`Dt.brandNavy`, `#001A45`) as the one accent and the logo's **gold** (`Dt.brandGold`, `#FBBA00`) taking its place in dark mode. All tokens live in `lib/design/app_theme.dart` (`Dt` for sizes and fixed colours, `Clarity` for the light and dark palettes); shared building blocks (cards, KPI tiles, pills, meters, page headers) live in `lib/widgets/clarity.dart` and `lib/widgets/app_page_header.dart`. No screen hardcodes colours or spacing.
 
 - **Type**: *Inter* (400–700) for everything, with tabular figures for numbers. Bundled in `assets/fonts/` (SIL Open Font License, `Inter-LICENSE.txt`) and registered in `pubspec.yaml`.
-- **Uppercase micro-labels**: 12px / w600 with +1.1 tracking (`microLabel`) name every section — "THIS WEEK", "DAY TOTAL", "MOST CLIENTS" — like print captions.
-- **Duotone data pair, nothing else colored**: New clients are always **peach** (`Dt.newGreen`), Existing clients always **periwinkle** (`Dt.existingBlue`), in inputs, charts and figures alike. Everything else stays in the warm neutral palette; a soft green dot marks Active staff.
-- **Warm paper palette**: dark = ink on warm charcoal (`#141211` bg, `#1B1817` panels); light = warm paper (`#F7F4F1` bg, `#EFEAE5` panels). Depth is 1px hairline borders (`Dt.border` / `Dt.borderStrong`); no shadows or gradients.
-- **Headlines with an italic accent**: each screen header is a serif headline where one word is set in peach italic ("Thursday, *1 October*", "The week of *October 5*", "The *team*", "Past *weeks*") above a small uppercase kicker.
-- **Layout rhythm**: 76px icon rail (serif "C" masthead, Settings pinned bottom) with a 1240px content column (`Dt.contentMaxWidth`); analytics as a 340px right rail that stacks on narrow screens. Radii are small and precise (6/8/12 + stadium pills for buttons).
-- **Primary action is an inverse pill** (surface fg on inverse surface) — quiet on purpose; color is reserved for data.
+- **Numbers first**: the key figure on a card is the biggest thing on it; labels are small and grey.
+- **Data colours mean data**: new clients are always **orange** (`seriesNew`, read through `Dt.newGreen`, a name kept from the first design) and existing clients always **blue** (`seriesExisting`, `Dt.existingBlue`), never used as decoration.
+- **Status is spelled out**: a coloured status always has a word too (`StatusPill`). No coloured strips on card edges.
+- **Quiet chrome**: 1px borders, no shadows, no gradients; radii 8 (buttons, inputs), 12 (cards, dialogs) and pills.
+- **Layout**: a 248px sidebar with the S&A logo on desktop (collapsible), a bottom bar on phones; content up to 1680px wide (`Dt.contentMaxWidth`).
 
 To change the look, edit the tokens in `buildAppTheme` / `Dt` — every screen follows automatically.
 
@@ -93,7 +92,7 @@ For the team: department heads and the Operations Manager can **Assign task** (O
 
 Handy extras: a **dot on Daily reports** when you haven't recorded anything today; **Ctrl+Enter** saves an activity; closing a half-filled activity asks first; **Add again today** repeats recurring work; and **Copy reminder** (Overview › Submission compliance) copies a ready-to-send message for everyone who hasn't submitted today.
 
-Not in phase 1 yet (phase 2 of the brief): assigning tasks, an approval step, reminders and overdue alerts by email, and attachments.
+Since added: assigning tasks, a review step (submitted work is approved or returned with a comment, then resubmitted), in-app notifications, and the To-do page, whose items can be sent to Daily reports. Not built yet: reminders and overdue alerts by email, and attachments.
 
 ## Signed builds
 

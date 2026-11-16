@@ -9,13 +9,24 @@ plugins {
 
 // The release signing key. The build (GitHub Actions) writes
 // android/key.properties from repository secrets; it is never committed.
-// Without it, a release build falls back to the debug key (fine locally,
-// but such an APK can't update one signed with the release key).
+// Without it a release build stops: an APK signed with the debug key can't
+// update one people already have. To try a release build on your own
+// machine anyway, add -PallowDebugSigning=true (never publish that APK).
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+    FileInputStream(keystorePropertiesFile).use { keystoreProperties.load(it) }
 }
+val allowDebugSigning =
+    (project.findProperty("allowDebugSigning") as String?)?.toBoolean() == true
+
+/** A value from key.properties, or a clear error naming what's missing. */
+fun signingValue(name: String): String =
+    keystoreProperties.getProperty(name)?.takeIf { it.isNotBlank() }
+        ?: throw GradleException(
+            "android/key.properties has no \"$name\". It needs storeFile, " +
+                "storePassword, keyAlias and keyPassword.",
+        )
 
 android {
     namespace = "com.clienttracker.client_tracker"
@@ -45,10 +56,10 @@ android {
     signingConfigs {
         if (keystorePropertiesFile.exists()) {
             create("release") {
-                keyAlias = keystoreProperties["keyAlias"] as String
-                keyPassword = keystoreProperties["keyPassword"] as String
-                storeFile = file(keystoreProperties["storeFile"] as String)
-                storePassword = keystoreProperties["storePassword"] as String
+                keyAlias = signingValue("keyAlias")
+                keyPassword = signingValue("keyPassword")
+                storeFile = file(signingValue("storeFile"))
+                storePassword = signingValue("storePassword")
             }
         }
     }
@@ -60,6 +71,8 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // Shrink the code with R8, using the rules in proguard-rules.pro.
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -76,4 +89,21 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+// No release key: stop any release build before it makes an APK that
+// can't update the installed app (unless allowed for a local try-out).
+gradle.taskGraph.whenReady {
+    val releasing = allTasks.any {
+        it.project == project && it.name.contains("Release") &&
+            (it.name.startsWith("assemble") || it.name.startsWith("bundle") ||
+                it.name.startsWith("package"))
+    }
+    if (releasing && !keystorePropertiesFile.exists() && !allowDebugSigning) {
+        throw GradleException(
+            "No release signing key: android/key.properties is missing. " +
+                "The build on GitHub writes it from the repository secrets. " +
+                "For a local try-out only, add -PallowDebugSigning=true.",
+        )
+    }
 }
