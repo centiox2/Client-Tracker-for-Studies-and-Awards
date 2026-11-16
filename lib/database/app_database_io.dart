@@ -27,22 +27,82 @@ AppDatabase openPlatformDatabase(String directory) {
   }
 }
 
-/// Rotating file copy: current -> .bak1 -> .bak2 … .bakN.
-/// Best-effort: never blocks the app from starting.
+/// Rotating copy: current -> .bak1 -> .bak2 … .bakN.
+///
+/// The copy is made by SQLite itself (`VACUUM INTO`), so it holds every
+/// saved change, including those still in the write-ahead log after a
+/// crash, and is consistent even if another copy of the app has the file
+/// open. Sign-ins kept on this device (online tokens, offline password
+/// checks) are taken out of each copy: a backup file must not let anyone
+/// sign in as the person. Best-effort: never blocks the app from starting.
 void makeRollingBackup(String dbPath) {
+  final tmp = '$dbPath.bak.tmp';
   try {
-    final f = File(dbPath);
-    if (!f.existsSync()) return;
-    for (var i = AppDatabase.rollingBackupCount - 1; i >= 1; i--) {
-      final src = File('$dbPath.bak$i');
-      if (src.existsSync()) {
-        src.copySync('$dbPath.bak${i + 1}');
-      }
+    if (!File(dbPath).existsSync()) return;
+    _deleteQuietly(tmp);
+    final src = sqlite3.open(dbPath);
+    try {
+      src.execute('PRAGMA busy_timeout = 5000;');
+      src.execute("VACUUM INTO '${tmp.replaceAll("'", "''")}';");
+    } finally {
+      src.dispose();
     }
-    f.copySync('$dbPath.bak1');
+    if (!scrubSignIns(tmp)) {
+      _deleteQuietly(tmp);
+      return;
+    }
+    for (var i = AppDatabase.rollingBackupCount - 1; i >= 1; i--) {
+      final older = File('$dbPath.bak$i');
+      if (older.existsSync()) older.copySync('$dbPath.bak${i + 1}');
+    }
+    File(tmp).copySync('$dbPath.bak1');
+    _deleteQuietly(tmp);
+    _scrubOldBackups(dbPath);
   } catch (_) {
-    // ignore - backups are best effort
+    _deleteQuietly(tmp);
   }
+}
+
+/// Takes the kept sign-ins out of the database file at [path], overwriting
+/// them on disk. True when the file holds none afterwards.
+bool scrubSignIns(String path) {
+  try {
+    final db = sqlite3.open(path);
+    try {
+      final has = db.select(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+        "AND name = 'user_signins';",
+      );
+      if (has.isEmpty) return true;
+      db.execute('PRAGMA secure_delete = ON;');
+      db.execute('DELETE FROM user_signins;');
+      db.execute('VACUUM;');
+      return true;
+    } finally {
+      db.dispose();
+    }
+  } catch (_) {
+    return false;
+  }
+}
+
+/// Copies made before sign-ins were taken out: cleaned once.
+void _scrubOldBackups(String dbPath) {
+  final marker = File('$dbPath.bak.clean');
+  if (marker.existsSync()) return;
+  var all = true;
+  for (var i = 2; i <= AppDatabase.rollingBackupCount; i++) {
+    final f = File('$dbPath.bak$i');
+    if (f.existsSync() && !scrubSignIns(f.path)) all = false;
+  }
+  if (all) marker.writeAsStringSync('1');
+}
+
+void _deleteQuietly(String path) {
+  try {
+    final f = File(path);
+    if (f.existsSync()) f.deleteSync();
+  } catch (_) {}
 }
 
 /// In-memory database for tests. Only callable on the VM (dart:io).

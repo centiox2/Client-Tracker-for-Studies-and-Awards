@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.8.1';
+  static const version = '1.8.2';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,28 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.8.2', 'November 2026', [
+      'Safer sign-in: a temporary password only lets you set a new one, and '
+          'each account only reads and changes the pages it may open.',
+      'Sync: offline changes from two devices no longer overwrite newer '
+          'ones online, and the same week or day made on two devices is '
+          'joined instead of doubled.',
+      'Download fresh copy and the first join keep your unsent changes as '
+          'a copy you can save (Settings › Backup), instead of losing them.',
+      'Daily reports: a task the server refuses stays on your device with '
+          'the reason, to fix or discard; a task is never saved twice after '
+          'a dropped connection; exports include every matching task.',
+      'Approved tasks that are changed go back for review.',
+      'Applications upload: a damaged or cut-off file is refused, and you '
+          'are asked before many applications are removed.',
+      'Backups hold everyone\'s to-do lists, and backup files on this '
+          'device no longer keep saved sign-ins.',
+      'Team to-dos stay with their team if you move departments; a damaged '
+          'to-do no longer stops the list loading.',
+      'Excel import: numbers for a day marked off clear the off mark.',
+      'Android: saving files works on newer phones, and sharing very large '
+          'photos no longer freezes the app.',
+    ]),
     Release('1.8.1', 'November 2026', [
       'To-do: what you don\'t finish moves to the next day, under '
           '"Yesterday’s unfinished" at the top, until you bring it to today '

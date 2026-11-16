@@ -428,8 +428,14 @@ ImportOutcome applyExcelImport(
         continue;
       }
       if (entry.off) {
+        // The mark hides any numbers there, without deleting them.
         timeOff.setDay(dayId: workDay.id, staffId: staffId, off: true);
       } else {
+        // Numbers for a day marked off: they worked after all (a blank
+        // zero only replaces the mark when overwriting).
+        if (overwrite || entry.total > 0) {
+          timeOff.setDay(dayId: workDay.id, staffId: staffId, off: false);
+        }
         counts.saveCount(
           dayId: workDay.id,
           staffId: staffId,

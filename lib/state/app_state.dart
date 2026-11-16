@@ -128,8 +128,12 @@ final canEditProvider = Provider<bool>(
 );
 
 /// The profile may see revenue (admin, director).
+/// Revenue figures show only to roles that see revenue, and only when the
+/// account may open the Revenue page (the server refuses them otherwise).
 final seesRevenueProvider = Provider<bool>(
-  (ref) => ref.watch(sessionProvider)?.seesRevenue ?? false,
+  (ref) =>
+      (ref.watch(sessionProvider)?.seesRevenue ?? false) &&
+      (ref.watch(currentUserProvider)?.mayOpen('revenue') ?? true),
 );
 
 typedef AdminSessionNotifier = SessionNotifier;

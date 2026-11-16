@@ -311,9 +311,13 @@ class FakeCloud implements CloudApi {
   /// The next sign-in fails with this code (once).
   String? failNextLogin;
 
+  /// When set, sign-ins wait for it (a slow connection).
+  Completer<void>? loginGate;
+
   @override
   Future<UserSignIn> userLogin(String username, String p, bool remember) async {
     _online();
+    if (loginGate case final gate? when !gate.isCompleted) await gate.future;
     if (failNextLogin case final code?) {
       failNextLogin = null;
       throw CloudException(code);
@@ -622,7 +626,8 @@ class FakeCloud implements CloudApi {
         for (final i in (p['p_items'] as List? ?? const []).cast<Map>()) {
           final item = i.cast<String, Object?>();
           if (item['team'] == true) {
-            if (shared != null) upsert(shared, item);
+            // As on the server: only for the team the change was made for.
+            if (shared != null && item['dept'] == teamId) upsert(shared, item);
           } else {
             upsert(mine, item);
           }
@@ -650,7 +655,9 @@ class FakeCloud implements CloudApi {
                   'name': departments.firstWhere(
                     (d) => d['id'] == teamId,
                   )['name'],
-                  'items': rows(shared),
+                  'items': [
+                    for (final r in rows(shared)) {...r, 'dept': teamId},
+                  ],
                 },
         };
       case 'todo_people':
@@ -797,8 +804,9 @@ class FakeCloud implements CloudApi {
           return c != 0 ? c : (b['id'] as int).compareTo(a['id'] as int);
         });
         final limit = f['limit'] as int?;
+        final after = rows.skip(f['offset'] as int? ?? 0);
         return [
-          for (final r in limit == null ? rows : rows.take(limit))
+          for (final r in limit == null ? after : after.take(limit))
             _reportJson(r),
         ];
       case 'report_summary':
@@ -929,6 +937,15 @@ class FakeCloud implements CloudApi {
       case 'report_save':
         final r = (p['p_report'] as Map).cast<String, Object?>();
         final id = r['id'] as int?;
+        // As on the server: a new task sent again under the same name
+        // (a retry after a lost answer) is not made twice.
+        final op = r['op'] as String?;
+        if (id == null && op != null) {
+          final made = reports.values
+              .where((x) => x['client_op'] == '$uid:$op')
+              .firstOrNull;
+          if (made != null) return _reportJson(made);
+        }
         final before = id == null ? null : reports[id];
         if (id != null && before == null) {
           throw CloudException('unknown_report');
@@ -1043,6 +1060,7 @@ class FakeCloud implements CloudApi {
           'submitted_at': submittedAt,
           'created_at': before?['created_at'] ?? now,
           'updated_at': now,
+          if (before == null && op != null) 'client_op': '$uid:$op',
         };
         final sid = saved['id'] as int;
         reports[sid] = saved;
@@ -1411,6 +1429,61 @@ void main() {
       cloud.tables['weeks']!.values.map((w) => w['start_date']),
       containsAll(['2026-09-07', '2026-09-14']),
     );
+  });
+
+  test('a fresh copy from an empty cloud changes nothing', () async {
+    final token = await cloud.claim('pass1234');
+    WeekRepository(admin).createWeekFor(DateTime(2026, 10, 12));
+    final a = SyncEngine(admin, cloud);
+    expect(await a.resetFromCloud(token), isFalse);
+    expect(WeekRepository(admin).getAllWeeks(), hasLength(1));
+    expect(a.recovery, isNull);
+  });
+
+  test('a fresh copy keeps unsent changes as a recovery copy', () async {
+    final token = await cloud.claim('pass1234');
+    WeekRepository(admin).createWeekFor(DateTime(2026, 10, 12));
+    final a = SyncEngine(admin, cloud);
+    await a.pull(token: token, readToken: token);
+    WeekRepository(admin).createWeekFor(DateTime(2026, 11, 2));
+    expect(a.pending, greaterThan(0));
+
+    expect(await a.resetFromCloud(token), isTrue);
+    expect(WeekRepository(admin).getAllWeeks().map((w) => w.startDate.month), [
+      10,
+    ]);
+    final copy = a.recovery;
+    expect(copy, isNotNull);
+    expect(copy!.json, contains('2026-11-02'));
+    a.clearRecovery();
+    expect(a.recovery, isNull);
+  });
+
+  test('a fresh copy that fails to download changes nothing', () async {
+    final token = await cloud.claim('pass1234');
+    WeekRepository(admin).createWeekFor(DateTime(2026, 10, 12));
+    final a = SyncEngine(admin, cloud);
+    await a.pull(token: token, readToken: token);
+    WeekRepository(admin).createWeekFor(DateTime(2026, 11, 2));
+    final waiting = a.pending;
+    cloud.offline = true;
+    await expectLater(a.resetFromCloud(token), throwsException);
+    expect(a.pending, waiting);
+    expect(WeekRepository(admin).getAllWeeks(), hasLength(2));
+  });
+
+  test('sends that overlap run one after the other', () async {
+    final token = await cloud.claim('pass1234');
+    final a = SyncEngine(admin, cloud);
+    await a.pull(token: token, readToken: token);
+    WeekRepository(admin).createWeekFor(DateTime(2026, 11, 2));
+    await Future.wait([
+      a.flush(token),
+      a.flush(token),
+      a.pull(token: token, readToken: token),
+    ]);
+    expect(a.pending, 0);
+    expect(cloud.tables['weeks'], hasLength(1));
   });
 
   // -------------------------------------------------------- sign-in flow ---
@@ -2821,6 +2894,82 @@ void main() {
     container.dispose();
   });
 
+  testWidgets('to-do: a bad saved item is skipped, and a team change stays '
+      'with its team', (tester) async {
+    todoClock = () => DateTime(2026, 11, 18, 10);
+    addTearDown(() => todoClock = DateTime.now);
+    final amina = cloud.addUser(
+      'amina',
+      'amina-pass-1',
+      name: 'Amina',
+      departmentId: 2,
+    );
+    const old = '2026-01-01T00:00:00.000Z';
+    cloud.todos[amina.id] = {
+      1: {
+        'id': 1,
+        'title': 'Good one',
+        'done': false,
+        'changed_at': old,
+        // Wrong types from an old or damaged copy: dropped, not fatal.
+        'extra': {'steps': 'oops', 'pos': 'x', 'starred': 'yes', 'notes': 5},
+      },
+      2: {'id': 'two', 'title': 'No real id', 'changed_at': old},
+    };
+    cloud.teamTodos[2] = {
+      10: {
+        'id': 10,
+        'title': 'Restock paper',
+        'done': false,
+        'changed_at': old,
+        'extra': {},
+        'team': true,
+      },
+    };
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1400, 1100),
+    );
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    container.read(appActionsProvider).selectTab(AppTab.todo);
+    await settle(tester);
+    final list = container.read(todoListProvider.notifier);
+    List<TodoItem> items() => container.read(todoListProvider);
+    expect(items().map((t) => t.title), containsAll(['Good one']));
+    expect(items().where((t) => t.title == 'No real id'), isEmpty);
+    final good = items().singleWhere((t) => t.title == 'Good one');
+    expect(good.steps, isEmpty);
+    expect(good.starred, isFalse);
+    final paper = items().singleWhere((t) => t.team);
+    expect(paper.dept, 2);
+
+    // Ticked offline, then Amina moves to another team before it is sent:
+    // the tick never lands on the new team's list (or the old one).
+    cloud.offline = true;
+    list.toggle(paper.key);
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    cloud.users[amina.id] = AppUser(
+      id: amina.id,
+      username: amina.username,
+      fullName: amina.fullName,
+      role: amina.role,
+      departmentId: 1,
+      reportAccess: amina.reportAccess,
+    );
+    cloud.teamTodos[1] = {};
+    cloud.offline = false;
+    await tester.runAsync(list.refresh);
+    await settle(tester);
+    expect(cloud.teamTodos[2]![10]!['done'], isFalse);
+    expect(cloud.teamTodos[1], isEmpty);
+    expect(items().where((t) => t.team), isEmpty);
+    expect(tester.takeException(), isNull);
+    container.dispose();
+  });
+
   testWidgets('to-do: earlier, overdue, repeats, stars, the team list and '
       'History', (tester) async {
     // Wednesday 18 November, 10:00.
@@ -3568,6 +3717,61 @@ void main() {
     container.dispose();
   });
 
+  testWidgets('daily reports: a refused queued task stays, the rest go, '
+      'and a resend makes no copy', (tester) async {
+    cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1600, 1400),
+    );
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    final outbox = container.read(reportOutboxProvider.notifier);
+
+    cloud.offline = true;
+    // One the server will refuse (no title), one it takes.
+    await tester.runAsync(
+      () => outbox.save(const ActivityReport(description: '')),
+    );
+    await tester.runAsync(
+      () => outbox.save(const ActivityReport(description: 'Ring the bank')),
+    );
+    final queued = container.read(reportOutboxProvider);
+    expect(queued, hasLength(2));
+    final op = queued.last.payload['op'];
+    expect(op, isA<String>());
+
+    cloud.offline = false;
+    await tester.runAsync(outbox.flush);
+    await settle(tester);
+    final left = container.read(reportOutboxProvider);
+    expect(left, hasLength(1), reason: 'the refused one is kept');
+    expect(left.single.error, isNotNull);
+    expect(outbox.refusals.values.single, isNotEmpty);
+    final made = cloud.reports.values.where(
+      (r) => r['description'] == 'Ring the bank',
+    );
+    expect(made, hasLength(1));
+
+    // The same new task sent again (its answer was lost): still one.
+    await tester.runAsync(
+      () => container
+          .read(dailyReportsProvider)
+          .save(
+            ActivityReport(
+              description: 'Ring the bank',
+              clientOp: op as String,
+            ),
+          ),
+    );
+    expect(
+      cloud.reports.values.where((r) => r['description'] == 'Ring the bank'),
+      hasLength(1),
+    );
+    container.dispose();
+  });
+
   testWidgets('daily reports: editing keeps counts for removed outputs', (
     tester,
   ) async {
@@ -3656,6 +3860,46 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(container.read(cloudSyncProvider).adminLinked, isTrue);
+    container.dispose();
+  });
+
+  testWidgets('accounts: a late online sign-in after signing out is ended', (
+    tester,
+  ) async {
+    cloud.addUser('whitney', 'whitney-pw1', role: UserRole.adminTeam);
+    var container = await pumpAccounts(tester, boss);
+    await signIn(tester, 'whitney', 'whitney-pw1');
+    container.dispose();
+
+    cloud.offline = true;
+    await tester.pumpWidget(const SizedBox());
+    container = await pumpAccounts(tester, boss);
+    await signIn(tester, 'whitney', 'whitney-pw1');
+    expect(container.read(currentUserProvider)?.username, 'whitney');
+    cloud.userTokens.clear();
+
+    // Back online; the sign-in is slow, and Whitney signs out meanwhile.
+    cloud.offline = false;
+    final gate = cloud.loginGate = Completer<void>();
+    final sync = container.read(cloudSyncProvider.notifier);
+    late Future<void> running;
+    await tester.runAsync(() async {
+      running = sync.syncNow();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    });
+    expect(cloud.logins.last, 'whitney');
+    await tester.runAsync(sync.signOutUser);
+    gate.complete();
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+    }
+    await tester.runAsync(() => running);
+    await tester.pump(const Duration(seconds: 1));
+    expect(container.read(currentUserProvider), isNull);
+    expect(cloud.userTokens, isEmpty, reason: 'the late sign-in was ended');
     container.dispose();
   });
 

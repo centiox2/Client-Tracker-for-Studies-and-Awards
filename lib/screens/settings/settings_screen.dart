@@ -98,6 +98,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final themeMode = ref.watch(themeModeProvider);
     final target = ref.watch(dailyTargetProvider);
     final lastBackup = ref.watch(lastBackupProvider);
+    // Rebuilt after each sync, so a recovery copy shows when it's made.
+    ref.watch(cloudSyncProvider.select((c) => c.lastSynced));
     final theme = Theme.of(context);
     if (!_targetSeeded) {
       _target.text = target?.toString() ?? '';
@@ -254,8 +256,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         description:
             'A backup is one .json file with everything: staff, weeks, '
             'numbers, notes, revenue, applications and settings, plus — when '
-            'online — daily reports, comments, departments, accounts (no '
-            'passwords) and the activity log. Keep a copy off this device.',
+            'online — daily reports, comments, departments, everyone’s to-do '
+            'lists, accounts (no passwords) and the activity log. Keep a copy '
+            'off this device.',
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -285,6 +288,51 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         '${DateFormat('d MMM y, HH:mm').format(lastBackup)}',
               style: muted,
             ),
+            if (ref.read(cloudSyncProvider.notifier).recovery
+                case final kept?) ...[
+              const SizedBox(height: Dt.s12),
+              Text(
+                'Changes made on this device before '
+                '${DateFormat('d MMM y, HH:mm').format(kept.at)} hadn’t been '
+                'sent when the online data replaced them. They are kept '
+                'here as a backup file: save it to look through, or restore '
+                'it on its own if you need it.',
+                key: const ValueKey('recovery-note'),
+              ),
+              const SizedBox(height: Dt.s8),
+              Wrap(
+                spacing: Dt.s8,
+                runSpacing: Dt.s8,
+                children: [
+                  OutlinedButton.icon(
+                    key: const ValueKey('recovery-save'),
+                    onPressed: () async {
+                      final saved = await deliverFile(
+                        context,
+                        dialogTitle: 'Save kept changes',
+                        fileName:
+                            'client_tracker_kept_changes_'
+                            '${DateFormat('yyyyMMdd_HHmm').format(kept.at)}'
+                            '.json',
+                        extension: 'json',
+                        bytes: Uint8List.fromList(utf8.encode(kept.json)),
+                      );
+                      if (saved && mounted) setState(() {});
+                    },
+                    icon: const Icon(Icons.download_outlined, size: 16),
+                    label: const Text('Save kept changes'),
+                  ),
+                  TextButton(
+                    key: const ValueKey('recovery-discard'),
+                    onPressed: () {
+                      ref.read(cloudSyncProvider.notifier).discardRecovery();
+                      setState(() {});
+                    },
+                    child: const Text('Discard them'),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -717,9 +765,11 @@ class _OnlineSyncSection extends ConsumerWidget {
                           s.pending == 0
                               ? 'This device’s data is replaced with the '
                                     'online data.'
-                              : 'The ${s.pending} change(s) on this device '
-                                    'that haven’t been sent will be lost, '
-                                    'and the online data used instead.',
+                              : 'The online data is used instead of the '
+                                    '${s.pending} change(s) on this device '
+                                    'that haven’t been sent. They are kept '
+                                    'as a copy you can save from Backup & '
+                                    'restore.',
                         ),
                         actions: [
                           TextButton(
@@ -733,7 +783,19 @@ class _OnlineSyncSection extends ConsumerWidget {
                         ],
                       ),
                     );
-                    if (ok == true) await sync.resetFromCloud();
+                    if (ok != true) return;
+                    final done = await sync.resetFromCloud();
+                    if (!done && context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Nothing changed: no connection, or there is no '
+                            'online data yet. This device’s changes are '
+                            'still waiting to be sent.',
+                          ),
+                        ),
+                      );
+                    }
                   },
                   child: const Text('Download fresh copy'),
                 ),

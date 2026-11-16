@@ -11,16 +11,23 @@ Future<String?> saveFileBytes({
   required List<String> extensions,
   required Uint8List bytes,
 }) async {
+  // On Android and iOS the picker hands back a document the app may not be
+  // able to open as a path (scoped storage), so it writes the bytes itself.
+  // On desktop it returns a path and the file is written here.
+  final mobile = Platform.isAndroid || Platform.isIOS;
   final target = await FilePicker.platform.saveFile(
     dialogTitle: dialogTitle,
     fileName: defaultName,
     type: FileType.custom,
     allowedExtensions: extensions,
+    bytes: mobile ? bytes : null,
   );
   if (target == null) return null;
-  File(target)
-    ..createSync(recursive: true)
-    ..writeAsBytesSync(bytes);
+  if (!mobile) {
+    File(target)
+      ..createSync(recursive: true)
+      ..writeAsBytesSync(bytes);
+  }
   return target;
 }
 

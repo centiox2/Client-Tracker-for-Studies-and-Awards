@@ -67,7 +67,7 @@ class TodoStep {
   Map<String, Object?> toJson() => {'t': title, if (done) 'd': true};
 
   static TodoStep fromJson(Map<String, Object?> j) =>
-      TodoStep(j['t'] as String? ?? '', done: j['d'] as bool? ?? false);
+      TodoStep(_str(j['t']) ?? '', done: _bool(j['d']));
 }
 
 const _unset = Object();
@@ -83,6 +83,7 @@ class TodoItem {
     this.deleted = false,
     this.changedAt,
     this.team = false,
+    this.dept,
     this.notes = '',
     this.day,
     this.later = false,
@@ -122,6 +123,11 @@ class TodoItem {
 
   /// On the department's shared list.
   final bool team;
+
+  /// For a shared item: the department whose list it is on. Sent with every
+  /// change, so a change made before moving team never lands on the new
+  /// team's list.
+  final int? dept;
 
   final String notes;
 
@@ -207,6 +213,7 @@ class TodoItem {
     bool? deleted,
     DateTime? changedAt,
     bool? team,
+    Object? dept = _unset,
     String? notes,
     Object? day = _unset,
     bool? later,
@@ -233,6 +240,7 @@ class TodoItem {
     deleted: deleted ?? this.deleted,
     changedAt: changedAt ?? this.changedAt,
     team: team ?? this.team,
+    dept: dept == _unset ? this.dept : dept as int?,
     notes: notes ?? this.notes,
     day: day == _unset ? this.day : day as DateTime?,
     later: later ?? this.later,
@@ -285,6 +293,7 @@ class TodoItem {
     'sent_id': sentId,
     if (deleted) 'deleted': true,
     if (team) 'team': true,
+    if (team && dept != null) 'dept': dept,
     'changed_at': changedAt?.toUtc().toIso8601String(),
     'extra': extra,
     if (reportReview != null) 'report_review': reportReview,
@@ -292,52 +301,65 @@ class TodoItem {
     if (changedBy != null) 'changed_by_name': changedBy,
   };
 
+  /// Reads an item saved on the device or sent by the server. Each field
+  /// is checked for its type, so one bad value (an older version, a damaged
+  /// copy) is dropped instead of making the whole list fail to load. Only a
+  /// missing or non-numeric id throws ([FormatException]).
   factory TodoItem.fromJson(Map<String, Object?> j) {
-    final x = (j['extra'] as Map?)?.cast<String, Object?>() ?? const {};
-    final dueRaw = x['due'] as String?;
-    final client = (x['client'] as Map?)?.cast<String, Object?>();
-    final from = (x['from'] as Map?)?.cast<String, Object?>();
+    final id = j['id'];
+    if (id is! num) throw const FormatException('A to-do without an id');
+    final x = _map(j['extra']) ?? const <String, Object?>{};
+    final dueRaw = _str(x['due']);
+    final client = _map(x['client']);
+    final from = _map(x['from']);
+    final team = _bool(j['team']);
     return TodoItem(
-      id: (j['id'] as num).toInt(),
-      title: j['title'] as String? ?? '',
-      done: j['done'] as bool? ?? false,
-      doneAt: DateTime.tryParse(j['done_at'] as String? ?? '')?.toLocal(),
-      sentId: (j['sent_id'] as num?)?.toInt(),
-      deleted: j['deleted'] as bool? ?? false,
-      team: j['team'] as bool? ?? false,
-      changedAt: DateTime.tryParse(j['changed_at'] as String? ?? '')?.toLocal(),
-      notes: x['notes'] as String? ?? '',
-      day: DateTime.tryParse(x['day'] as String? ?? ''),
-      later: x['later'] as bool? ?? false,
+      id: id.toInt(),
+      title: _str(j['title']) ?? '',
+      done: _bool(j['done']),
+      doneAt: DateTime.tryParse(_str(j['done_at']) ?? '')?.toLocal(),
+      sentId: _int(j['sent_id']),
+      deleted: _bool(j['deleted']),
+      team: team,
+      dept: team ? _int(j['dept']) : null,
+      changedAt: DateTime.tryParse(_str(j['changed_at']) ?? '')?.toLocal(),
+      notes: _str(x['notes']) ?? '',
+      day: DateTime.tryParse(_str(x['day']) ?? ''),
+      later: _bool(x['later']),
       due: DateTime.tryParse(dueRaw ?? ''),
       dueTime: dueRaw != null && dueRaw.contains('T'),
-      starred: x['starred'] as bool? ?? false,
-      pos: (x['pos'] as num?)?.toDouble(),
-      repeat: TodoRepeat.named(x['repeat'] as String?),
+      starred: _bool(x['starred']),
+      pos: (x['pos'] is num) ? (x['pos'] as num).toDouble() : null,
+      repeat: TodoRepeat.named(_str(x['repeat'])),
       steps: [
-        for (final s in (x['steps'] as List? ?? const []).cast<Map>())
-          TodoStep.fromJson(s.cast<String, Object?>()),
+        if (x['steps'] is List)
+          for (final s in x['steps'] as List)
+            if (_map(s) case final m?) TodoStep.fromJson(m),
       ],
       outputs: {
-        for (final e
-            in ((x['outputs'] as Map?)?.cast<String, Object?>() ?? const {})
-                .entries)
+        for (final e in (_map(x['outputs']) ?? const {}).entries)
           if (e.value is num) e.key: (e.value as num).toInt(),
       },
-      clientKey: client?['key'] as String?,
-      clientName: client?['name'] as String?,
-      fromName: from?['name'] as String?,
-      isNew: x['new'] as bool? ?? false,
-      archived: x['archived'] as bool? ?? false,
-      doneBy: x['done_by'] as String?,
-      changedBy: j['changed_by_name'] as String?,
-      spawned: (x['spawned'] as num?)?.toInt(),
-      autoTicked: x['auto_ticked'] as bool? ?? false,
-      reportReview: j['report_review'] as String?,
-      reportStatus: j['report_status'] as String?,
+      clientKey: _str(client?['key']),
+      clientName: _str(client?['name']),
+      fromName: _str(from?['name']),
+      isNew: _bool(x['new']),
+      archived: _bool(x['archived']),
+      doneBy: _str(x['done_by']),
+      changedBy: _str(j['changed_by_name']),
+      spawned: _int(x['spawned']),
+      autoTicked: _bool(x['auto_ticked']),
+      reportReview: _str(j['report_review']),
+      reportStatus: _str(j['report_status']),
     );
   }
 }
+
+String? _str(Object? v) => v is String ? v : null;
+bool _bool(Object? v) => v is bool && v;
+int? _int(Object? v) => v is num ? v.toInt() : null;
+Map<String, Object?>? _map(Object? v) =>
+    v is Map ? {for (final e in v.entries) '${e.key}': e.value} : null;
 
 /// What a typed line means: "Call the embassy tomorrow 3pm !" is the title
 /// "Call the embassy", planned for tomorrow, due at 15:00, starred.

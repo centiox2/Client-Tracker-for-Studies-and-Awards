@@ -551,10 +551,40 @@ class _MyTasksState extends ConsumerState<_MyTasks> {
 
   void _open(ActivityReport t) {
     if (t.pending) {
-      _snack(
-        context,
-        'This one is waiting to be sent. It opens once you’re back online.',
-      );
+      final outbox = ref.read(reportOutboxProvider.notifier);
+      final why = outbox.refusals[t.id];
+      if (why == null) {
+        _snack(
+          context,
+          'This one is waiting to be sent. It opens once you’re back online.',
+        );
+        return;
+      }
+      // Refused online: kept here until the person decides.
+      showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Not sent'),
+          content: Text(
+            '“${t.description}” couldn’t be saved online: $why\n\n'
+            'It stays on this device and is tried again with the others. '
+            'Discard it if it isn’t needed any more.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Keep'),
+            ),
+            FilledButton(
+              key: const ValueKey('discard-queued'),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Discard'),
+            ),
+          ],
+        ),
+      ).then((discard) {
+        if (discard == true && t.id != null) outbox.cancel(t.id!);
+      });
       return;
     }
     _openTask(context, meta, t);
@@ -1374,10 +1404,12 @@ class _TeamTabState extends ConsumerState<_TeamTab> {
 
   Future<void> _export(bool pdf) async {
     final summary = _summary;
-    final entries = _entries;
-    if (summary == null || entries == null || _exporting) return;
+    if (summary == null || _entries == null || _exporting) return;
     setState(() => _exporting = true);
     try {
+      // The screen shows up to 500; the export has every matching task.
+      final entries = await ref.read(dailyReportsProvider).listAll(_listFilter);
+      if (!mounted) return;
       final report = OperationsReport(
         title: _reportTitle,
         periodLabel: _periodLabel,

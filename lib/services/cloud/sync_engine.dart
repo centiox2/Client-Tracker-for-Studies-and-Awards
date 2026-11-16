@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 
 import '../../database/database.dart';
@@ -16,7 +18,10 @@ import 'cloud_api.dart';
 /// - Local edits not yet sent are never overwritten by cloud data.
 /// - A device joins ("connects") once: if the cloud already has data, it
 ///   replaces this device's starter data; if the cloud is empty, the first
-///   admin device uploads everything it has.
+///   admin device uploads everything it has. Work made offline before the
+///   first join is kept as a recovery copy ([recovery]) rather than lost.
+/// - Uploads go one at a time (and never alongside a download), so an
+///   older upload can't land after a newer one.
 class SyncEngine {
   SyncEngine(this._db, this._api);
 
@@ -24,6 +29,70 @@ class SyncEngine {
   final CloudApi _api;
 
   static const _connectedKey = 'connected';
+  static const _recoveryKey = 'recovery_json';
+  static const _recoveryAtKey = 'recovery_at';
+
+  /// One upload or download at a time: when one is running, the next
+  /// waits its turn; when none is, it starts straight away.
+  bool _busy = false;
+  final _waiting = Queue<Completer<void>>();
+
+  Future<T> _serial<T>(Future<T> Function() action) async {
+    if (_busy) {
+      final turn = Completer<void>();
+      _waiting.add(turn);
+      await turn.future;
+    }
+    _busy = true;
+    try {
+      return await action();
+    } finally {
+      if (_waiting.isNotEmpty) {
+        _waiting.removeFirst().complete();
+      } else {
+        _busy = false;
+      }
+    }
+  }
+
+  /// This device's data as it was before cloud data replaced unsent work
+  /// (a backup file's contents), and when; null when there is none.
+  ({String json, DateTime at})? get recovery {
+    final json = _state(_recoveryKey);
+    if (json == null || json.isEmpty) return null;
+    return (
+      json: json,
+      at: DateTime.tryParse(_state(_recoveryAtKey) ?? '') ?? DateTime.now(),
+    );
+  }
+
+  /// The recovery copy has been saved elsewhere or isn't wanted.
+  void clearRecovery() {
+    _db.raw.execute('DELETE FROM sync_state WHERE k IN (?, ?);', [
+      _recoveryKey,
+      _recoveryAtKey,
+    ]);
+  }
+
+  /// Keeps this device's data before it is replaced while changes are
+  /// still waiting to be sent (only the newest such copy is kept).
+  void _keepRecovery() {
+    if (pending == 0 || !_hasWork()) return;
+    _setState(_recoveryKey, _db.exportToJson());
+    _setState(_recoveryAtKey, DateTime.now().toIso8601String());
+  }
+
+  /// Waiting changes that are more than the first-launch staff list.
+  bool _hasWork() =>
+      _db.raw
+          .select("SELECT 1 FROM sync_outbox WHERE tbl <> 'staff' LIMIT 1;")
+          .isNotEmpty ||
+      _db.raw
+          .select(
+            "SELECT 1 FROM sync_outbox o WHERE o.tbl = 'staff' AND NOT EXISTS "
+            "(SELECT 1 FROM sync_state WHERE k = 'staff_seeded') LIMIT 1;",
+          )
+          .isNotEmpty;
 
   bool get connected => _state(_connectedKey) == '1';
 
@@ -36,13 +105,16 @@ class SyncEngine {
   /// brings this device up to date. [token] (devices that edit) lets
   /// waiting local changes go up first. Returns true when local data
   /// changed.
-  Future<bool> pull({String? token, required String readToken}) async {
+  Future<bool> pull({String? token, required String readToken}) =>
+      _serial(() => _pull(token: token, readToken: readToken));
+
+  Future<bool> _pull({String? token, required String readToken}) async {
     if (connected && pending > 0) {
       if (token == null) {
         // Can't send them yet; keep them, and take live updates only.
         return false;
       }
-      await flush(token);
+      await _flush(token);
     }
     final seqBefore = _lastSeq();
     final snap = await _api.snapshot(readToken);
@@ -60,13 +132,18 @@ class SyncEngine {
       }
       return false;
     }
+    // Joining for the first time with changes made here offline: the
+    // cloud's data is the team's, but this device's work is kept.
+    if (!connected) _keepRecovery();
     _replaceLocal(snap);
     _setState(_connectedKey, '1');
     return true;
   }
 
   /// Sends waiting local changes. Returns how many rows went up.
-  Future<int> flush(String token) async {
+  Future<int> flush(String token) => _serial(() => _flush(token));
+
+  Future<int> _flush(String token) async {
     final entries = _db.raw.select(
       'SELECT seq, tbl, pk FROM sync_outbox ORDER BY seq;',
     );
@@ -147,14 +224,18 @@ class SyncEngine {
     }
   }
 
-  /// Drops waiting local changes and takes the cloud's data as it is —
-  /// the way out if a change can't be sent.
-  Future<void> resetFromCloud(String readToken) async {
-    _db.raw.execute('DELETE FROM sync_outbox;');
+  /// Takes the cloud's data as it is in place of waiting local changes —
+  /// the way out if a change can't be sent. Nothing changes here until the
+  /// cloud's data has arrived, and what was waiting is kept as the
+  /// recovery copy. False (and nothing changed) when the cloud has no data.
+  Future<bool> resetFromCloud(String readToken) => _serial(() async {
     final snap = await _api.snapshot(readToken);
-    if (snap.values.any((rows) => rows.isNotEmpty)) _replaceLocal(snap);
+    if (snap.values.every((rows) => rows.isEmpty)) return false;
+    _keepRecovery();
+    _replaceLocal(snap);
     _setState(_connectedKey, '1');
-  }
+    return true;
+  });
 
   // ---------------------------------------------------------------------
 
@@ -165,8 +246,11 @@ class SyncEngine {
         for (final r in _db.raw.select('SELECT * FROM $table;')) _row(r),
       ];
     }
-    _db.raw.execute('DELETE FROM sync_outbox;');
+    final maxSeq = _lastSeq();
     await _api.push(token, {'upserts': upserts, 'deletes': {}});
+    // Sent: only now are the waiting notes done with (edits made meanwhile
+    // stay queued).
+    _db.raw.execute('DELETE FROM sync_outbox WHERE seq <= ?;', [maxSeq]);
   }
 
   void _replaceLocal(Map<String, List<Map<String, Object?>>> snap) {

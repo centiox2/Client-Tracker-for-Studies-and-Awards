@@ -417,11 +417,15 @@ class ApplicationRepository {
   /// application under an old key that matches an incoming one on name,
   /// institution and country takes the new key — with its history — so the
   /// first upload after the change shows no false "removed" and "added".
-  void _carryOverKeys(List<ApplicationCsvRow> rows) {
-    final stored = all();
+  /// Which stored keys the incoming rows take over (new key → old key).
+  /// Reads only; [_carryOverKeys] applies it.
+  Map<String, String> _carryOverMatches(
+    List<ApplicationCsvRow> rows,
+    List<Application> stored,
+  ) {
     final storedKeys = {for (final a in stored) a.key};
     final incomingKeys = {for (final r in rows) r.key};
-    final taken = <String>{};
+    final taken = <String, String>{};
     for (final row in rows) {
       if (storedKeys.contains(row.key)) continue;
       final rto = (row.fields[0] ?? '').toLowerCase();
@@ -430,25 +434,45 @@ class ApplicationRepository {
           .where(
             (a) =>
                 !incomingKeys.contains(a.key) &&
-                !taken.contains(a.key) &&
+                !taken.containsValue(a.key) &&
                 a.student.toLowerCase() == row.student.toLowerCase() &&
                 a.rto.toLowerCase() == rto &&
                 a.country.toLowerCase() == country,
           )
           .firstOrNull;
       if (match == null) continue;
-      taken.add(match.key);
+      taken[row.key] = match.key;
+    }
+    return taken;
+  }
+
+  void _carryOverKeys(List<ApplicationCsvRow> rows) {
+    final matches = _carryOverMatches(rows, all());
+    for (final MapEntry(key: next, value: old) in matches.entries) {
       _db.transaction(() {
         _db.raw.execute(
           'UPDATE applications SET app_key = ? WHERE app_key = ?;',
-          [row.key, match.key],
+          [next, old],
         );
         _db.raw.execute(
           'UPDATE application_changes SET app_key = ? WHERE app_key = ?;',
-          [row.key, match.key],
+          [next, old],
         );
       });
     }
+  }
+
+  /// How many stored applications an upload of [text] would remove, without
+  /// changing anything, so the screen can ask first. Throws
+  /// [ApplicationCsvException] like [importCsv] for a file it can't use.
+  int wouldRemove(String text) {
+    final rows = parseApplicationsCsv(text);
+    final stored = all();
+    final kept = {
+      for (final r in rows) r.key,
+      ..._carryOverMatches(rows, stored).values,
+    };
+    return stored.where((a) => !kept.contains(a.key)).length;
   }
 
   ApplicationImportResult importCsv(String text, {String fileName = ''}) {
@@ -636,6 +660,16 @@ class ApplicationRepository {
         c >= 0,
     ];
 
+    // A row with more fields than the header was split wrongly (a stray
+    // comma or quote), so its values would land in the wrong columns.
+    for (final (i, r) in table.skip(1).indexed) {
+      if (r.length > header.length) {
+        throw ApplicationCsvException(
+          'Row ${i + 2} has ${r.length} fields but the header has '
+          '${header.length}. The file may be damaged. Nothing was changed.',
+        );
+      }
+    }
     String at(List<String> r, int i) => i < 0 || i >= r.length ? '' : r[i];
     final out = <ApplicationCsvRow>[];
     // How each application is recognised from one upload to the next. A
@@ -761,6 +795,15 @@ class ApplicationRepository {
       } else {
         field.write(c);
       }
+    }
+    // A quote that never closes means the file was cut off or damaged: the
+    // rest of it would be read as one field, and the applications after it
+    // removed. Refuse it before anything changes.
+    if (quoted) {
+      throw ApplicationCsvException(
+        'The file looks cut off or damaged: a quoted field is never closed. '
+        'Nothing was changed.',
+      );
     }
     row.add(field.toString());
     if (row.any((f) => f.isNotEmpty)) rows.add(row);

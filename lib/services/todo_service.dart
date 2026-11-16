@@ -46,6 +46,7 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
   bool _online = false;
   TodoSync _sync = TodoSync.device;
   String? _teamName;
+  int? _teamId;
 
   /// Changes not saved online yet, by key (deleted ones included).
   final _dirty = <String, TodoItem>{};
@@ -61,6 +62,7 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
     _sync = _online ? TodoSync.saved : TodoSync.device;
     _loaded = false;
     _teamName = null;
+    _teamId = null;
     _dirty.clear();
     _pushTimer?.cancel();
     ref.onDispose(() => _pushTimer?.cancel());
@@ -97,15 +99,16 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
         // Plain list: an older copy. Else {items, dirty, team}.
         final items = data is List ? data : (data as Map)['items'] as List;
         final dirty = data is Map ? (data['dirty'] as List? ?? []) : [];
-        if (data is Map) _teamName = data['team'] as String?;
-        for (final j in dirty.cast<Map>()) {
-          final t = TodoItem.fromJson(j.cast<String, Object?>());
+        if (data is Map) {
+          final team = data['team'];
+          _teamName = team is String ? team : null;
+          final id = data['team_id'];
+          _teamId = id is num ? id.toInt() : null;
+        }
+        for (final t in _decodeAll(dirty)) {
           _dirty[t.key] = t;
         }
-        state = _sorted([
-          for (final j in items.cast<Map>())
-            TodoItem.fromJson(j.cast<String, Object?>()),
-        ]);
+        state = _sorted(_decodeAll(items));
       }
     } catch (_) {}
     _loaded = true;
@@ -123,8 +126,31 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
         'items': [for (final t in state) t.toJson()],
         'dirty': [for (final t in _dirty.values) t.toJson()],
         'team': _teamName,
+        'team_id': _teamId,
       }),
     );
+  }
+
+  /// Reads each item on its own: one that can't be read is skipped, the
+  /// rest of the list still loads.
+  static List<TodoItem> _decodeAll(
+    Iterable<Object?> raw, {
+    bool team = false,
+  }) => [
+    for (final j in raw)
+      if (j is Map)
+        ?_tryDecode({
+          for (final e in j.entries) '${e.key}': e.value,
+          if (team) 'team': true,
+        }),
+  ];
+
+  static TodoItem? _tryDecode(Map<String, Object?> j) {
+    try {
+      return TodoItem.fromJson(j);
+    } catch (_) {
+      return null;
+    }
   }
 
   static List<TodoItem> _sorted(List<TodoItem> items) =>
@@ -135,7 +161,10 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
     state = _sorted(items);
     if (_online) {
       for (final t in changed) {
-        _dirty[t.key] = t;
+        // A new shared item belongs to the team it was added for.
+        _dirty[t.key] = t.team && t.dept == null && _teamId != null
+            ? t.copyWith(dept: _teamId)
+            : t;
       }
       _setSync(TodoSync.pending);
       _schedulePush();
@@ -188,8 +217,17 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
     if (!sync.enabled) return;
     final sending = Map.of(_dirty);
     try {
+      // Shared items go with the team they were changed for; the server
+      // drops any for a team this person is no longer on. Ones queued by an
+      // older version (no team on them) take the last team known here.
       final result = await sync.callAsUser('todo_sync', {
-        'p_items': [for (final t in sending.values) t.toJson()],
+        'p_items': [
+          for (final t in sending.values)
+            if (t.team && t.dept == null)
+              {...t.toJson(), 'dept': ?_teamId}
+            else
+              t.toJson(),
+        ],
       }) as Map;
       if (owner != _owner) return;
       sending.forEach((k, t) {
@@ -197,12 +235,17 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
       });
       final team = (result['team'] as Map?)?.cast<String, Object?>();
       _teamName = team?['name'] as String?;
+      final teamId = team?['id'];
+      _teamId = teamId is num ? teamId.toInt() : null;
+      final teamItems = team?['items'];
       final server = [
-        for (final j in (result['items'] as List).cast<Map>())
-          TodoItem.fromJson(j.cast<String, Object?>()),
-        for (final j in (team?['items'] as List? ?? const []).cast<Map>())
-          TodoItem.fromJson({...j.cast<String, Object?>(), 'team': true}),
+        ..._decodeAll(result['items'] as List),
+        if (teamItems is List) ..._decodeAll(teamItems, team: true),
       ];
+      // Shared changes for a team this person has left are dropped.
+      _dirty.removeWhere(
+        (_, t) => t.team && t.dept != null && t.dept != _teamId,
+      );
       // What's online, with changes made here since laid on top.
       final byKey = {for (final t in server) t.key: t};
       for (final t in _dirty.values) {

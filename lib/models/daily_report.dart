@@ -216,6 +216,7 @@ class ActivityReport {
     this.commentCount = 0,
     this.lastReviewNote = '',
     this.pending = false,
+    this.clientOp,
   });
 
   final int? id;
@@ -260,6 +261,11 @@ class ActivityReport {
   /// Saved on this device while offline; sent when the connection is back.
   /// A new one has a negative [id] until then.
   final bool pending;
+
+  /// For a new task: this device's name for creating it, sent with every
+  /// try, so the online database saves it once even if a reply was lost
+  /// and it is sent again.
+  final String? clientOp;
 
   bool get isAssigned => assignedBy != null || assignedByName.isNotEmpty;
 
@@ -314,6 +320,7 @@ class ActivityReport {
     commentCount: (json['comment_count'] as num?)?.toInt() ?? 0,
     lastReviewNote: json['last_review_note'] as String? ?? '',
     pending: json['pending'] as bool? ?? false,
+    clientOp: json['client_op'] as String?,
   );
 
   /// The same shape the server sends, to keep a copy on this device.
@@ -344,6 +351,7 @@ class ActivityReport {
     'comment_count': commentCount,
     'last_review_note': lastReviewNote,
     if (pending) 'pending': true,
+    'client_op': ?clientOp,
   };
 
   ActivityReport copyWith({
@@ -362,6 +370,7 @@ class ActivityReport {
     DateTime? date,
     DateTime? submittedAt,
     bool? pending,
+    String? clientOp,
   }) => ActivityReport(
     id: id ?? this.id,
     userId: userId ?? this.userId,
@@ -389,6 +398,7 @@ class ActivityReport {
     commentCount: commentCount,
     lastReviewNote: lastReviewNote,
     pending: pending ?? this.pending,
+    clientOp: clientOp ?? this.clientOp,
   );
 
   /// The same task with another status (one-tap status changes).
@@ -404,6 +414,7 @@ class ActivityReport {
     DateTime? doneOn,
   }) => {
     if (isSaved) 'id': id,
+    if (!isSaved) 'op': ?clientOp,
     'user_id': ?userId,
     'description': description.trim(),
     'details': details.trim(),

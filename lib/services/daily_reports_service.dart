@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -79,6 +80,31 @@ class DailyReportsService {
 
   Future<List<ActivityReport>> list(ReportFilter filter) async =>
       _reports(await _call('report_list', {'p_filter': filter.toJson()}));
+
+  /// Every task matching [filter], fetched [page] at a time (for exports,
+  /// which must not stop at the screen's limit). A task that moves between
+  /// pages while they are read is kept once.
+  Future<List<ActivityReport>> listAll(
+    ReportFilter filter, {
+    int page = 1000,
+    int maxPages = 100,
+  }) async {
+    final seen = <int>{};
+    final out = <ActivityReport>[];
+    for (var i = 0; i < maxPages; i++) {
+      final rows = _reports(
+        await _call('report_list', {
+          'p_filter': {...filter.toJson(), 'limit': page, 'offset': i * page},
+        }),
+      );
+      for (final r in rows) {
+        final id = r.id;
+        if (id == null || seen.add(id)) out.add(r);
+      }
+      if (rows.length < page) break;
+    }
+    return out;
+  }
 
   Future<ReportSummary> summary(
     DateTime from,
@@ -416,6 +442,7 @@ class QueuedTask {
     required this.report,
     required this.payload,
     required this.submit,
+    this.error,
   });
 
   /// How it shows meanwhile ([ActivityReport.pending]; a new one has a
@@ -426,19 +453,43 @@ class QueuedTask {
   final Map<String, Object?> payload;
   final bool submit;
 
-  factory QueuedTask.fromJson(Map<String, Object?> json) => QueuedTask(
-    report: ActivityReport.fromJson(
+  /// Why the online database refused it the last time it was sent (kept
+  /// here until it is changed, sent again or discarded).
+  final String? error;
+
+  QueuedTask withError(String? why) =>
+      QueuedTask(report: report, payload: payload, submit: submit, error: why);
+
+  factory QueuedTask.fromJson(Map<String, Object?> json) {
+    final payload = (json['payload'] as Map).cast<String, Object?>();
+    final report = ActivityReport.fromJson(
       (json['report'] as Map).cast<String, Object?>(),
-    ),
-    payload: (json['payload'] as Map).cast<String, Object?>(),
-    submit: json['submit'] as bool? ?? false,
-  );
+    );
+    return QueuedTask(
+      report: report.clientOp == null && payload['op'] is String
+          ? report.copyWith(clientOp: payload['op'] as String)
+          : report,
+      payload: payload,
+      submit: json['submit'] as bool? ?? false,
+      error: json['error'] as String?,
+    );
+  }
 
   Map<String, Object?> toJson() => {
     'report': report.toJson(),
     'payload': payload,
     'submit': submit,
+    'error': ?error,
   };
+}
+
+/// A name for creating one new task, unique to this device's try.
+String newClientOp() {
+  final r = Random.secure();
+  return [
+    for (var i = 0; i < 16; i++)
+      r.nextInt(256).toRadixString(16).padLeft(2, '0'),
+  ].join();
 }
 
 /// What happened to a save: the task as it is now, and whether it is
@@ -518,6 +569,11 @@ class ReportOutboxNotifier extends Notifier<List<QueuedTask>> {
   }) async {
     await _loading;
     final service = ref.read(dailyReportsProvider);
+    // A new task keeps one name for creating it through every try, online
+    // or queued, so it can only be saved once.
+    if (!report.isSaved && report.clientOp == null) {
+      report = report.copyWith(clientOp: newClientOp());
+    }
     if (report.pending) {
       return (task: _queue(report, submit, note), queued: true);
     }
@@ -588,8 +644,14 @@ class ReportOutboxNotifier extends Notifier<List<QueuedTask>> {
     return true;
   }
 
-  /// Sends what is waiting, oldest first; stops at the first one that
-  /// can't be sent for lack of a connection.
+  /// Refusals that are about the connection or the sign-in, not the task:
+  /// everything waits and is sent again later.
+  static const _tryLater = {'not_signed_in', 'needs_update'};
+
+  /// Sends what is waiting, oldest first. It stops (keeping everything)
+  /// when the connection, the sign-in or the online database isn't ready;
+  /// a task the online database refuses stays here with the reason, to be
+  /// changed or discarded by the person — nothing is thrown away unasked.
   Future<void> flush() async {
     await _loading;
     if (_flushing || state.isEmpty) return;
@@ -601,8 +663,14 @@ class ReportOutboxNotifier extends Notifier<List<QueuedTask>> {
         try {
           await service.saveQueued(q.payload);
         } on CloudException catch (e) {
-          // Refused (it changed online meanwhile): dropped, and said why.
-          refused = describeReportError(e);
+          if (_tryLater.contains(e.code)) break;
+          final why = describeReportError(e);
+          refused = why;
+          state = [
+            for (final x in state) identical(x, q) ? x.withError(why) : x,
+          ];
+          await _store();
+          continue;
         } catch (_) {
           break;
         }
@@ -618,6 +686,12 @@ class ReportOutboxNotifier extends Notifier<List<QueuedTask>> {
     }
     if (sent) ref.read(reportsChangedProvider.notifier).bump();
   }
+
+  /// Why each waiting task was refused, by its id (only those refused).
+  Map<int, String> get refusals => {
+    for (final q in state)
+      if (q.error != null && q.report.id != null) q.report.id!: q.error!,
+  };
 }
 
 /// Tasks deleted a moment ago, hidden while their Undo is offered.

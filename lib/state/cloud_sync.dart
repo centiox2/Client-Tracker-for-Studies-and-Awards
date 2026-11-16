@@ -507,13 +507,24 @@ class CloudSyncController extends Notifier<CloudSyncState> {
         ref.read(currentUserProvider) == null) {
       return true;
     }
+    // Still the same sign-in after the wait? (Signed out, or someone else
+    // signed in meanwhile: this late reply is not theirs.)
+    bool stale() =>
+        !ref.mounted ||
+        !identical(_pendingLogin, pending) ||
+        _userToken != null ||
+        ref.read(currentUserProvider)?.username != pending.username;
     try {
       final signIn = await api.userLogin(
         pending.username,
         pending.password,
         pending.remember,
       );
-      if (!ref.mounted) return false;
+      if (stale()) {
+        // End that online sign-in; nothing here changes.
+        unawaited(api.userLogout(signIn.token).then((_) {}, onError: (_) {}));
+        return ref.mounted;
+      }
       if (signIn.user.mustChange) {
         await signOutUser(
           notice: 'An admin gave you a new password. Sign in with it.',
@@ -535,6 +546,7 @@ class CloudSyncController extends Notifier<CloudSyncState> {
       state = state.copyWith(adminLinked: _pushToken != null);
       return true;
     } on CloudException catch (e) {
+      if (stale()) return ref.mounted;
       // Anything else (a server hiccup, an update not applied yet): stay
       // signed in here and try again on the next connection.
       if (!const {'wrong_password', 'locked', 'deactivated'}.contains(e.code)) {
@@ -863,23 +875,33 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     }
   }
 
-  /// Throws away waiting local changes and downloads the cloud's data.
-  Future<void> resetFromCloud() async {
+  /// This device's data from before cloud data replaced changes that
+  /// hadn't been sent (a backup file's contents), if any.
+  ({String json, DateTime at})? get recovery => _engine?.recovery;
+
+  void discardRecovery() => _engine?.clearRecovery();
+
+  /// Takes the cloud's data in place of waiting local changes (which are
+  /// kept as [recovery]). False when nothing was changed: offline, or the
+  /// online data is empty.
+  Future<bool> resetFromCloud() async {
     final engine = _engine;
     final read = _readToken;
-    if (engine == null || read == null) return;
+    if (engine == null || read == null) return false;
     try {
-      await engine.resetFromCloud(read);
-      if (!ref.mounted) return;
+      if (!await engine.resetFromCloud(read)) return false;
+      if (!ref.mounted) return true;
       _bumpFromRemote();
       state = state.copyWith(
         phase: SyncPhase.live,
         lastSynced: DateTime.now(),
-        pending: 0,
+        pending: engine.pending,
         clearMessage: true,
       );
+      return true;
     } catch (_) {
       if (ref.mounted) state = state.copyWith(phase: SyncPhase.offline);
+      return false;
     }
   }
 

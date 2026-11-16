@@ -93,9 +93,38 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
     setState(() => _busy = true);
     try {
       final text = utf8.decode(bytes, allowMalformed: true);
-      final result = ref
-          .read(applicationRepositoryProvider)
-          .importCsv(text, fileName: fileName);
+      final repo = ref.read(applicationRepositoryProvider);
+      // Applications missing from the file are removed. Ask first when the
+      // upload would remove more than a few, so a partial export (a filtered
+      // view, a cut-off file) can't wipe the list without anyone noticing.
+      final removing = repo.wouldRemove(text);
+      final stored = repo.all().length;
+      if (removing > 0 && (removing >= 10 || removing * 4 >= stored)) {
+        final go = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Remove applications?'),
+            content: Text(
+              'This file is missing $removing of the $stored applications '
+              'stored here, so they would be removed. If you downloaded a '
+              'filtered view, download the full Grid view instead.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                key: const Key('confirm-remove-applications'),
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text('Remove $removing'),
+              ),
+            ],
+          ),
+        );
+        if (go != true || !mounted) return;
+      }
+      final result = repo.importCsv(text, fileName: fileName);
       ref.read(dataVersionProvider.notifier).bump();
       setState(() => _importId = null);
       messenger.showSnackBar(
