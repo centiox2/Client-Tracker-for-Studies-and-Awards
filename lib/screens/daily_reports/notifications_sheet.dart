@@ -85,8 +85,12 @@ class _NotificationsDialogState extends ConsumerState<_NotificationsDialog> {
   Future<void> _open(ReportNotification n) async {
     final id = n.reportId;
     final appActions = ref.read(appActionsProvider);
-    if (id == null) {
+    // The 4 pm reminder: straight to the quick line, ready to type.
+    if (n.kind == NotificationKind.reminder || id == null) {
       Navigator.pop(context);
+      if (n.kind == NotificationKind.reminder) {
+        ref.read(reportFocusProvider.notifier).request(ReportFocus.quickLine);
+      }
       appActions.selectTab(AppTab.dailyReports);
       return;
     }
@@ -94,9 +98,15 @@ class _NotificationsDialogState extends ConsumerState<_NotificationsDialog> {
     try {
       final start = ref.read(reportStartProvider);
       final meta = start?.meta ?? await service.meta();
-      final found = await service.list(ReportFilter(search: '#$id', limit: 1));
+      // The task comes with the notification, so it opens at once.
+      var task = n.report;
+      if (task == null && n.task.isNotEmpty) {
+        final found = await service.list(
+          ReportFilter(search: '#$id', limit: 1),
+        );
+        task = found.where((t) => t.id == id).firstOrNull;
+      }
       if (!mounted) return;
-      final task = found.where((t) => t.id == id).firstOrNull;
       if (task == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('That task has been deleted.')),

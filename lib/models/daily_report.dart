@@ -215,6 +215,7 @@ class ActivityReport {
     this.reviewedAt,
     this.commentCount = 0,
     this.lastReviewNote = '',
+    this.pending = false,
   });
 
   final int? id;
@@ -256,10 +257,17 @@ class ActivityReport {
   /// The reviewer's latest note (approved or returned).
   final String lastReviewNote;
 
+  /// Saved on this device while offline; sent when the connection is back.
+  /// A new one has a negative [id] until then.
+  final bool pending;
+
   bool get isAssigned => assignedBy != null || assignedByName.isNotEmpty;
 
   /// "#123", the number people quote.
-  String get ref => id == null ? '' : '#$id';
+  String get ref => id == null || id! < 0 ? '' : '#$id';
+
+  /// Known to the online database (not only waiting on this device).
+  bool get isSaved => id != null && id! > 0;
 
   /// On the person's list: not done yet, or done but returned to them.
   bool get isOpen => status.isOpen || review == ReviewState.returned;
@@ -305,6 +313,7 @@ class ActivityReport {
     reviewedAt: _date(json['reviewed_at'])?.toLocal(),
     commentCount: (json['comment_count'] as num?)?.toInt() ?? 0,
     lastReviewNote: json['last_review_note'] as String? ?? '',
+    pending: json['pending'] as bool? ?? false,
   );
 
   /// The same shape the server sends, to keep a copy on this device.
@@ -334,6 +343,7 @@ class ActivityReport {
     'reviewed_at': reviewedAt?.toUtc().toIso8601String(),
     'comment_count': commentCount,
     'last_review_note': lastReviewNote,
+    if (pending) 'pending': true,
   };
 
   ActivityReport copyWith({
@@ -346,13 +356,19 @@ class ActivityReport {
     String? blocker,
     TaskUrgency? urgency,
     Object? dueDate = _unset,
+    int? id,
+    int? departmentId,
+    ReviewState? review,
+    DateTime? date,
+    DateTime? submittedAt,
+    bool? pending,
   }) => ActivityReport(
-    id: id,
+    id: id ?? this.id,
     userId: userId ?? this.userId,
     userName: userName,
-    departmentId: departmentId,
+    departmentId: departmentId ?? this.departmentId,
     departmentName: departmentName,
-    date: date,
+    date: date ?? this.date,
     description: description ?? this.description,
     details: details ?? this.details,
     reference: reference ?? this.reference,
@@ -363,15 +379,16 @@ class ActivityReport {
     dueDate: identical(dueDate, _unset) ? this.dueDate : dueDate as DateTime?,
     createdAt: createdAt,
     updatedAt: updatedAt,
-    submittedAt: submittedAt,
+    submittedAt: submittedAt ?? this.submittedAt,
     assignedBy: assignedBy,
     assignedByName: assignedByName,
-    review: review,
+    review: review ?? this.review,
     reviewedBy: reviewedBy,
     reviewedByName: reviewedByName,
     reviewedAt: reviewedAt,
     commentCount: commentCount,
     lastReviewNote: lastReviewNote,
+    pending: pending ?? this.pending,
   );
 
   /// The same task with another status (one-tap status changes).
@@ -379,9 +396,14 @@ class ActivityReport {
 
   /// What is sent to save it. A task with [userId] set to someone else is
   /// assigned to them; [submit] marks it done and sends it for review,
-  /// dated today by the server.
-  Map<String, Object?> toSaveJson({bool submit = false, String note = ''}) => {
-    'id': ?id,
+  /// dated today by the server, or [doneOn] (the day it was done, when it
+  /// was saved offline and sent later).
+  Map<String, Object?> toSaveJson({
+    bool submit = false,
+    String note = '',
+    DateTime? doneOn,
+  }) => {
+    if (isSaved) 'id': id,
     'user_id': ?userId,
     'description': description.trim(),
     'details': details.trim(),
@@ -393,6 +415,7 @@ class ActivityReport {
     'due_date': dueDate == null ? null : dateKey(dueDate!),
     if (submit) 'submit': true,
     if (submit && note.trim().isNotEmpty) 'note': note.trim(),
+    if (submit && doneOn != null) 'done_on': dateKey(doneOn),
   };
 }
 
@@ -609,6 +632,7 @@ class ReportNotification {
     this.actorName = '',
     this.task = '',
     this.urgency,
+    this.report,
   });
 
   final int id;
@@ -622,6 +646,10 @@ class ReportNotification {
   /// The task's title now (empty when it was deleted).
   final String task;
   final TaskUrgency? urgency;
+
+  /// The task as it is now, to open at once (null when deleted or no
+  /// longer visible).
+  final ActivityReport? report;
 
   /// One line: who did what.
   String get title {
@@ -669,6 +697,11 @@ class ReportNotification {
         urgency: json['urgency'] == null
             ? null
             : TaskUrgency.fromCode(json['urgency'] as String?),
+        report: json['report'] is Map
+            ? ActivityReport.fromJson(
+                (json['report'] as Map).cast<String, Object?>(),
+              )
+            : null,
       );
 }
 

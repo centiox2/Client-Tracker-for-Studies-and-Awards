@@ -11,14 +11,20 @@ Future<void> showShortcutsDialog(BuildContext context) => showDialog<void>(
 const _shortcuts = <(String, String)>[
   ('Ctrl K', 'Search: clients, staff, weeks, payments and pages'),
   ('Ctrl 1 – 7', 'Open the pages in the menu, top to bottom'),
-  ('/', 'Quick search'),
-  ('N', 'Revenue: new payment · Weekly tracker, History: new week'),
+  ('/', 'Quick search · Daily reports: search tasks'),
+  (
+    'N',
+    'Revenue: new payment · Weekly tracker, History: new week · Daily '
+        'reports: the quick line',
+  ),
   ('Ctrl N', 'New week'),
   ('Ctrl Z', 'Undo the last number you changed'),
   ('Ctrl V', 'Revenue: read a pasted screenshot or payment message'),
   ('?', 'This list of shortcuts'),
   ('Enter', 'Weekly tracker: move to the next field'),
-  ('Esc', 'Close a dialog'),
+  ('Esc', 'Close a dialog · Daily reports: leave the quick line'),
+  ('Ctrl Enter', 'Daily reports: add as done · Save a task or a submit'),
+  ('↑ ↓, Space', 'Daily reports: move between tasks, tick one'),
 ];
 
 class _ShortcutsDialog extends StatelessWidget {

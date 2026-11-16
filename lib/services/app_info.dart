@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.4.0';
+  static const version = '1.5.0';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,33 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.5.0', 'November 2026', [
+      'Daily reports, quicker: tick a task to submit it. The submit window '
+          'only opens when your department records counts, or with '
+          '"Submit with details".',
+      'The quick line understands what you type: "Lodged visas 3 done" '
+          'submits finished work with its count; "Call embassy tomorrow '
+          'urgent" sets the due day and urgency. It shows what it '
+          'understood before you press Enter.',
+      'Paste a list into the quick line: each line becomes a task.',
+      'No internet? What you add or submit is kept on this device, marked '
+          '"Waiting to send", and sent when you are back online, for the '
+          'day you did it.',
+      'Add activity is shorter: urgency, due date, notes and the reference '
+          'are under "More details". It remembers whether you last chose '
+          'Done today or To do, and the urgency.',
+      'No more "Are you sure?": deleting, closing without saving, changing '
+          'the status and submitting all offer Undo instead.',
+      'Wrap up my day: tick everything you finished and submit it '
+          'together.',
+      'The reference box suggests student names from Applications.',
+      'Tapping a notification opens its task at once; the 4 pm reminder '
+          'opens the quick line, ready to type.',
+      'Keys: N for the quick line, / to search, Enter adds, Ctrl+Enter adds '
+          'it as done, Esc leaves the box, the arrow keys move between tasks '
+          'and Space ticks one.',
+      'The separate Start button is gone: use the status label.',
+    ]),
     Release('1.4.0', 'November 2026', [
       'Daily reports rebuilt around tasks. Tabs: My tasks, My submissions, '
           'Review (for whoever reviews work) and Team.',

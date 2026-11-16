@@ -122,6 +122,22 @@ class DailyReportsService {
     return saved;
   }
 
+  /// Sends what was saved on this device while offline, as it was.
+  Future<ActivityReport> saveQueued(Map<String, Object?> payload) async =>
+      ActivityReport.fromJson(
+        _map(await _call('report_save', {'p_report': payload})),
+      );
+
+  /// Takes back a submission that hasn't been reviewed yet (Undo): it goes
+  /// back on the person's list as Doing.
+  Future<ActivityReport> withdraw(int id) async {
+    final saved = ActivityReport.fromJson(
+      _map(await _call('report_withdraw', {'p_report': id})),
+    );
+    onChanged?.call();
+    return saved;
+  }
+
   /// Approves submitted work, or returns it ([approve] false; [comment]
   /// needed) to the person to do again.
   Future<ActivityReport> review(
@@ -298,10 +314,12 @@ class ReportStartNotifier extends Notifier<ReportsStart?> {
     }
   }
 
-  /// Reads the latest; keeps what's shown if it can't.
+  /// Reads the latest; keeps what's shown if it can't. Anything saved on
+  /// this device while offline is sent first.
   Future<void> refresh() async {
     final seq = ++_seq;
     try {
+      await ref.read(reportOutboxProvider.notifier).flush();
       final start = await ref.read(dailyReportsProvider).start();
       if (seq != _seq) return;
       _error = null;
@@ -388,4 +406,319 @@ String describeReportError(Object e) {
           'the admin to apply the update.',
     _ => 'That didn’t work (${e.code}).',
   };
+}
+
+// ------------------------------------------------------------- Offline ---
+
+/// A task saved on this device while offline, waiting to be sent.
+class QueuedTask {
+  const QueuedTask({
+    required this.report,
+    required this.payload,
+    required this.submit,
+  });
+
+  /// How it shows meanwhile ([ActivityReport.pending]; a new one has a
+  /// negative id).
+  final ActivityReport report;
+
+  /// What is sent (the same as [DailyReportsService.save] sends).
+  final Map<String, Object?> payload;
+  final bool submit;
+
+  factory QueuedTask.fromJson(Map<String, Object?> json) => QueuedTask(
+    report: ActivityReport.fromJson(
+      (json['report'] as Map).cast<String, Object?>(),
+    ),
+    payload: (json['payload'] as Map).cast<String, Object?>(),
+    submit: json['submit'] as bool? ?? false,
+  );
+
+  Map<String, Object?> toJson() => {
+    'report': report.toJson(),
+    'payload': payload,
+    'submit': submit,
+  };
+}
+
+/// What happened to a save: the task as it is now, and whether it is
+/// waiting on this device for the connection.
+typedef SaveOutcome = ({ActivityReport task, bool queued});
+
+/// Tasks added, changed or submitted while offline, kept on this device
+/// (per person) and sent when the connection is back. They show on the
+/// lists meanwhile, marked "Waiting to send".
+final reportOutboxProvider =
+    NotifierProvider<ReportOutboxNotifier, List<QueuedTask>>(
+      ReportOutboxNotifier.new,
+    );
+
+class ReportOutboxNotifier extends Notifier<List<QueuedTask>> {
+  static String _key(int user) => 'daily_reports_outbox_$user';
+
+  int? _user;
+  Future<void>? _loading;
+  bool _flushing = false;
+
+  /// Why something sent later was refused (shown once, then cleared).
+  String? refused;
+
+  @override
+  List<QueuedTask> build() {
+    final me = ref.watch(currentUserProvider)?.id;
+    _user = me;
+    if (me == null) return const [];
+    _loading = _load(me);
+    return const [];
+  }
+
+  Future<void> _load(int me) async {
+    try {
+      final raw = (await SharedPreferences.getInstance()).getString(_key(me));
+      if (raw == null || _user != me) return;
+      final items = [
+        for (final r in jsonDecode(raw) as List)
+          QueuedTask.fromJson((r as Map).cast<String, Object?>()),
+      ];
+      if (_user == me) state = [...items, ...state];
+    } catch (_) {
+      // Unreadable: nothing waiting.
+    }
+  }
+
+  Future<void> _store() async {
+    final me = _user;
+    if (me == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (state.isEmpty) {
+      await prefs.remove(_key(me));
+    } else {
+      await prefs.setString(
+        _key(me),
+        jsonEncode([for (final q in state) q.toJson()]),
+      );
+    }
+  }
+
+  DateTime get _today {
+    final meta = ref.read(reportStartProvider)?.meta;
+    if (meta != null) return meta.today;
+    final n = DateTime.now();
+    return DateTime(n.year, n.month, n.day);
+  }
+
+  /// Saves (or with [submit], submits) [report]; if the connection is down
+  /// it waits on this device instead and is sent later, keeping the day it
+  /// was done. Errors from the online database (not allowed, a title
+  /// needed…) are thrown as usual.
+  Future<SaveOutcome> save(
+    ActivityReport report, {
+    bool submit = false,
+    String note = '',
+  }) async {
+    await _loading;
+    final service = ref.read(dailyReportsProvider);
+    if (report.pending) {
+      return (task: _queue(report, submit, note), queued: true);
+    }
+    try {
+      final saved = submit
+          ? await service.submit(report, note: note)
+          : await service.save(report);
+      return (task: saved, queued: false);
+    } on CloudException {
+      rethrow;
+    } catch (_) {
+      // No connection: kept here and sent later.
+      return (task: _queue(report, submit, note), queued: true);
+    }
+  }
+
+  ActivityReport _queue(ActivityReport report, bool submit, String note) {
+    final today = _today;
+    // A change to something already waiting replaces it.
+    final old = state.where((q) => q.report.id == report.id).firstOrNull;
+    final submitting =
+        submit || (old?.submit ?? false) && !report.status.isOpen;
+    final minId = state.fold<int>(
+      0,
+      (m, q) => (q.report.id ?? 0) < m ? q.report.id! : m,
+    );
+    final id = report.id ?? minId - 1;
+    final me = ref.read(reportStartProvider)?.meta;
+    final shown = report.copyWith(
+      departmentId: report.departmentId ?? me?.myDepartmentId,
+      id: id,
+      pending: true,
+      userId: report.userId ?? me?.myId,
+      status: submitting ? ReportStatus.done : report.status,
+      review: submitting ? ReviewState.submitted : null,
+      date: submitting ? today : null,
+      submittedAt: submitting ? DateTime.now() : null,
+    );
+    final payload = shown.toSaveJson(
+      submit: submitting,
+      note: note,
+      doneOn: submitting ? today : null,
+    );
+    final item = QueuedTask(
+      report: shown,
+      payload: payload,
+      submit: submitting,
+    );
+    state = [
+      for (final q in state)
+        if (q.report.id != id) q,
+      item,
+    ];
+    unawaited(_store());
+    ref.read(reportsChangedProvider.notifier).bump();
+    return shown;
+  }
+
+  /// Takes back something waiting to be sent (Undo). True if it was there.
+  bool cancel(int id) {
+    final before = state.length;
+    state = [
+      for (final q in state)
+        if (q.report.id != id) q,
+    ];
+    if (state.length == before) return false;
+    unawaited(_store());
+    return true;
+  }
+
+  /// Sends what is waiting, oldest first; stops at the first one that
+  /// can't be sent for lack of a connection.
+  Future<void> flush() async {
+    await _loading;
+    if (_flushing || state.isEmpty) return;
+    _flushing = true;
+    var sent = false;
+    try {
+      final service = ref.read(dailyReportsProvider);
+      for (final q in [...state]) {
+        try {
+          await service.saveQueued(q.payload);
+        } on CloudException catch (e) {
+          // Refused (it changed online meanwhile): dropped, and said why.
+          refused = describeReportError(e);
+        } catch (_) {
+          break;
+        }
+        sent = true;
+        state = [
+          for (final x in state)
+            if (!identical(x, q)) x,
+        ];
+        await _store();
+      }
+    } finally {
+      _flushing = false;
+    }
+    if (sent) ref.read(reportsChangedProvider.notifier).bump();
+  }
+}
+
+/// Tasks deleted a moment ago, hidden while their Undo is offered.
+final reportHiddenProvider = NotifierProvider<ReportHiddenNotifier, Set<int>>(
+  ReportHiddenNotifier.new,
+);
+
+class ReportHiddenNotifier extends Notifier<Set<int>> {
+  @override
+  Set<int> build() => const {};
+
+  void hide(int id) => state = {...state, id};
+  void show(int id) => state = {...state}..remove(id);
+}
+
+/// What the page shows: the latest from [reportStartProvider], with what is
+/// waiting to be sent and without what was just deleted.
+final reportViewProvider = Provider<ReportsStart?>((ref) {
+  final start = ref.watch(reportStartProvider);
+  if (start == null) return null;
+  final queued = ref.watch(reportOutboxProvider);
+  final hidden = ref.watch(reportHiddenProvider);
+  if (queued.isEmpty && hidden.isEmpty) return start;
+  final replaced = {for (final q in queued) q.report.id};
+  bool keep(ActivityReport t) =>
+      !hidden.contains(t.id) && !replaced.contains(t.id);
+  final waiting = [
+    for (final q in queued)
+      if (!hidden.contains(q.report.id)) q.report,
+  ];
+  return ReportsStart(
+    meta: start.meta,
+    badge: start.badge,
+    tasks: [...waiting.where((t) => t.isOpen), ...start.tasks.where(keep)],
+    submissions: [
+      ...waiting.where((t) => t.isSubmitted),
+      ...start.submissions.where(keep),
+    ],
+  );
+});
+
+// ------------------------------------------------------- Remembered ---
+
+/// The last choices in Add activity, kept per person on this device:
+/// Done today or To do, and the urgency.
+typedef ReportChoices = ({String mode, TaskUrgency urgency});
+
+final reportChoicesProvider =
+    NotifierProvider<ReportChoicesNotifier, ReportChoices>(
+      ReportChoicesNotifier.new,
+    );
+
+class ReportChoicesNotifier extends Notifier<ReportChoices> {
+  static const _default = (mode: 'done', urgency: TaskUrgency.normal);
+  static String _key(int user) => 'daily_reports_choices_$user';
+
+  @override
+  ReportChoices build() {
+    final me = ref.watch(currentUserProvider)?.id;
+    if (me != null) unawaited(_load(me));
+    return _default;
+  }
+
+  Future<void> _load(int me) async {
+    try {
+      final raw = (await SharedPreferences.getInstance()).getString(_key(me));
+      if (raw == null) return;
+      final j = (jsonDecode(raw) as Map).cast<String, Object?>();
+      state = (
+        mode: j['mode'] as String? ?? 'done',
+        urgency: TaskUrgency.fromCode(j['urgency'] as String?),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> remember({String? mode, TaskUrgency? urgency}) async {
+    state = (mode: mode ?? state.mode, urgency: urgency ?? state.urgency);
+    final me = ref.read(currentUserProvider)?.id;
+    if (me == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _key(me),
+      jsonEncode({'mode': state.mode, 'urgency': state.urgency.code}),
+    );
+  }
+}
+
+// ----------------------------------------------------------- Requests ---
+
+/// Asks the Daily reports page to put the cursor somewhere: the quick line
+/// (the N key, the 4 pm reminder) or the search (the / key).
+enum ReportFocus { quickLine, search }
+
+final reportFocusProvider = NotifierProvider<ReportFocusNotifier, ReportFocus?>(
+  ReportFocusNotifier.new,
+);
+
+class ReportFocusNotifier extends Notifier<ReportFocus?> {
+  @override
+  ReportFocus? build() => null;
+
+  void request(ReportFocus f) => state = f;
+  void done() => state = null;
 }

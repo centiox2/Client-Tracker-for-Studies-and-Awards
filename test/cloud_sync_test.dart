@@ -9,6 +9,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:excel/excel.dart';
 import 'package:client_tracker/app.dart';
 import 'package:client_tracker/services/daily_report_export.dart';
+import 'package:client_tracker/services/daily_reports_service.dart';
+import 'package:client_tracker/screens/daily_reports/report_editor.dart'
+    show UrgencyPill;
 import 'package:client_tracker/database/app_database_io.dart';
 import 'package:client_tracker/database/database.dart';
 import 'package:client_tracker/repositories/auth_repository.dart';
@@ -552,9 +555,9 @@ class FakeCloud implements CloudApi {
               (c['kind'] == 'returned' || c['kind'] == 'approved'),
         )
         .lastOrNull?['body'],
-    'department_name': departments.firstWhere(
-      (d) => d['id'] == r['department_id'],
-    )['name'],
+    'department_name': departments
+        .where((d) => d['id'] == r['department_id'])
+        .firstOrNull?['name'],
   };
 
   bool _isOpen(Map<String, Object?> r) =>
@@ -634,6 +637,11 @@ class FakeCloud implements CloudApi {
                 'actor_name': users[n['actor_id']]?.fullName,
                 'task': reports[n['report_id']]?['description'],
                 'urgency': reports[n['report_id']]?['urgency'],
+                'report':
+                    reports[n['report_id']] == null ||
+                        !_canSeeTask(uid, reports[n['report_id']]!)
+                    ? null
+                    : _reportJson(reports[n['report_id']]!),
               },
         ];
       case 'report_notifications_read':
@@ -893,7 +901,18 @@ class FakeCloud implements CloudApi {
         if (submit) {
           if (owner != uid) throw CloudException('not_allowed');
           reviewState = 'submitted';
-          reportDate = t;
+          // Saved offline and sent later: the day it was done (a week
+          // back at most).
+          final doneOn = r['done_on'] as String?;
+          reportDate =
+              doneOn != null &&
+                  doneOn.compareTo(t) <= 0 &&
+                  doneOn.compareTo(
+                        _day(today.subtract(const Duration(days: 7))),
+                      ) >=
+                      0
+              ? doneOn
+              : t;
           submittedAt = now;
         } else if (status != 'done' && reviewState == 'approved') {
           reviewState = 'none';
@@ -957,6 +976,43 @@ class FakeCloud implements CloudApi {
           _notify(assigned, 'submitted', sid, uid, title);
         }
         return _reportJson(saved);
+      case 'report_withdraw':
+        final id = p['p_report'] as int;
+        final r = reports[id];
+        if (r == null) throw CloudException('unknown_report');
+        if (r['user_id'] != uid) throw CloudException('not_allowed');
+        if (r['review'] != 'submitted') throw CloudException('not_submitted');
+        final lastReview = comments
+            .where(
+              (c) =>
+                  c['report_id'] == id &&
+                  ['approved', 'returned'].contains(c['kind']),
+            )
+            .lastOrNull;
+        final now = _now();
+        r
+          ..['review'] = lastReview?['kind'] == 'returned' ? 'returned' : 'none'
+          ..['status'] = 'in_progress'
+          ..['report_date'] = null
+          ..['submitted_at'] = null
+          ..['updated_at'] = now;
+        final sub = comments
+            .where((c) => c['report_id'] == id && c['kind'] == 'submitted')
+            .lastOrNull;
+        if (sub != null) comments.remove(sub);
+        notifications.removeWhere(
+          (n) =>
+              n['report_id'] == id &&
+              n['kind'] == 'submitted' &&
+              n['read'] != true,
+        );
+        reportChanges.add({
+          'report_id': id,
+          'action': 'withdrawn',
+          'changed_by': me.fullName,
+          'changed_at': now,
+        });
+        return _reportJson(r);
       case 'report_review':
         final id = p['p_report'] as int;
         final r = reports[id];
@@ -1864,7 +1920,7 @@ void main() {
   Map<String, Object?> seedReport(
     int id,
     int userId,
-    int dept, {
+    int? dept, {
     String status = 'done',
     String review = 'submitted',
     String? date = '2026-11-09',
@@ -1947,12 +2003,16 @@ void main() {
     // Add activity done: submitted at once, dated today.
     await tester.tap(find.byKey(const ValueKey('add-activity')));
     await tester.pumpAndSettle();
-    expect(find.text('Add activity'), findsOneWidget);
+    expect(find.widgetWithText(AlertDialog, 'Add activity'), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('report-description')),
       'Lodged visa applications',
     );
     await enterCount(tester, 'output-visa_lodgements', '3');
+    // Urgency, notes and reference are behind More.
+    expect(find.byKey(const ValueKey('urgency-high')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('report-more')));
+    await tester.pump();
     await tester.tap(find.byKey(const ValueKey('urgency-high')));
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('report-save')));
@@ -1973,6 +2033,24 @@ void main() {
       find.byKey(const ValueKey('report-description')),
       'Call the embassy',
     );
+    // The urgency used last is remembered (shown beside More details).
+    expect(find.byKey(const ValueKey('urgency-high')), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(UrgencyPill),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('report-more')));
+    await tester.pump();
+    expect(
+      tester
+          .widget<ChoiceChip>(find.byKey(const ValueKey('urgency-high')))
+          .selected,
+      isTrue,
+    );
+    await tester.tap(find.byKey(const ValueKey('urgency-normal')));
     await tester.tap(find.byKey(const ValueKey('due-Tomorrow')));
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('report-save-another')));
@@ -2017,8 +2095,19 @@ void main() {
     expect(printIt['urgency'], 'urgent');
     expect(printIt['status'], 'to_do');
 
-    // Start it: one tap.
-    await tester.tap(find.byKey(ValueKey('start-${call['id']}')));
+    // No Start button: the status menu sets Doing, with Undo.
+    expect(find.byKey(ValueKey('start-${call['id']}')), findsNothing);
+    await tester.tap(find.byKey(ValueKey('status-menu-${call['id']}')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Doing').last);
+    await settle(tester);
+    expect(cloud.reports[call['id']]!['status'], 'in_progress');
+    await tester.tap(find.byKey(const ValueKey('report-undo')));
+    await settle(tester);
+    expect(cloud.reports[call['id']]!['status'], 'to_do');
+    await tester.tap(find.byKey(ValueKey('status-menu-${call['id']}')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Doing').last);
     await settle(tester);
     expect(cloud.reports[call['id']]!['status'], 'in_progress');
 
@@ -2842,7 +2931,7 @@ void main() {
     await tester.tap(find.text('Close').last);
     await settle(tester);
 
-    // Cancel after typing asks first.
+    // Cancel after typing doesn't ask: Undo brings the draft back.
     await openReportsTab(tester, 'My tasks');
     await tester.tap(find.byKey(const ValueKey('add-activity')));
     await tester.pumpAndSettle();
@@ -2852,16 +2941,284 @@ void main() {
     );
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
-    expect(find.text('Discard what you typed?'), findsOneWidget);
-    await tester.tap(find.text('Keep editing'));
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.text('Not saved.'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('report-undo')));
     await tester.pumpAndSettle();
     expect(find.text('Half typed'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('discard-report')));
-    await tester.pumpAndSettle();
-    expect(find.text('Add activity'), findsNothing);
+    expect(find.byType(AlertDialog), findsNothing);
     expect(cloud.reports, hasLength(2));
+    container.dispose();
+  });
+
+  testWidgets('daily reports: quick line, tick, undo, paste, wrap up, '
+      'offline, keys, notifications', (tester) async {
+    cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1600, 2000),
+    );
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    final quick = find.byKey(const ValueKey('quick-task'));
+    Future<void> type(String text) async {
+      await tester.enterText(quick, text);
+      await tester.pump();
+    }
+
+    Future<void> enter() async {
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await settle(tester);
+    }
+
+    // "done" and a count: submitted at once, the count in its place.
+    await type('Lodged visas 3 done');
+    expect(find.byKey(const ValueKey('quick-preview')), findsOneWidget);
+    expect(find.textContaining('Visa lodgements 3'), findsOneWidget);
+    await enter();
+    final lodged = cloud.reports.values.single;
+    expect(lodged['description'], 'Lodged visas');
+    expect(lodged['outputs'], {'visa_lodgements': 3});
+    expect(lodged['review'], 'submitted');
+    // Undo: it was new, so it goes.
+    await tester.tap(find.byKey(const ValueKey('report-undo')));
+    await settle(tester);
+    expect(cloud.reports, isEmpty);
+
+    // A due day and an urgency in words.
+    await type('Call embassy tomorrow urgent');
+    await enter();
+    final call = cloud.reports.values.single;
+    expect(call['description'], 'Call embassy');
+    expect(call['urgency'], 'urgent');
+    expect(call['due_date'], '2026-11-10');
+    expect(call['status'], 'to_do');
+    final callId = call['id'] as int;
+
+    // A pasted list: a task per line.
+    await type('Book flights\nRenew passport\n- Email the school');
+    await settle(tester);
+    expect(cloud.reports, hasLength(4));
+    expect(
+      cloud.reports.values.map((r) => r['description']),
+      containsAll(['Book flights', 'Renew passport', 'Email the school']),
+    );
+    expect(find.text('Added 3 tasks'), findsOneWidget);
+    expect(tester.widget<TextField>(quick).controller!.text, isEmpty);
+    int idOf(String title) =>
+        cloud.reports.values.firstWhere((r) => r['description'] == title)['id']
+            as int;
+    final flights = idOf('Book flights');
+    final passport = idOf('Renew passport');
+    final school = idOf('Email the school');
+
+    // The department records counts, so ticking asks for them.
+    await tester.tap(find.byKey(ValueKey('tick-$callId')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('submit-confirm')), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    // Delete: hidden at once, Undo keeps it.
+    await tester.tap(find.byKey(ValueKey('report-$school')));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('delete-report')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(ValueKey('report-$school')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('report-undo')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(ValueKey('report-$school')), findsOneWidget);
+    expect(cloud.reports.containsKey(school), isTrue);
+    // Without Undo it goes when the message does.
+    await tester.tap(find.byKey(ValueKey('report-$school')));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('delete-report')));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 8));
+    await settle(tester);
+    expect(cloud.reports.containsKey(school), isFalse);
+
+    // Wrap up my day: what's Doing is ticked already.
+    await tester.tap(find.byKey(ValueKey('status-menu-$flights')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Doing').last);
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('wrap-up')));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<CheckboxListTile>(find.byKey(ValueKey('wrap-$flights')))
+          .value,
+      isTrue,
+    );
+    await tester.tap(find.byKey(ValueKey('wrap-$passport')));
+    await tester.pump();
+    await tester.enterText(
+      find.byKey(ValueKey('wrap-$passport-visa_lodgements')),
+      '2',
+    );
+    expect(find.text('Submit 2 tasks'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('wrap-submit')));
+    await settle(tester);
+    expect(cloud.reports[flights]!['review'], 'submitted');
+    expect(cloud.reports[passport]!['review'], 'submitted');
+    expect(cloud.reports[passport]!['outputs'], {'visa_lodgements': 2});
+    // Undo takes both back.
+    await tester.tap(find.byKey(const ValueKey('report-undo')));
+    await settle(tester);
+    expect(cloud.reports[flights]!['review'], 'none');
+    expect(cloud.reports[passport]!['status'], 'in_progress');
+    expect(
+      cloud.reportChanges.where((c) => c['action'] == 'withdrawn'),
+      hasLength(2),
+    );
+
+    // Offline: kept on this device, shown, and sent later for that day.
+    cloud.offline = true;
+    await type('Scanned passports done');
+    await enter();
+    expect(
+      cloud.reports.values.where(
+        (r) => r['description'] == 'Scanned passports',
+      ),
+      isEmpty,
+    );
+    expect(find.byKey(const ValueKey('section-waiting')), findsOneWidget);
+    expect(find.textContaining('sent when you’re back online'), findsOneWidget);
+    cloud.offline = false;
+    await tester.tap(find.byKey(const ValueKey('reports-refresh')));
+    await settle(tester);
+    final scanned = cloud.reports.values.firstWhere(
+      (r) => r['description'] == 'Scanned passports',
+    );
+    expect(scanned['review'], 'submitted');
+    expect(scanned['report_date'], '2026-11-09');
+    expect(container.read(reportOutboxProvider), isEmpty);
+    expect(find.textContaining('Waiting to send'), findsNothing);
+
+    // Keys: Esc leaves the quick line, N comes back to it, Down to the
+    // cards, / to search.
+    await tester.tap(quick);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'my tasks');
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'quick line');
+    // Enter adds; Ctrl+Enter adds it as done.
+    await tester.enterText(quick, 'Ring the bank');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await settle(tester);
+    expect(
+      cloud.reports.values.where((r) => r['description'] == 'Ring the bank'),
+      hasLength(1),
+    );
+    await tester.enterText(quick, 'Filed the receipts');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await settle(tester);
+    expect(
+      cloud.reports.values.firstWhere(
+        (r) => r['description'] == 'Filed the receipts',
+      )['review'],
+      'submitted',
+    );
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'quick line');
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, startsWith('task '));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, startsWith('task '));
+    // Space ticks the card (here: its counts first).
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('submit-confirm')), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, startsWith('task '));
+    await tester.sendKeyEvent(LogicalKeyboardKey.slash);
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'task search');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+
+    // A notification opens its task without looking it up, and the
+    // reminder opens the quick line.
+    cloud.notifications.addAll([
+      {
+        'id': 90,
+        'user_id': 1,
+        'kind': 'assigned',
+        'report_id': callId,
+        'actor_id': 1,
+        'body': 'Call embassy',
+        'created_at': '2026-11-09T08:00:00Z',
+        'read': false,
+      },
+      {
+        'id': 91,
+        'user_id': 1,
+        'kind': 'reminder',
+        'report_id': null,
+        'actor_id': null,
+        'body': 'Nothing submitted yet today',
+        'created_at': '2026-11-09T13:00:00Z',
+        'read': false,
+      },
+    ]);
+    await tester.tap(find.byKey(const ValueKey('report-bell')));
+    await settle(tester);
+    final lists = cloud.calls.where((c) => c == 'report_list').length;
+    await tester.tap(find.byKey(const ValueKey('notification-90')));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('task-id')), findsOneWidget);
+    expect(cloud.calls.where((c) => c == 'report_list').length, lists);
+    await tester.tap(find.text('Close').last);
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('notification-91')));
+    await settle(tester);
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'quick line');
+    container.dispose();
+  });
+
+  testWidgets('daily reports: one tap finishes a task when there are no '
+      'counts', (tester) async {
+    cloud.addUser('ken', 'ken-pass-1', name: 'Ken');
+    cloud.reports[5] = seedReport(5, 1, null, status: 'to_do');
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1600, 1400),
+    );
+    await signIn(tester, 'ken', 'ken-pass-1');
+    await settle(tester);
+    container.read(navTabProvider.notifier).set(AppTab.dailyReports);
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('tick-5')));
+    await settle(tester);
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(cloud.reports[5]!['review'], 'submitted');
+    expect(cloud.reports[5]!['report_date'], '2026-11-09');
+    expect(find.byKey(const ValueKey('report-5')), findsNothing);
+    // Undo: back on the list as Doing.
+    await tester.tap(find.byKey(const ValueKey('report-undo')));
+    await settle(tester);
+    expect(cloud.reports[5]!['review'], 'none');
+    expect(cloud.reports[5]!['status'], 'in_progress');
+    expect(find.byKey(const ValueKey('report-5')), findsOneWidget);
+    expect(
+      cloud.comments.where(
+        (c) => c['report_id'] == 5 && c['kind'] == 'submitted',
+      ),
+      isEmpty,
+    );
     container.dispose();
   });
 

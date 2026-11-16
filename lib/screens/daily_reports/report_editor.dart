@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -50,6 +52,183 @@ bool canReviewTask(ReportsMeta meta, ActivityReport task) =>
         meta.scope == ReportScope.all ||
         (meta.scope == ReportScope.department &&
             task.departmentId == meta.myDepartmentId));
+
+/// A short message at the bottom of the screen, with Undo when [onUndo]
+/// is set. It goes away by itself.
+ScaffoldFeatureController<SnackBar, SnackBarClosedReason> reportSnack(
+  ScaffoldMessengerState messenger,
+  String text, {
+  VoidCallback? onUndo,
+}) {
+  // A new message replaces the last (a queue would show Undo too late).
+  messenger.clearSnackBars();
+  return messenger.showSnackBar(
+    SnackBar(
+      content: Text(text),
+      duration: Duration(seconds: onUndo == null ? 4 : 6),
+      persist: false,
+      action: onUndo == null
+          ? null
+          : SnackBarAction(
+              key: const ValueKey('report-undo'),
+              label: 'Undo',
+              onPressed: onUndo,
+            ),
+    ),
+  );
+}
+
+/// What was saved, in words.
+String savedMessage(ActivityReport saved) => saved.pending
+    ? 'Saved on this device. It’s sent when you’re back online.'
+    : saved.isSubmitted
+    ? '${saved.ref} submitted for review'
+    : 'Added ${saved.ref} to your list';
+
+/// The task actions that offer Undo afterwards instead of asking first.
+/// Holds what it needs, so Undo still works after the page or dialog that
+/// started it has closed.
+class TaskActions {
+  TaskActions(BuildContext context, WidgetRef ref)
+    : messenger = ScaffoldMessenger.of(context),
+      _service = ref.read(dailyReportsProvider),
+      _outbox = ref.read(reportOutboxProvider.notifier),
+      _hidden = ref.read(reportHiddenProvider.notifier);
+
+  final ScaffoldMessengerState messenger;
+  final DailyReportsService _service;
+  final ReportOutboxNotifier _outbox;
+  final ReportHiddenNotifier _hidden;
+
+  void snack(String text, {VoidCallback? onUndo}) =>
+      reportSnack(messenger, text, onUndo: onUndo);
+
+  void error(Object e) => snack(describeReportError(e));
+
+  Future<SaveOutcome> save(ActivityReport t, {bool submit = false}) =>
+      _outbox.save(t, submit: submit);
+
+  /// "#12 submitted · Undo". [created]: it was new, so Undo deletes it;
+  /// otherwise Undo takes the submission back.
+  void submitted(SaveOutcome o, {bool created = false}) =>
+      snack(savedMessage(o.task), onUndo: () => undo(o, created: created));
+
+  /// "Added #12 · Undo" for a new task.
+  void added(SaveOutcome o) =>
+      snack(savedMessage(o.task), onUndo: () => undo(o, created: true));
+
+  /// Takes back a save: what's waiting on this device is dropped, a new
+  /// task is deleted, a submission withdrawn.
+  Future<void> undo(SaveOutcome o, {bool created = false}) async {
+    final id = o.task.id;
+    if (id == null) return;
+    if (o.queued || o.task.pending) {
+      _outbox.cancel(id);
+      return;
+    }
+    try {
+      if (created) {
+        await _service.delete(id);
+      } else {
+        await _service.withdraw(id);
+      }
+    } catch (e) {
+      error(e);
+    }
+  }
+
+  /// Several at once (Wrap up my day, a pasted list).
+  Future<void> undoAll(List<SaveOutcome> all, {bool created = false}) async {
+    for (final o in all) {
+      await undo(o, created: created);
+    }
+  }
+
+  /// Hides [t] at once and deletes it when the Undo has gone.
+  void delete(ActivityReport t) {
+    final id = t.id;
+    if (id == null) return;
+    if (!t.isSaved) {
+      _outbox.cancel(id);
+      snack('Removed it.');
+      return;
+    }
+    _hidden.hide(id);
+    var undone = false;
+    final shown = reportSnack(
+      messenger,
+      'Deleted task ${t.ref}',
+      onUndo: () {
+        undone = true;
+        _hidden.show(id);
+      },
+    );
+    shown.closed.then((_) async {
+      if (undone) return;
+      try {
+        await _service.delete(id);
+      } catch (e) {
+        _hidden.show(id);
+        error(e);
+      }
+    });
+  }
+
+  /// Sets [t]'s status ("#12 is now doing · Undo").
+  Future<void> setStatus(ActivityReport t, ReportStatus s) async {
+    try {
+      final o = await _outbox.save(t.withStatus(s));
+      snack(
+        o.queued
+            ? savedMessage(o.task)
+            : '${t.ref} is now ${s.label.toLowerCase()}',
+        onUndo: () async {
+          if (o.queued && !t.isSaved) {
+            await _outbox.save(o.task.withStatus(t.status));
+          } else if (o.queued) {
+            _outbox.cancel(t.id!);
+          } else {
+            try {
+              await _outbox.save(o.task.withStatus(t.status));
+            } catch (e) {
+              error(e);
+            }
+          }
+        },
+      );
+    } catch (e) {
+      error(e);
+    }
+  }
+}
+
+/// Finishes [task] in one tap: submitted straight away, with Undo. The
+/// submit window (what you did, counts) opens instead when the department
+/// records counts, or with [details].
+Future<void> finishTask(
+  BuildContext context,
+  WidgetRef ref, {
+  required ReportsMeta meta,
+  required ActivityReport task,
+  bool details = false,
+}) async {
+  final actions = TaskActions(context, ref);
+  final dept = meta.department(task.departmentId ?? meta.myDepartmentId);
+  if (details || (dept?.outputs.isNotEmpty ?? false)) {
+    final o = await showSubmitDialog(context, meta: meta, task: task);
+    if (o != null) actions.submitted(o);
+    return;
+  }
+  try {
+    final o = await actions.save(
+      task.withStatus(ReportStatus.done),
+      submit: true,
+    );
+    actions.submitted(o);
+  } catch (e) {
+    actions.error(e);
+  }
+}
 
 /// A small coloured label.
 class TaskPill extends StatelessWidget {
@@ -123,6 +302,9 @@ class UrgencyPill extends StatelessWidget {
   }
 }
 
+/// From this width a card's labels and buttons sit beside its title.
+const double _wide = 520;
+
 /// One task as a card: its number, urgency label,
 /// title, who and when, where it is, and what can be done next.
 class TaskCard extends StatelessWidget {
@@ -134,6 +316,8 @@ class TaskCard extends StatelessWidget {
     this.showPerson = false,
     this.actions = const [],
     this.onStatus,
+    this.onTick,
+    this.focusNode,
   });
 
   final ActivityReport task;
@@ -148,6 +332,12 @@ class TaskCard extends StatelessWidget {
 
   /// Set: the status pill is a menu that changes the status in one tap.
   final ValueChanged<ReportStatus>? onStatus;
+
+  /// Set: a tick box before the title finishes the task in one tap.
+  final VoidCallback? onTick;
+
+  /// For moving between cards with the arrow keys.
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -282,138 +472,187 @@ class TaskCard extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           key: t.id == null ? null : ValueKey('report-${t.id}'),
+          focusNode: focusNode,
           onTap: onTap,
           child: Container(
             decoration: BoxDecoration(
               border: Border.all(color: c.border),
               borderRadius: BorderRadius.circular(Dt.rMd),
             ),
-            padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+            padding: EdgeInsets.fromLTRB(onTick == null ? 14 : 4, 10, 12, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                LayoutBuilder(
-                  builder: (context, box) {
-                    final title = Text.rich(
-                      TextSpan(
-                        children: [
-                          if (t.id != null)
-                            TextSpan(
-                              text: '${t.ref}  ',
-                              style: TextStyle(
-                                color: c.textMuted,
-                                fontWeight: FontWeight.w600,
-                                fontFeatures: const [
-                                  FontFeature.tabularFigures(),
-                                ],
-                              ),
-                            ),
-                          TextSpan(text: t.description),
-                        ],
+                if (onTick != null)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 2),
+                    child: SizedBox(
+                      width: 36,
+                      height: 24,
+                      child: Checkbox(
+                        key: ValueKey('tick-${t.id}'),
+                        value: false,
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.padded,
+                        semanticLabel: 'Done: submit ${t.description}',
+                        onChanged: (_) => onTick!(),
                       ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        height: 1.3,
-                      ),
-                    );
-                    final pills = Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      alignment: WrapAlignment.end,
-                      children: [
-                        if (t.urgency != TaskUrgency.normal)
-                          UrgencyPill(t.urgency),
-                        if (t.review == ReviewState.none ||
-                            t.review == ReviewState.returned)
-                          statusPill(),
-                        if (t.review != ReviewState.none)
-                          TaskPill(
-                            t.review == ReviewState.submitted
-                                ? 'Awaiting review'
-                                : t.review.label,
-                            reviewColor(t.review, theme),
-                            icon: switch (t.review) {
-                              ReviewState.approved => Icons.verified,
-                              ReviewState.returned => Icons.undo,
-                              _ => Icons.hourglass_top,
-                            },
-                          ),
-                      ],
-                    );
-                    // Narrow (phones): the labels go under the title, so
-                    // the title keeps the width.
-                    if (box.maxWidth < 520) {
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [title, const SizedBox(height: 6), pills],
-                      );
-                    }
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(child: title),
-                        const SizedBox(width: 8),
-                        pills,
-                      ],
-                    );
-                  },
-                ),
-                if (info.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text.rich(TextSpan(children: info), style: muted),
-                ],
-                if (t.details.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    t.details,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
-                  ),
-                ],
-                if (outputs.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    outputs,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: c.textSecondary,
-                      fontWeight: FontWeight.w500,
                     ),
                   ),
-                ],
-                if (t.status == ReportStatus.blocked && t.blocker.isNotEmpty)
-                  note(
-                    'Blocked:',
-                    t.blocker,
-                    scheme.error,
-                    scheme.error.withValues(alpha: 0.08),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      LayoutBuilder(
+                        builder: (context, box) {
+                          final title = Text.rich(
+                            TextSpan(
+                              children: [
+                                if (t.id != null)
+                                  TextSpan(
+                                    text: '${t.ref}  ',
+                                    style: TextStyle(
+                                      color: c.textMuted,
+                                      fontWeight: FontWeight.w600,
+                                      fontFeatures: const [
+                                        FontFeature.tabularFigures(),
+                                      ],
+                                    ),
+                                  ),
+                                TextSpan(text: t.description),
+                              ],
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              height: 1.3,
+                            ),
+                          );
+                          final pills = Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            alignment: WrapAlignment.end,
+                            children: [
+                              if (t.pending)
+                                TaskPill(
+                                  'Waiting to send',
+                                  c.textMuted,
+                                  key: ValueKey('pending-${t.id}'),
+                                  icon: Icons.cloud_upload_outlined,
+                                ),
+                              if (t.urgency != TaskUrgency.normal)
+                                UrgencyPill(t.urgency),
+                              if (t.review == ReviewState.none ||
+                                  t.review == ReviewState.returned)
+                                statusPill(),
+                              if (t.review != ReviewState.none &&
+                                  !(t.pending && t.isSubmitted))
+                                TaskPill(
+                                  t.review == ReviewState.submitted
+                                      ? 'Awaiting review'
+                                      : t.review.label,
+                                  reviewColor(t.review, theme),
+                                  icon: switch (t.review) {
+                                    ReviewState.approved => Icons.verified,
+                                    ReviewState.returned => Icons.undo,
+                                    _ => Icons.hourglass_top,
+                                  },
+                                ),
+                            ],
+                          );
+                          // Narrow (phones): the labels go under the title, so
+                          // the title keeps the width.
+                          if (box.maxWidth < _wide) {
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                title,
+                                const SizedBox(height: 6),
+                                pills,
+                              ],
+                            );
+                          }
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(child: title),
+                              const SizedBox(width: 8),
+                              pills,
+                              for (final a in actions) ...[
+                                const SizedBox(width: 6),
+                                a,
+                              ],
+                            ],
+                          );
+                        },
+                      ),
+                      if (info.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text.rich(TextSpan(children: info), style: muted),
+                      ],
+                      if (t.details.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          t.details,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                      if (outputs.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          outputs,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: c.textSecondary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                      if (t.status == ReportStatus.blocked &&
+                          t.blocker.isNotEmpty)
+                        note(
+                          'Blocked:',
+                          t.blocker,
+                          scheme.error,
+                          scheme.error.withValues(alpha: 0.08),
+                        ),
+                      if (t.review == ReviewState.returned)
+                        note(
+                          'Returned${t.reviewedByName.isEmpty ? '' : ' by ${t.reviewedByName}'}:',
+                          t.lastReviewNote.isEmpty ? '—' : t.lastReviewNote,
+                          scheme.error,
+                          scheme.error.withValues(alpha: 0.08),
+                        ),
+                      if (t.review == ReviewState.approved &&
+                          t.lastReviewNote.isNotEmpty)
+                        note(
+                          'Approved${t.reviewedByName.isEmpty ? '' : ' by ${t.reviewedByName}'}:',
+                          t.lastReviewNote,
+                          Dt.statusGreen(theme.brightness),
+                          c.positiveBg,
+                        ),
+                      // Wide: the buttons sit beside the labels instead.
+                      if (actions.isNotEmpty)
+                        LayoutBuilder(
+                          builder: (context, box) => box.maxWidth >= _wide
+                              ? const SizedBox.shrink()
+                              : Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: Wrap(
+                                    alignment: WrapAlignment.end,
+                                    spacing: 8,
+                                    runSpacing: 6,
+                                    children: actions,
+                                  ),
+                                ),
+                        ),
+                    ],
                   ),
-                if (t.review == ReviewState.returned)
-                  note(
-                    'Returned${t.reviewedByName.isEmpty ? '' : ' by ${t.reviewedByName}'}:',
-                    t.lastReviewNote.isEmpty ? '—' : t.lastReviewNote,
-                    scheme.error,
-                    scheme.error.withValues(alpha: 0.08),
-                  ),
-                if (t.review == ReviewState.approved &&
-                    t.lastReviewNote.isNotEmpty)
-                  note(
-                    'Approved${t.reviewedByName.isEmpty ? '' : ' by ${t.reviewedByName}'}:',
-                    t.lastReviewNote,
-                    Dt.statusGreen(theme.brightness),
-                    c.positiveBg,
-                  ),
-                if (actions.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Wrap(
-                    alignment: WrapAlignment.end,
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: actions,
-                  ),
-                ],
+                ),
               ],
             ),
           ),
@@ -452,64 +691,113 @@ Future<ActivityReport?> showReportEditor(
   ActivityReport? template,
   bool assign = false,
   int? assignTo,
-  TaskMode mode = TaskMode.done,
+  TaskMode? mode,
+  ReportDraft? draft,
 }) => showDialog<ActivityReport>(
   context: context,
   barrierDismissible: false,
   builder: (_) => _ReportEditor(
+    host: context,
     meta: meta,
     existing: existing,
     template: template,
     assign: assign,
     assignTo: assignTo,
     mode: mode,
+    draft: draft,
   ),
 );
 
+/// What was typed in the editor when it was closed, to bring it back with
+/// Undo.
+class ReportDraft {
+  const ReportDraft({
+    required this.task,
+    required this.mode,
+    required this.people,
+    required this.assign,
+    this.existing,
+  });
+
+  final ActivityReport task;
+  final TaskMode mode;
+  final Set<int> people;
+  final bool assign;
+  final ActivityReport? existing;
+}
+
 class _ReportEditor extends ConsumerStatefulWidget {
   const _ReportEditor({
+    required this.host,
     required this.meta,
     this.existing,
     this.template,
     this.assign = false,
     this.assignTo,
-    this.mode = TaskMode.done,
+    this.mode,
+    this.draft,
   });
 
+  /// Where it was opened from (to open it again with Undo).
+  final BuildContext host;
   final ReportsMeta meta;
   final ActivityReport? existing;
   final ActivityReport? template;
   final bool assign;
   final int? assignTo;
-  final TaskMode mode;
+
+  /// Null: the one used last.
+  final TaskMode? mode;
+  final ReportDraft? draft;
 
   @override
   ConsumerState<_ReportEditor> createState() => _ReportEditorState();
 }
 
 class _ReportEditorState extends ConsumerState<_ReportEditor> {
-  late final ActivityReport? _e = widget.existing;
-  late final ActivityReport? _from = _e ?? widget.template;
-  late final bool _assign = widget.assign && _e == null;
-  late TaskMode _mode = widget.mode;
+  late final ReportDraft? _draft = widget.draft;
+  late final ActivityReport? _e = _draft?.existing ?? widget.existing;
+  // What it starts from: a draft brought back, the task, or a copy.
+  late final ActivityReport? _from = _draft?.task ?? _e ?? widget.template;
+  late final ActivityReport? _full = _draft?.task ?? _e;
+  late final bool _assign = (_draft?.assign ?? widget.assign) && _e == null;
+  late final ReportChoices _choices = ref.read(reportChoicesProvider);
+  late TaskMode _mode =
+      _draft?.mode ??
+      widget.mode ??
+      TaskMode.values.firstWhere(
+        (m) => m.name == _choices.mode,
+        orElse: () => TaskMode.done,
+      );
   late final _title = TextEditingController(text: _from?.description);
-  late final _details = TextEditingController(text: _e?.details);
+  late final _details = TextEditingController(text: _full?.details);
   late final _reference = TextEditingController(text: _from?.reference);
-  late final _blocker = TextEditingController(text: _e?.blocker);
+  late final _blocker = TextEditingController(text: _full?.blocker);
+  final _referenceFocus = FocusNode();
   final _personSearch = TextEditingController();
-  late final Set<int> _people = {?widget.assignTo};
-  late ReportStatus _status = _e?.status.isOpen == true
-      ? _e!.status
+  late final Set<int> _people = {...?_draft?.people, ?widget.assignTo};
+  late ReportStatus _status = _full?.status.isOpen == true
+      ? _full!.status
       : ReportStatus.toDo;
-  late TaskUrgency _urgency = _from?.urgency ?? TaskUrgency.normal;
-  late DateTime? _due = _e?.dueDate;
+  late TaskUrgency _urgency =
+      _from?.urgency ??
+      (_isNew && !_assign ? _choices.urgency : TaskUrgency.normal);
+  late DateTime? _due = _full?.dueDate;
   late final Department? _dept = widget.meta.department(
     _e?.departmentId ?? (_assign ? null : widget.meta.myDepartmentId),
   );
   late final Map<String, int> _outputs = {
     for (final o in _dept?.outputs ?? const <OutputField>[])
-      o.key: _e?.outputs[o.key] ?? 0,
+      o.key: _full?.outputs[o.key] ?? 0,
   };
+
+  /// Urgency, due date, notes and reference show (new tasks of your own
+  /// keep them behind "More" unless something is already in them).
+  late bool _more =
+      !_isNew ||
+      _details.text.isNotEmpty ||
+      _reference.text.isNotEmpty ||
+      _due != null;
   bool _busy = false;
   String? _error;
 
@@ -548,34 +836,34 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
     _details.dispose();
     _reference.dispose();
     _blocker.dispose();
+    _referenceFocus.dispose();
     _personSearch.dispose();
     super.dispose();
   }
 
-  Future<void> _close() async {
+  /// Closes it. What was typed isn't asked about: Undo brings it back.
+  void _close() {
     if (_busy) return;
-    if (_snapshot != _opened) {
-      final discard = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Discard what you typed?'),
-          content: const Text('This task won’t be saved.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Keep editing'),
-            ),
-            FilledButton(
-              key: const ValueKey('discard-report'),
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Discard'),
-            ),
-          ],
-        ),
-      );
-      if (discard != true || !mounted) return;
-    }
+    final changed = _snapshot != _opened && _title.text.trim().isNotEmpty;
+    final draft = ReportDraft(
+      task: _build(),
+      mode: _mode,
+      people: {..._people},
+      assign: _assign,
+      existing: _e,
+    );
+    final messenger = ScaffoldMessenger.of(context);
+    final host = widget.host;
+    final meta = widget.meta;
     Navigator.of(context).pop(_added.lastOrNull);
+    if (!changed) return;
+    reportSnack(
+      messenger,
+      _isNew ? 'Not saved.' : 'Changes not saved.',
+      onUndo: () {
+        if (host.mounted) showReportEditor(host, meta: meta, draft: draft);
+      },
+    );
   }
 
   DateTime get _today => widget.meta.today;
@@ -621,6 +909,7 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
 
   ActivityReport _build({int? forUser}) => ActivityReport(
     id: _e?.id,
+    pending: _e?.pending ?? false,
     userId: forUser ?? _e?.userId,
     description: _title.text,
     details: _details.text,
@@ -651,16 +940,22 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
     if (error != null || _busy) return;
     setState(() => _busy = true);
     final service = ref.read(dailyReportsProvider);
+    final outbox = ref.read(reportOutboxProvider.notifier);
+    if (_isNew && !_assign) {
+      unawaited(
+        ref
+            .read(reportChoicesProvider.notifier)
+            .remember(mode: _mode.name, urgency: _urgency),
+      );
+    }
     try {
       ActivityReport? last;
       if (_assign) {
         for (final person in _people) {
           last = await service.save(_build(forUser: person));
         }
-      } else if (_submitting) {
-        last = await service.submit(_build());
       } else {
-        last = await service.save(_build());
+        last = (await outbox.save(_build(), submit: _submitting)).task;
       }
       if (!mounted) return;
       if (another && last != null) {
@@ -675,7 +970,6 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
             _outputs[k] = 0;
           }
           _due = null;
-          _urgency = TaskUrgency.normal;
         });
         return;
       }
@@ -837,75 +1131,102 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
                 ],
               ),
             ],
-            _label(theme, 'Urgency'),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final u in TaskUrgency.values)
-                  ChoiceChip(
-                    key: ValueKey('urgency-${u.code}'),
-                    showCheckmark: false,
-                    avatar: Icon(
-                      Icons.circle,
-                      size: 12,
-                      color: u.color(theme.brightness),
+            if (!_more && !_assign)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Wrap(
+                  spacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Tooltip(
+                      message: _submitting
+                          ? 'Urgency, notes and a reference'
+                          : 'Urgency, a due date, notes and a reference',
+                      child: TextButton.icon(
+                        key: const ValueKey('report-more'),
+                        onPressed: _busy
+                            ? null
+                            : () => setState(() => _more = true),
+                        icon: const Icon(Icons.expand_more, size: 18),
+                        label: const Text('More details'),
+                      ),
                     ),
-                    label: Text(u.label),
-                    selected: _urgency == u,
-                    selectedColor: u
-                        .color(theme.brightness)
-                        .withValues(alpha: 0.18),
-                    onSelected: _busy
-                        ? null
-                        : (_) => setState(() => _urgency = u),
-                  ),
-              ],
-            ),
-            if (showDue) ...[
-              _label(theme, 'Due'),
+                    if (_urgency != TaskUrgency.normal) UrgencyPill(_urgency),
+                  ],
+                ),
+              ),
+            if (_more || _assign) ...[
+              _label(theme, 'Urgency'),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
-                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  for (final (label, day) in _quickDues)
+                  for (final u in TaskUrgency.values)
                     ChoiceChip(
-                      key: ValueKey('due-$label'),
-                      label: Text(label),
-                      selected: _due == day,
+                      key: ValueKey('urgency-${u.code}'),
+                      showCheckmark: false,
+                      avatar: Icon(
+                        Icons.circle,
+                        size: 12,
+                        color: u.color(theme.brightness),
+                      ),
+                      label: Text(u.label),
+                      selected: _urgency == u,
+                      selectedColor: u
+                          .color(theme.brightness)
+                          .withValues(alpha: 0.18),
                       onSelected: _busy
                           ? null
-                          : (_) =>
-                                setState(() => _due = _due == day ? null : day),
-                    ),
-                  ActionChip(
-                    key: const ValueKey('report-due'),
-                    avatar: const Icon(Icons.event, size: 16),
-                    label: Text(
-                      _due == null || _quickDues.any((q) => q.$2 == _due)
-                          ? 'Pick a date'
-                          : taskDay(_due!, today: _today),
-                    ),
-                    onPressed: _busy ? null : _pickDue,
-                  ),
-                  if (_due != null)
-                    TextButton(
-                      onPressed: _busy
-                          ? null
-                          : () => setState(() => _due = null),
-                      child: const Text('No due date'),
+                          : (_) => setState(() => _urgency = u),
                     ),
                 ],
               ),
-              if (_due != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    'Due ${_dayYearFormat.format(_due!)}',
-                    style: muted,
-                  ),
+              if (showDue) ...[
+                _label(theme, 'Due'),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    for (final (label, day) in _quickDues)
+                      ChoiceChip(
+                        key: ValueKey('due-$label'),
+                        label: Text(label),
+                        selected: _due == day,
+                        onSelected: _busy
+                            ? null
+                            : (_) => setState(
+                                () => _due = _due == day ? null : day,
+                              ),
+                      ),
+                    ActionChip(
+                      key: const ValueKey('report-due'),
+                      avatar: const Icon(Icons.event, size: 16),
+                      label: Text(
+                        _due == null || _quickDues.any((q) => q.$2 == _due)
+                            ? 'Pick a date'
+                            : taskDay(_due!, today: _today),
+                      ),
+                      onPressed: _busy ? null : _pickDue,
+                    ),
+                    if (_due != null)
+                      TextButton(
+                        onPressed: _busy
+                            ? null
+                            : () => setState(() => _due = null),
+                        child: const Text('No due date'),
+                      ),
+                  ],
                 ),
+                if (_due != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      'Due ${_dayYearFormat.format(_due!)}',
+                      style: muted,
+                    ),
+                  ),
+              ],
             ],
             if (showOutputs) ...[
               _label(theme, 'Counts (where you can count them)'),
@@ -934,39 +1255,39 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
                 ),
               ),
             ],
-            const SizedBox(height: 12),
-            TextField(
-              key: const ValueKey('report-details'),
-              controller: _details,
-              enabled: !_busy,
-              minLines: 2,
-              maxLines: 6,
-              maxLength: 4000,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(
-                labelText: _submitting
-                    ? 'What you did (optional)'
-                    : 'Notes (optional)',
-                hintText: _submitting
-                    ? 'Details the reviewer should know'
-                    : _assign
-                    ? 'Instructions, what “done” looks like'
-                    : 'Anything to remember about it',
+            if (_assign && !_more)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  key: const ValueKey('report-more'),
+                  onPressed: _busy ? null : () => setState(() => _more = true),
+                  icon: const Icon(Icons.expand_more, size: 18),
+                  label: const Text('Instructions, reference'),
+                ),
               ),
-            ),
-            TextField(
-              key: const ValueKey('report-reference'),
-              controller: _reference,
-              enabled: !_busy,
-              maxLength: 200,
-              decoration: const InputDecoration(
-                labelText: 'Reference (optional)',
-                helperText:
-                    'Student, application or case reference. No passport '
-                    'numbers or other personal details.',
-                helperMaxLines: 2,
+            if (_more) ...[
+              const SizedBox(height: 12),
+              TextField(
+                key: const ValueKey('report-details'),
+                controller: _details,
+                enabled: !_busy,
+                minLines: 2,
+                maxLines: 6,
+                maxLength: 4000,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: InputDecoration(
+                  labelText: _submitting
+                      ? 'What you did (optional)'
+                      : 'Notes (optional)',
+                  hintText: _submitting
+                      ? 'Details the reviewer should know'
+                      : _assign
+                      ? 'Instructions, what “done” looks like'
+                      : 'Anything to remember about it',
+                ),
               ),
-            ),
+              _referenceField(),
+            ],
             if (_error != null) ...[
               const SizedBox(height: 8),
               Text(
@@ -1004,6 +1325,75 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
       ],
     );
   }
+
+  /// Student names from Applications, for whoever may open it.
+  late final List<String> _students = () {
+    final user = ref.read(currentUserProvider);
+    if (!(user?.mayOpen(AppTab.applications.name) ?? true)) {
+      return const <String>[];
+    }
+    try {
+      final names = <String>{
+        for (final a in ref.read(applicationRepositoryProvider).all())
+          if (a.student.trim().isNotEmpty) a.student.trim(),
+      };
+      return names.toList()..sort();
+    } catch (_) {
+      return const <String>[];
+    }
+  }();
+
+  Widget _referenceField() => RawAutocomplete<String>(
+    textEditingController: _reference,
+    focusNode: _referenceFocus,
+    optionsBuilder: (value) {
+      final q = value.text.trim().toLowerCase();
+      if (q.length < 2 || _students.isEmpty) return const [];
+      return _students
+          .where((n) => n.toLowerCase().contains(q) && n.toLowerCase() != q)
+          .take(6);
+    },
+    fieldViewBuilder: (context, controller, focus, onSubmit) => TextField(
+      key: const ValueKey('report-reference'),
+      controller: controller,
+      focusNode: focus,
+      enabled: !_busy,
+      maxLength: 200,
+      decoration: InputDecoration(
+        labelText: 'Reference (optional)',
+        helperText: _students.isEmpty
+            ? 'Student, application or case reference. No passport '
+                  'numbers or other personal details.'
+            : 'Start typing a student’s name, or a case reference. No '
+                  'passport numbers or other personal details.',
+        helperMaxLines: 2,
+      ),
+    ),
+    optionsViewBuilder: (context, onSelected, options) => Align(
+      alignment: Alignment.topLeft,
+      child: Material(
+        elevation: 4,
+        borderRadius: BorderRadius.circular(Dt.rSm),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 240, maxWidth: 420),
+          child: ListView(
+            padding: EdgeInsets.zero,
+            shrinkWrap: true,
+            children: [
+              for (final o in options)
+                ListTile(
+                  key: ValueKey('reference-option-$o'),
+                  dense: true,
+                  leading: const Icon(Icons.school_outlined, size: 18),
+                  title: Text(o),
+                  onTap: () => onSelected(o),
+                ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 
   List<Widget> _peoplePicker(ThemeData theme, TextStyle? muted) {
     final query = _personSearch.text.trim().toLowerCase();
@@ -1155,12 +1545,12 @@ class _StepperState extends State<_Stepper> {
 // -------------------------------------------------------------- Submit ---
 
 /// Marks [task] done and sends it for review, after the person says what
-/// they did. Returns the submitted task.
-Future<ActivityReport?> showSubmitDialog(
+/// they did. Returns how it went (it may be waiting to send).
+Future<SaveOutcome?> showSubmitDialog(
   BuildContext context, {
   required ReportsMeta meta,
   required ActivityReport task,
-}) => showDialog<ActivityReport>(
+}) => showDialog<SaveOutcome>(
   context: context,
   barrierDismissible: false,
   builder: (_) => _SubmitDialog(meta: meta, task: task),
@@ -1204,8 +1594,9 @@ class _SubmitDialogState extends ConsumerState<_SubmitDialog> {
     final t = widget.task;
     try {
       final saved = await ref
-          .read(dailyReportsProvider)
-          .submit(
+          .read(reportOutboxProvider.notifier)
+          .save(
+            submit: true,
             t.copyWith(
               details: _details.text,
               outputs: {
@@ -1551,8 +1942,7 @@ class _ReportDetailsState extends ConsumerState<_ReportDetails> {
     }
   }
 
-  void _snack(String text) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  void _snack(String text) => reportSnack(ScaffoldMessenger.of(context), text);
 
   Future<void> _sendComment() async {
     final id = _task.id;
@@ -1643,14 +2033,24 @@ class _ReportDetailsState extends ConsumerState<_ReportDetails> {
   }
 
   Future<void> _submit() async {
-    final saved = await showSubmitDialog(
-      context,
-      meta: widget.meta,
-      task: _task,
-    );
-    if (saved != null && mounted) {
-      _after(saved);
-      _snack('${saved.ref} submitted for review');
+    final actions = TaskActions(context, ref);
+    final o = await showSubmitDialog(context, meta: widget.meta, task: _task);
+    if (o != null && mounted) {
+      _after(o.task);
+      actions.submitted(o);
+    }
+  }
+
+  /// Takes back a submission that hasn't been reviewed yet.
+  Future<void> _withdraw() async {
+    try {
+      final saved = await ref.read(dailyReportsProvider).withdraw(_task.id!);
+      if (mounted) {
+        _after(saved);
+        _snack('${saved.ref} is back on your list');
+      }
+    } catch (e) {
+      if (mounted) _snack(describeReportError(e));
     }
   }
 
@@ -1662,46 +2062,11 @@ class _ReportDetailsState extends ConsumerState<_ReportDetails> {
     }
   }
 
-  Future<void> _start() async {
-    try {
-      final saved = await ref
-          .read(dailyReportsProvider)
-          .save(_task.withStatus(ReportStatus.inProgress));
-      if (mounted) _after(saved);
-    } catch (e) {
-      if (mounted) _snack(describeReportError(e));
-    }
-  }
-
-  Future<void> _delete() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Delete task ${_task.ref}?'),
-        content: const Text(
-          'It’s removed from everyone’s lists. The change is kept in the '
-          'audit trail.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: const ValueKey('confirm-delete-report'),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-    try {
-      await ref.read(dailyReportsProvider).delete(_task.id!);
-      if (mounted) Navigator.pop(context, true);
-    } catch (e) {
-      if (mounted) _snack(describeReportError(e));
-    }
+  /// Closes and deletes it, with Undo.
+  void _delete() {
+    final actions = TaskActions(context, ref);
+    Navigator.pop(context, true);
+    actions.delete(_task);
   }
 
   @override
@@ -1930,11 +2295,11 @@ class _ReportDetailsState extends ConsumerState<_ReportDetails> {
             onPressed: _edit,
             child: const Text('Edit'),
           ),
-        if (_mine && t.status == ReportStatus.toDo && _canSubmit)
-          OutlinedButton(
-            key: const ValueKey('start-report'),
-            onPressed: _start,
-            child: const Text('Start'),
+        if (_mine && t.isSubmitted && t.isSaved)
+          TextButton(
+            key: const ValueKey('withdraw-report'),
+            onPressed: _withdraw,
+            child: const Text('Take back'),
           ),
         if (_canReview) ...[
           OutlinedButton.icon(

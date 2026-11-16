@@ -417,10 +417,11 @@ void main() {
       newClients: 3,
       existingClients: 4,
     );
-    await pumpApp(tester, admin: false);
-    await tester.tap(find.text('Staff').first);
+    final container = await pumpApp(tester, admin: false);
+    // (Not by the word "Staff": on a Monday Overview shows it too.)
+    container.read(navTabProvider.notifier).set(AppTab.staff);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Talaam'));
+    await tester.tap(find.byTooltip('View Talaam’s profile'));
     await tester.pumpAndSettle();
     expect(find.text('Clients, all time'), findsOneWidget);
     expect(find.text('Average by weekday'), findsOneWidget);

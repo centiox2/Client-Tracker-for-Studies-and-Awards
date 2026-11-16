@@ -356,12 +356,25 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     }
     final key = event.logicalKey;
     final char = event.character;
+    final onReports = ref.read(navTabProvider) == AppTab.dailyReports;
     if (key == LogicalKeyboardKey.slash && char != '?') {
+      if (onReports) {
+        // Daily reports: its own search box.
+        ref.read(reportFocusProvider.notifier).request(ReportFocus.search);
+        return KeyEventResult.handled;
+      }
       showQuickSearch(context);
       return KeyEventResult.handled;
     }
     if (char == '?') {
       showShortcutsDialog(context);
+      return KeyEventResult.handled;
+    }
+    // Daily reports: N puts the cursor in the quick line (for everyone).
+    if (key == LogicalKeyboardKey.keyN &&
+        onReports &&
+        !HardwareKeyboard.instance.isAltPressed) {
+      ref.read(reportFocusProvider.notifier).request(ReportFocus.quickLine);
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.keyN &&
