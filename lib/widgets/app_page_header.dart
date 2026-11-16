@@ -15,6 +15,7 @@ import 'week_label.dart';
 String pageTitle(AppTab tab) => switch (tab) {
   AppTab.home => 'Overview',
   AppTab.dailyReports => 'Daily reports',
+  AppTab.todo => 'To-do',
   AppTab.revenue => 'Revenue',
   AppTab.applications => 'Applications',
   AppTab.week => 'Weekly tracker',

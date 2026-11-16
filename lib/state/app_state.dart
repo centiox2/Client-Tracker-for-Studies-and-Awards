@@ -182,6 +182,7 @@ class SessionNotifier extends Notifier<UserRole?> {
 enum AppTab {
   home,
   dailyReports,
+  todo,
   week,
   revenue,
   applications,

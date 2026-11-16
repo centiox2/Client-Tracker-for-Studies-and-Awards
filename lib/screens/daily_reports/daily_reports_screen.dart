@@ -43,14 +43,43 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
   Timer? _searchDebounce;
   String _query = '';
 
+  /// The search box shows once the search button (or /) is pressed.
+  bool _searchOpen = false;
+
+  void _openSearch() {
+    setState(() => _searchOpen = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _searchFocus.requestFocus();
+    });
+  }
+
+  void _closeSearch() {
+    _searchDebounce?.cancel();
+    _search.clear();
+    setState(() {
+      _query = '';
+      _searchOpen = false;
+    });
+  }
+
+  /// While this page is open, checks for news more often than the badge
+  /// does elsewhere, so a submission or a return shows within seconds.
+  Timer? _live;
+  static const liveEvery = Duration(seconds: 15);
+
   @override
   void initState() {
     super.initState();
     _onFocusRequest(ref.read(reportFocusProvider));
+    _live = Timer.periodic(
+      liveEvery,
+      (_) => ref.read(reportBadgeProvider.notifier).refresh(),
+    );
   }
 
   @override
   void dispose() {
+    _live?.cancel();
     _search.dispose();
     _searchFocus.dispose();
     _searchDebounce?.cancel();
@@ -64,7 +93,9 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
       _tab = _Tab.tasks;
       _query = '';
       _search.clear();
+      _searchOpen = false;
     } else if (f == ReportFocus.search) {
+      _searchOpen = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _searchFocus.requestFocus();
@@ -95,6 +126,14 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
       if (why != null) {
         outbox.refused = null;
         _snack(context, 'Something saved offline couldn’t be sent: $why');
+      }
+    });
+    // Something changed elsewhere (work submitted for review, a task
+    // returned or assigned): reload what's shown.
+    ref.listen(reportBadgeProvider, (before, after) {
+      if (before == null || after == null) return;
+      if (before.toReview != after.toReview || after.unread > before.unread) {
+        ref.read(reportsChangedProvider.notifier).bump();
       }
     });
     final start = ref.watch(reportViewProvider);
@@ -141,22 +180,28 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
           focusNode: _searchFocus,
           onChanged: _onSearch,
           textInputAction: TextInputAction.search,
+          onTapOutside: (_) {
+            if (_search.text.isEmpty && _searchOpen) _closeSearch();
+          },
           decoration: InputDecoration(
             isDense: true,
             prefixIcon: const Icon(Icons.search, size: 18),
-            hintText: 'Search tasks: words, a name or #123',
-            suffixIcon: _search.text.isEmpty
-                ? null
-                : IconButton(
-                    tooltip: 'Clear',
-                    onPressed: () {
-                      _search.clear();
-                      setState(() => _query = '');
-                    },
-                    icon: const Icon(Icons.close, size: 16),
-                  ),
+            hintText: 'Words, a name or #123',
+            suffixIcon: IconButton(
+              key: const ValueKey('search-close'),
+              tooltip: 'Close search',
+              onPressed: _closeSearch,
+              icon: const Icon(Icons.close, size: 16),
+            ),
           ),
         );
+        final searchButton = IconButton(
+          key: const ValueKey('search-open'),
+          tooltip: 'Search tasks (/)',
+          onPressed: _openSearch,
+          icon: const Icon(Icons.search, size: 20),
+        );
+        final showSearch = _searchOpen || _query.isNotEmpty;
         return RefreshIndicator(
           onRefresh: () => ref.read(reportStartProvider.notifier).refresh(),
           child: SingleChildScrollView(
@@ -193,10 +238,11 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
                             ),
                           ),
                         ),
-                        if (!phone) ...[
+                        if (!phone && showSearch) ...[
                           SizedBox(width: 320, child: searchField),
                           const SizedBox(width: 4),
-                        ],
+                        ] else if (!showSearch)
+                          searchButton,
                         IconButton(
                           key: const ValueKey('reports-refresh'),
                           tooltip: 'Refresh',
@@ -208,7 +254,10 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
                         if (!phone) const ReportBell(),
                       ],
                     ),
-                    if (phone) ...[const SizedBox(height: 8), searchField],
+                    if (phone && showSearch) ...[
+                      const SizedBox(height: 8),
+                      searchField,
+                    ],
                     const SizedBox(height: 6),
                     UnderlineTabs<_Tab>(
                       key: const ValueKey('reports-tab'),
@@ -518,21 +567,27 @@ class _MyTasksState extends ConsumerState<_MyTasks> {
         onPressed: () => _setStatus(t, ReportStatus.inProgress),
         child: const Text('Unblocked'),
       ),
-    TextButton.icon(
-      key: ValueKey('submit-${t.id}'),
-      style: TextButton.styleFrom(
-        visualDensity: VisualDensity.compact,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        textStyle: Theme.of(context).textTheme.labelMedium,
+    if (t.review == ReviewState.returned)
+      // What was sent is filled in already; change what was asked for.
+      FilledButton.tonalIcon(
+        key: ValueKey('submit-${t.id}'),
+        style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+        onPressed: () => _details(t),
+        icon: const Icon(Icons.send, size: 16),
+        label: const Text('Resubmit'),
+      )
+    else
+      TextButton.icon(
+        key: ValueKey('submit-${t.id}'),
+        style: TextButton.styleFrom(
+          visualDensity: VisualDensity.compact,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          textStyle: Theme.of(context).textTheme.labelMedium,
+        ),
+        onPressed: () => _details(t),
+        icon: const Icon(Icons.edit_note, size: 16),
+        label: const Text('Submit with details'),
       ),
-      onPressed: () => _details(t),
-      icon: const Icon(Icons.edit_note, size: 16),
-      label: Text(
-        t.review == ReviewState.returned
-            ? 'Resubmit with details'
-            : 'Submit with details',
-      ),
-    ),
   ];
 
   FocusNode _focusFor(ActivityReport t) => _cardFocus.putIfAbsent(
@@ -574,7 +629,8 @@ class _MyTasksState extends ConsumerState<_MyTasks> {
         meta: meta,
         focusNode: node,
         onTap: () => _open(t),
-        onStatus: t.pending ? null : (s) => _setStatus(t, s),
+        // Its section says its state; ticking it finishes it.
+        inSection: true,
         onTick: t.pending && t.isSubmitted ? null : () => _tick(t),
         actions: t.pending ? const [] : _actions(t),
       ),
@@ -659,12 +715,10 @@ class _MyTasksState extends ConsumerState<_MyTasks> {
           Expanded(
             child: Text(
               doneToday.isEmpty
-                  ? 'Today, ${taskDay(today, today: today)}: nothing '
-                        'submitted yet. List what you’ve done below and submit '
-                        'it, or tick tasks as you finish them.'
-                  : 'Today, ${taskDay(today, today: today)}: '
-                        '${doneToday.length} submitted '
-                        '(${doneToday.where((s) => s.review == ReviewState.approved).length} approved).',
+                  ? 'Today, ${taskDay(today, today: today)} · nothing submitted yet'
+                  : 'Today, ${taskDay(today, today: today)} · '
+                        '${doneToday.length} submitted · '
+                        '${doneToday.where((s) => s.review == ReviewState.approved).length} approved',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: doneToday.isEmpty && needsReport
                     ? c.warningFg
@@ -753,10 +807,6 @@ class _MyTasksState extends ConsumerState<_MyTasks> {
               title: 'Submitted today (${submittedToday.length})',
               icon: Icons.task_alt,
               color: Dt.statusGreen(theme.brightness),
-              trailing: Text(
-                '${submittedToday.where((s) => s.review == ReviewState.approved).length} approved',
-                style: muted,
-              ),
               children: [
                 for (final t in submittedToday)
                   TaskCard(task: t, meta: meta, onTap: () => _open(t)),
@@ -847,7 +897,10 @@ class _MySubmissionsState extends State<_MySubmissions> {
     // By the day each was submitted for.
     final days = <DateTime, List<ActivityReport>>{};
     for (final s in shown) {
-      final d = s.date ?? meta.today;
+      final at = s.submittedAt;
+      final d =
+          s.date ??
+          (at == null ? meta.today : DateTime(at.year, at.month, at.day));
       days.putIfAbsent(d, () => []).add(s);
     }
     final dept = meta.myDepartment;
@@ -876,11 +929,6 @@ class _MySubmissionsState extends State<_MySubmissions> {
                 onSelected: (_) => setState(() => _filter = f),
               ),
           ],
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'The last 60 days. Search above for anything older.',
-          style: muted,
         ),
         const SizedBox(height: 14),
         if (shown.isEmpty)
@@ -950,10 +998,20 @@ class _ReviewTabState extends ConsumerState<_ReviewTab> {
   int? _person;
   int _seq = 0;
 
+  Timer? _timer;
+
   @override
   void initState() {
     super.initState();
     _load();
+    // Picks up new submissions even when the count stays the same.
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -1020,14 +1078,6 @@ class _ReviewTabState extends ConsumerState<_ReviewTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Work submitted by the people you assigned it to, or in your '
-          '${meta.scope == ReportScope.all ? 'company' : 'department'}. '
-          'Approve it, or return it with a comment saying what to fix — it '
-          'goes back on their list.',
-          style: muted,
-        ),
-        const SizedBox(height: 10),
         if (people.length > 1)
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
@@ -1061,7 +1111,8 @@ class _ReviewTabState extends ConsumerState<_ReviewTab> {
               const PanelEmpty(
                 icon: Icons.inbox_outlined,
                 title: 'Nothing waiting',
-                message: 'Submitted work shows here for you to review.',
+                message:
+                    'Work your team submits shows here to approve or return.',
               ),
             for (final t in shown)
               TaskCard(
@@ -1582,15 +1633,17 @@ class _TeamTabState extends ConsumerState<_TeamTab> {
               _Stat(
                 'Open now',
                 s.open,
-                hint: 'To do, doing or blocked, any date',
+                hint: 'Not finished yet, any date',
                 onTap: () => show(_TaskFilter.open),
               ),
-              _Stat(
-                'Blocked',
-                s.count(ReportStatus.blocked),
-                alert: true,
-                onTap: () => show(_TaskFilter.blocked),
-              ),
+              // Older tasks only: work can't be marked Blocked any more.
+              if (s.count(ReportStatus.blocked) > 0)
+                _Stat(
+                  'Blocked',
+                  s.count(ReportStatus.blocked),
+                  alert: true,
+                  onTap: () => show(_TaskFilter.blocked),
+                ),
               _Stat(
                 'Overdue',
                 s.overdue.length,

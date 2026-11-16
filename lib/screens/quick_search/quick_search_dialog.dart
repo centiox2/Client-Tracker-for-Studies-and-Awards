@@ -44,6 +44,7 @@ class _Result {
 const _pages = <(AppTab, String, IconData)>[
   (AppTab.home, 'Overview', Icons.space_dashboard_outlined),
   (AppTab.dailyReports, 'Daily reports', Icons.description_outlined),
+  (AppTab.todo, 'To-do', Icons.checklist),
   (AppTab.week, 'Weekly tracker', Icons.calendar_view_week_outlined),
   (AppTab.revenue, 'Revenue', Icons.payments_outlined),
   (AppTab.applications, 'Applications', Icons.school_outlined),
@@ -80,7 +81,9 @@ class _QuickSearchDialogState extends ConsumerState<_QuickSearchDialog> {
     final role = ref.read(sessionProvider);
     final user = ref.read(currentUserProvider);
     bool may(AppTab tab) =>
-        (tab == AppTab.settings || (user?.mayOpen(tab.name) ?? true)) &&
+        (tab == AppTab.settings ||
+            tab == AppTab.todo ||
+            (user?.mayOpen(tab.name) ?? true)) &&
         (tab != AppTab.revenue || (role?.seesRevenue ?? false)) &&
         (tab != AppTab.dailyReports || ref.read(accountsEnabledProvider)) &&
         ((role?.canEdit ?? false) ||

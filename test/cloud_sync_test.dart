@@ -10,8 +10,9 @@ import 'package:excel/excel.dart';
 import 'package:client_tracker/app.dart';
 import 'package:client_tracker/services/daily_report_export.dart';
 import 'package:client_tracker/services/daily_reports_service.dart';
+import 'package:client_tracker/services/todo_service.dart';
 import 'package:client_tracker/screens/daily_reports/report_editor.dart'
-    show UrgencyPill;
+    show TaskMode, TaskModeToggle, UrgencyPill;
 import 'package:client_tracker/database/app_database_io.dart';
 import 'package:client_tracker/database/database.dart';
 import 'package:client_tracker/repositories/auth_repository.dart';
@@ -516,6 +517,9 @@ class FakeCloud implements CloudApi {
 
   final comments = <Map<String, Object?>>[];
 
+  /// Personal to-do items per person (as the server's todo_items).
+  final todos = <int, Map<int, Map<String, Object?>>>{};
+
   void _notify(Object? user, String kind, int? rid, int? actor, String body) {
     if (user == null || user == actor) return;
     notifications.add({
@@ -580,7 +584,30 @@ class FakeCloud implements CloudApi {
     ];
     Future<Object?> again(String fn, [Map<String, Object?> more = const {}]) =>
         callFunction(fn, {'p_token': p['p_token'], ...more});
+    List<Map<String, Object?>> todoList() {
+      final mine = todos[uid] ?? {};
+      return [
+        for (final id in (mine.keys.toList()..sort()))
+          if (mine[id]!['deleted'] != true) {...mine[id]!}..remove('deleted'),
+      ];
+    }
+
     switch (name) {
+      case 'todo_list':
+        return todoList();
+      case 'todo_save':
+        final mine = todos.putIfAbsent(uid, () => {});
+        for (final i in (p['p_items'] as List).cast<Map>()) {
+          final item = i.cast<String, Object?>();
+          final id = (item['id'] as num).toInt();
+          final old = mine[id];
+          final at = item['changed_at'] as String;
+          if (old != null && at.compareTo(old['changed_at'] as String) < 0) {
+            continue;
+          }
+          mine[id] = {...item, 'sent_id': item['sent_id'] ?? old?['sent_id']};
+        }
+        return todoList();
       case 'report_start':
         // As the server: everything the page opens with, in one call.
         return {
@@ -1035,6 +1062,9 @@ class FakeCloud implements CloudApi {
         r
           ..['review'] = decision
           ..['status'] = decision == 'returned' ? 'in_progress' : 'done'
+          ..['report_date'] = decision == 'returned'
+              ? null
+              : (r['report_date'] ?? '2026-11-09')
           ..['reviewed_by'] = uid
           ..['reviewed_at'] = now
           ..['updated_at'] = now;
@@ -1949,6 +1979,16 @@ void main() {
     'updated_at': '2026-11-09T07:00:00Z',
   };
 
+  /// Which button of a Done / To do pair is chosen.
+  TaskMode modeOf(String key) => find
+      .ancestor(
+        of: find.byKey(ValueKey(key)),
+        matching: find.byType(TaskModeToggle),
+      )
+      .evaluate()
+      .map((e) => (e.widget as TaskModeToggle).value)
+      .first;
+
   /// A task card's title (it's rich text, after the #id).
   Finder taskTitle(String text) =>
       find.textContaining(text, findRichText: true);
@@ -2026,12 +2066,13 @@ void main() {
     expect(done['urgency'], 'high');
     expect(find.textContaining('1 submitted'), findsOneWidget);
 
-    // Plan a task (status from the drop-down), then Save & add another.
+    // Plan a task (Done / To do buttons), then Save & add another.
     await tester.tap(find.byKey(const ValueKey('add-activity')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('task-mode')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('To do').last);
+    // Two statuses only: no In progress.
+    expect(find.text('Doing now'), findsNothing);
+    expect(find.text('In progress'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('task-mode-todo')));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(AlertDialog, 'Add a task'), findsOneWidget);
     await tester.enterText(
@@ -2065,11 +2106,7 @@ void main() {
       find.byKey(const ValueKey('report-description')),
       'Chase medical results',
     );
-    // Doing now instead of To do.
-    await tester.tap(find.byKey(const ValueKey('task-mode')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Doing now').last);
-    await tester.pumpAndSettle();
+    // To do stays chosen for the next one.
     await tester.tap(find.byKey(const ValueKey('report-save')));
     await settle(tester);
     final call = cloud.reports.values.firstWhere(
@@ -2081,9 +2118,8 @@ void main() {
     final chase = cloud.reports.values.firstWhere(
       (r) => r['description'] == 'Chase medical results',
     );
-    expect(chase['status'], 'in_progress');
+    expect(chase['status'], 'to_do');
     expect(find.byKey(const ValueKey('section-todo')), findsOneWidget);
-    expect(find.byKey(const ValueKey('section-doing')), findsOneWidget);
 
     // The list card: typed items wait there with a status drop-down
     // each, until they're saved together.
@@ -2100,9 +2136,7 @@ void main() {
       ),
       isEmpty,
     );
-    await tester.tap(find.byKey(const ValueKey('draft-mode-1')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('To do').last);
+    await tester.tap(find.byKey(const ValueKey('draft-mode-1-todo')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('draft-urgency-1')));
     await tester.pumpAndSettle();
@@ -2118,38 +2152,8 @@ void main() {
     expect(printIt['urgency'], 'urgent');
     expect(printIt['status'], 'to_do');
 
-    // No Start button: the status menu sets Doing, with Undo.
-    expect(find.byKey(ValueKey('start-${call['id']}')), findsNothing);
-    await tester.tap(find.byKey(ValueKey('status-menu-${call['id']}')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Doing').last);
-    await settle(tester);
-    expect(cloud.reports[call['id']]!['status'], 'in_progress');
-    await tester.tap(find.byKey(const ValueKey('report-undo')));
-    await settle(tester);
-    expect(cloud.reports[call['id']]!['status'], 'to_do');
-    await tester.tap(find.byKey(ValueKey('status-menu-${call['id']}')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Doing').last);
-    await settle(tester);
-    expect(cloud.reports[call['id']]!['status'], 'in_progress');
-
-    // Blocked needs a reason.
-    await tester.tap(find.byKey(ValueKey('status-menu-${chase['id']}')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Blocked').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('report-save')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('report-error')), findsOneWidget);
-    await tester.enterText(
-      find.byKey(const ValueKey('report-blocker')),
-      'Clinic closed until Thursday',
-    );
-    await tester.tap(find.byKey(const ValueKey('report-save')));
-    await settle(tester);
-    expect(cloud.reports[chase['id']]!['status'], 'blocked');
-    expect(find.byKey(const ValueKey('section-blocked')), findsOneWidget);
+    // Cards have no status menu: the section says it, the tick finishes.
+    expect(find.byKey(ValueKey('status-menu-${call['id']}')), findsNothing);
 
     // Submit when done, with what was done and counts.
     await tester.tap(find.byKey(ValueKey('submit-${call['id']}')));
@@ -2316,14 +2320,32 @@ void main() {
     );
     await tester.tap(find.byKey(ValueKey('submit-$id')));
     await tester.pumpAndSettle();
-    // The dialog repeats what to fix.
+    // The dialog repeats what to fix, with what was sent before filled in
+    // (and editable). An assigned task keeps its title.
     expect(
       find.text('Returned: Include the February ones too'),
       findsOneWidget,
     );
+    expect(find.text('Resubmit #$id'), findsOneWidget);
+    expect(find.byKey(const ValueKey('submit-title')), findsNothing);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('submit-details')))
+          .controller!
+          .text,
+      'Checked 40 files',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('submit-details')),
+      'Checked 40 files and the February ones',
+    );
     await tester.tap(find.byKey(const ValueKey('submit-confirm')));
     await settle(tester);
     expect(cloud.reports[id]!['review'], 'submitted');
+    expect(
+      cloud.reports[id]!['details'],
+      'Checked 40 files and the February ones',
+    );
     container.dispose();
 
     // Grace approves it from the task itself; the timeline shows it all.
@@ -2378,6 +2400,10 @@ void main() {
     await signIn(tester, 'ruth', 'ruth-pass-1');
     await settle(tester);
     Future<void> search(String text) async {
+      if (find.byKey(const ValueKey('task-search')).evaluate().isEmpty) {
+        await tester.tap(find.byKey(const ValueKey('search-open')));
+        await tester.pumpAndSettle();
+      }
       await tester.enterText(find.byKey(const ValueKey('task-search')), text);
       await tester.pump(const Duration(milliseconds: 400));
       await settle(tester);
@@ -2616,6 +2642,179 @@ void main() {
     expect(pdf.length, greaterThan(2000));
   });
 
+  testWidgets('to-do: a personal list on every device, sent to Daily '
+      'reports when wanted', (tester) async {
+    final aminaId = cloud
+        .addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2)
+        .id;
+    var container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1400, 1000),
+    );
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    container.read(appActionsProvider).selectTab(AppTab.todo);
+    await settle(tester);
+    expect(find.text('Nothing on your list'), findsOneWidget);
+
+    // Enter adds; a pasted list adds a line each.
+    final input = find.byKey(const ValueKey('todo-input'));
+    await tester.enterText(input, 'Call the embassy');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    await tester.enterText(input, '- Print COE letters\n- Book interview\n');
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(find.text('3 to do · 0 done'), findsOneWidget);
+    // Saved with the account, not only here.
+    expect(cloud.todos[aminaId]!.values, hasLength(3));
+    expect(
+      find.text('Your own list, the same on all your devices.'),
+      findsOneWidget,
+    );
+
+    final ids = container.read(todoListProvider).map((t) => t.id).toList();
+    await tester.tap(find.byKey(ValueKey('todo-tick-${ids[0]}')));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(find.text('2 to do · 1 done'), findsOneWidget);
+    expect(find.text('Done (1)'), findsOneWidget);
+
+    // Delete with Undo.
+    await tester.tap(find.byKey(ValueKey('todo-menu-${ids[2]}')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Book interview'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('report-undo')));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(find.text('Book interview'), findsOneWidget);
+    expect(cloud.todos[aminaId]![ids[2]]!['deleted'], isNot(true));
+    container.dispose();
+
+    // Another device (nothing kept on it): the same list.
+    await tester.pumpWidget(const SizedBox());
+    SharedPreferences.setMockInitialValues({});
+    container = await pumpAccounts(tester, boss, size: const Size(390, 860));
+    await signIn(tester, 'amina', 'amina-pass-1');
+    await settle(tester);
+    container.read(appActionsProvider).selectTab(AppTab.todo);
+    await settle(tester);
+    expect(find.text('2 to do · 1 done'), findsOneWidget);
+    expect(find.text('Call the embassy'), findsOneWidget);
+
+    // Send to Daily reports: done ones are submitted, the rest listed.
+    await tester.tap(find.byKey(const ValueKey('todo-send')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(ValueKey('todo-send-${ids[1]}')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('todo-send-confirm')));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    final call = cloud.reports.values.singleWhere(
+      (r) => r['description'] == 'Call the embassy',
+    );
+    expect(call['review'], 'submitted');
+    final print = cloud.reports.values.singleWhere(
+      (r) => r['description'] == 'Print COE letters',
+    );
+    expect(print['status'], 'to_do');
+    expect(
+      cloud.reports.values.where((r) => r['description'] == 'Book interview'),
+      isEmpty,
+    );
+    expect(find.byKey(ValueKey('todo-sent-${ids[0]}')), findsOneWidget);
+    expect(find.byKey(ValueKey('todo-sent-${ids[1]}')), findsOneWidget);
+    expect(cloud.todos[aminaId]![ids[0]]!['sent_id'], call['id']);
+    // Only the unsent one is left to send.
+    await tester.tap(find.byKey(const ValueKey('todo-send')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(ValueKey('todo-send-${ids[2]}')), findsOneWidget);
+    expect(find.byKey(ValueKey('todo-send-${ids[0]}')), findsNothing);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    // Clear done, with Undo.
+    await tester.tap(find.byKey(const ValueKey('todo-clear-done')));
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(find.text('Call the embassy'), findsNothing);
+    expect(cloud.todos[aminaId]![ids[0]]!['deleted'], isTrue);
+    expect(tester.takeException(), isNull);
+    container.dispose();
+  });
+
+  testWidgets('daily reports: Review updates by itself when work is '
+      'submitted', (tester) async {
+    cloud.addUser('zawadi', 'zawadi-pass1', name: 'Zawadi', departmentId: 2);
+    cloud.addUser(
+      'grace',
+      'grace-pass-1',
+      name: 'Grace',
+      departmentId: 2,
+      reportAccess: ReportAccess.head,
+    );
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1600, 1400),
+    );
+    await signIn(tester, 'grace', 'grace-pass-1');
+    await settle(tester);
+    await openReportsTab(tester, 'Review');
+    expect(taskTitle('Lodged six visas'), findsNothing);
+
+    // Zawadi submits on her own device; Grace touches nothing.
+    seedReport(40, 1, 2, description: 'Lodged six visas');
+    await tester.pump(const Duration(seconds: 31));
+    await settle(tester);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('review-waiting')),
+        matching: taskTitle('Lodged six visas'),
+      ),
+      findsOneWidget,
+    );
+    expect(reportsTab('Review (1)'), findsOneWidget);
+    container.dispose();
+  });
+
+  testWidgets('daily reports: your own returned task can be renamed when '
+      'resubmitted', (tester) async {
+    cloud.addUser('zawadi', 'zawadi-pass1', name: 'Zawadi', departmentId: 2);
+    final r = seedReport(41, 1, 2, description: 'Lodged visas');
+    r['review'] = 'returned';
+    r['status'] = 'in_progress';
+    r['report_date'] = null;
+    r['details'] = 'Six lodged';
+    final container = await pumpAccounts(
+      tester,
+      boss,
+      size: const Size(1600, 1400),
+    );
+    await signIn(tester, 'zawadi', 'zawadi-pass1');
+    await settle(tester);
+    expect(find.byKey(const ValueKey('section-returned')), findsOneWidget);
+    expect(find.text('Resubmit'), findsWidgets);
+    await tester.tap(find.byKey(const ValueKey('submit-41')));
+    await tester.pumpAndSettle();
+    final title = find.byKey(const ValueKey('submit-title'));
+    expect(tester.widget<TextField>(title).controller!.text, 'Lodged visas');
+    await tester.enterText(title, 'Lodged visas for the Nairobi intake');
+    await tester.tap(find.byKey(const ValueKey('submit-confirm')));
+    await settle(tester);
+    expect(cloud.reports[41]!['review'], 'submitted');
+    expect(
+      cloud.reports[41]!['description'],
+      'Lodged visas for the Nairobi intake',
+    );
+    expect(cloud.reports[41]!['details'], 'Six lodged');
+    container.dispose();
+  });
+
   testWidgets('daily reports fit a phone', (tester) async {
     cloud.addUser('amina', 'amina-pass-1', name: 'Amina', departmentId: 2);
     cloud.addUser(
@@ -2638,13 +2837,20 @@ void main() {
     var container = await pumpAccounts(tester, boss, size: phone);
     await signIn(tester, 'amina', 'amina-pass-1');
     await settle(tester);
-    // Search sits in the top bar on phones.
+    // Search is a button until it's wanted.
     expect(find.byKey(const ValueKey('phone-search')), findsOneWidget);
+    expect(find.byKey(const ValueKey('task-search')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('search-open')));
+    await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('task-search')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('search-close')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('task-search')), findsNothing);
     expect(find.byKey(const ValueKey('section-doing')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('add-activity')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('task-mode')), findsOneWidget);
+    expect(find.byKey(const ValueKey('task-mode-done')), findsOneWidget);
+    expect(find.byKey(const ValueKey('task-mode-todo')), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     container.dispose();
@@ -3007,13 +3213,7 @@ void main() {
     await type('Lodged visas 3 done');
     await enter();
     expect(cloud.reports, isEmpty);
-    expect(
-      find.descendant(
-        of: find.byKey(const ValueKey('draft-mode-1')),
-        matching: find.text('Done today'),
-      ),
-      findsOneWidget,
-    );
+    expect(modeOf('draft-mode-1'), TaskMode.done);
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('draft-count-1-visa_lodgements')),
@@ -3034,9 +3234,7 @@ void main() {
 
     // New items start as To do once that's chosen; a due day and an
     // urgency in words.
-    await tester.tap(find.byKey(const ValueKey('draft-default-mode')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('To do').last);
+    await tester.tap(find.byKey(const ValueKey('draft-default-mode-todo')));
     await tester.pumpAndSettle();
     await type('Call embassy tomorrow urgent');
     await enter();
@@ -3101,13 +3299,11 @@ void main() {
     await settle(tester);
     expect(cloud.reports.containsKey(school), isFalse);
 
-    // Wrap up my day: what's Doing is ticked already.
-    await tester.tap(find.byKey(ValueKey('status-menu-$flights')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Doing').last);
-    await settle(tester);
+    // Wrap up my day: tick what got done.
     await tester.tap(find.byKey(const ValueKey('wrap-up')));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(ValueKey('wrap-$flights')));
+    await tester.pump();
     expect(
       tester
           .widget<CheckboxListTile>(find.byKey(ValueKey('wrap-$flights')))
@@ -3267,12 +3463,11 @@ void main() {
     await signIn(tester, 'amina', 'amina-pass-1');
     await settle(tester);
     final quick = find.byKey(const ValueKey('quick-task'));
-    await tester.tap(find.byKey(const ValueKey('draft-default-mode')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('To do').last);
+    await tester.tap(find.byKey(const ValueKey('draft-default-mode-todo')));
     await tester.pumpAndSettle();
     await tester.enterText(quick, 'Renewed passports 2 done');
     await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
     await tester.enterText(quick, 'Book the interview');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await settle(tester);

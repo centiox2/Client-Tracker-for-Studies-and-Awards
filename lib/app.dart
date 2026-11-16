@@ -21,6 +21,7 @@ import 'screens/revenue/revenue_screen.dart';
 import 'screens/revenue/scan_payments.dart';
 import 'services/share_receiver.dart';
 import 'screens/settings/settings_screen.dart';
+import 'screens/todo/todo_screen.dart';
 import 'screens/staff_management/staff_management_screen.dart';
 import 'screens/weekly_tracker/new_week_dialog.dart';
 import 'screens/weekly_tracker/weekly_tracker_screen.dart';
@@ -102,6 +103,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       shortLabel: 'Home',
     ),
     _dailyReportsTab,
+    _todoTab,
     _AppTabInfo(
       AppTab.week,
       'Weekly tracker',
@@ -122,6 +124,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     Icons.description_outlined,
     shortLabel: 'Daily',
   );
+
+  static const _todoTab = _AppTabInfo(AppTab.todo, 'To-do', Icons.checklist);
 
   static const _applicationsTab = _AppTabInfo(
     AppTab.applications,
@@ -151,6 +155,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   /// can change data.
   static const _viewerTabs = <_AppTabInfo>[
     _dailyReportsTab,
+    _todoTab,
     _reportsTab,
     _revenueTab,
     _applicationsTab,
@@ -182,9 +187,14 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // password, sessions); the workspace parts in it are admin only.
     final limited = [
       for (final t in byRole)
-        if (t.tab == AppTab.settings || (user?.mayOpen(t.tab.name) ?? true)) t,
+        if (t.tab == AppTab.settings ||
+            t.tab == AppTab.todo ||
+            (user?.mayOpen(t.tab.name) ?? true))
+          t,
     ];
-    return limited.any((t) => t.tab != AppTab.settings) ? limited : byRole;
+    return limited.any((t) => t.tab != AppTab.settings && t.tab != AppTab.todo)
+        ? limited
+        : byRole;
   }
 
   /// Notices when the date changes so "today" (Quick view, the tracker's
@@ -457,6 +467,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   Widget _page(AppTab tab) => switch (tab) {
     AppTab.home => const DashboardScreen(),
     AppTab.dailyReports => const DailyReportsScreen(),
+    AppTab.todo => const TodoScreen(),
     AppTab.week => const WeeklyTrackerScreen(),
     AppTab.revenue => RevenueScreen(readOnly: !ref.read(isAdminProvider)),
     AppTab.applications => ApplicationsScreen(canUpload: !_isViewer),
@@ -603,6 +614,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // Keeps the Daily reports page's data loaded in the background, so
     // the page opens at once.
     ref.listen(reportStartProvider, (_, _) {});
+    // A message about the page being left (its Undo included) doesn't
+    // follow to the next page.
+    ref.listen(navTabProvider, (before, after) {
+      if (before != after) ScaffoldMessenger.maybeOf(context)?.clearSnackBars();
+    });
     // A new notification: say so, wherever the person is.
     ref.listen(reportBadgeProvider, (before, after) {
       if (before == null || after == null) return;

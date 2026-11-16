@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.6.0';
+  static const version = '1.7.0';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,23 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.7.0', 'November 2026', [
+      'New To-do page for everyone: a personal list for your day. It is '
+          'saved with your account, so it is the same on all your devices, '
+          'and it still works offline. Send items to Daily reports when you '
+          'want them there: done ones go for review, the rest go on your '
+          'list.',
+      'Daily reports: a task is either Done or To do, picked with two '
+          'buttons instead of a drop-down.',
+      'Search in Daily reports is a button until you need it (or press /).',
+      'Resubmitting returned work: what you sent before is filled in, and '
+          'you can change any of it (the title too, for your own tasks).',
+      'Returned work no longer counts as submitted in Team figures until '
+          'it is resubmitted.',
+      'Review updates by itself when your team submits work; no need to '
+          'switch tabs.',
+      'Tidier task cards and phone layouts, with less repeated text.',
+    ]),
     Release('1.6.0', 'November 2026', [
       'Daily reports: My tasks opens with Today’s list. Type each thing '
           'you did or plan to do and press Enter; it waits on the list '

@@ -214,7 +214,10 @@ Future<void> finishTask(
 }) async {
   final actions = TaskActions(context, ref);
   final dept = meta.department(task.departmentId ?? meta.myDepartmentId);
-  if (details || (dept?.outputs.isNotEmpty ?? false)) {
+  // Returned work always opens it: what was sent is shown to change.
+  if (details ||
+      task.review == ReviewState.returned ||
+      (dept?.outputs.isNotEmpty ?? false)) {
     final o = await showSubmitDialog(context, meta: meta, task: task);
     if (o != null) actions.submitted(o);
     return;
@@ -318,6 +321,7 @@ class TaskCard extends StatelessWidget {
     this.onStatus,
     this.onTick,
     this.focusNode,
+    this.inSection = false,
   });
 
   final ActivityReport task;
@@ -335,6 +339,10 @@ class TaskCard extends StatelessWidget {
 
   /// Set: a tick box before the title finishes the task in one tap.
   final VoidCallback? onTick;
+
+  /// Listed under a heading that already says its state (To do, Returned
+  /// to you…): no status or Returned label on the card.
+  final bool inSection;
 
   /// For moving between cards with the arrow keys.
   final FocusNode? focusNode;
@@ -390,7 +398,12 @@ class TaskCard extends StatelessWidget {
         bold: overdue || dueToday,
       );
     }
-    final submitted = t.review == ReviewState.none ? '' : submittedLabel(t);
+    // A returned task isn't a submission any more: what matters is that it
+    // came back (said in the note below).
+    final submitted =
+        t.review == ReviewState.none || t.review == ReviewState.returned
+        ? ''
+        : submittedLabel(t);
     if (submitted.isNotEmpty) add(submitted);
     if (t.reference.isNotEmpty) add('Ref ${t.reference}');
     if (t.commentCount > 0) {
@@ -529,47 +542,60 @@ class TaskCard extends StatelessWidget {
                               height: 1.3,
                             ),
                           );
+                          final narrow = box.maxWidth < _wide;
+                          final pillList = <Widget>[
+                            if (t.pending)
+                              TaskPill(
+                                'Waiting to send',
+                                c.textMuted,
+                                key: ValueKey('pending-${t.id}'),
+                                icon: Icons.cloud_upload_outlined,
+                              ),
+                            if (t.urgency != TaskUrgency.normal)
+                              UrgencyPill(t.urgency),
+                            // Returned work shows Returned only, not the
+                            // status it was put back to.
+                            if (t.review == ReviewState.none && !inSection)
+                              statusPill(),
+                            if (t.review != ReviewState.none &&
+                                !(t.pending && t.isSubmitted) &&
+                                !(inSection &&
+                                    t.review == ReviewState.returned))
+                              TaskPill(
+                                t.review == ReviewState.submitted
+                                    ? 'Awaiting review'
+                                    : t.review.label,
+                                reviewColor(t.review, theme),
+                                icon: switch (t.review) {
+                                  ReviewState.approved => Icons.verified,
+                                  ReviewState.returned => Icons.undo,
+                                  _ => Icons.hourglass_top,
+                                },
+                              ),
+                          ];
                           final pills = Wrap(
                             spacing: 6,
                             runSpacing: 4,
                             alignment: WrapAlignment.end,
-                            children: [
-                              if (t.pending)
-                                TaskPill(
-                                  'Waiting to send',
-                                  c.textMuted,
-                                  key: ValueKey('pending-${t.id}'),
-                                  icon: Icons.cloud_upload_outlined,
-                                ),
-                              if (t.urgency != TaskUrgency.normal)
-                                UrgencyPill(t.urgency),
-                              if (t.review == ReviewState.none ||
-                                  t.review == ReviewState.returned)
-                                statusPill(),
-                              if (t.review != ReviewState.none &&
-                                  !(t.pending && t.isSubmitted))
-                                TaskPill(
-                                  t.review == ReviewState.submitted
-                                      ? 'Awaiting review'
-                                      : t.review.label,
-                                  reviewColor(t.review, theme),
-                                  icon: switch (t.review) {
-                                    ReviewState.approved => Icons.verified,
-                                    ReviewState.returned => Icons.undo,
-                                    _ => Icons.hourglass_top,
-                                  },
-                                ),
-                            ],
+                            children: pillList,
                           );
-                          // Narrow (phones): the labels go under the title, so
-                          // the title keeps the width.
-                          if (box.maxWidth < _wide) {
+                          // Narrow (phones): the labels and buttons go under
+                          // the title, on one line when they fit.
+                          if (narrow) {
                             return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
                                 title,
-                                const SizedBox(height: 6),
-                                pills,
+                                if (pillList.isNotEmpty || actions.isNotEmpty)
+                                  const SizedBox(height: 6),
+                                if (pillList.isNotEmpty || actions.isNotEmpty)
+                                  Wrap(
+                                    spacing: 6,
+                                    runSpacing: 6,
+                                    crossAxisAlignment:
+                                        WrapCrossAlignment.center,
+                                    children: [...pillList, ...actions],
+                                  ),
                               ],
                             );
                           }
@@ -635,21 +661,6 @@ class TaskCard extends StatelessWidget {
                           Dt.statusGreen(theme.brightness),
                           c.positiveBg,
                         ),
-                      // Wide: the buttons sit beside the labels instead.
-                      if (actions.isNotEmpty)
-                        LayoutBuilder(
-                          builder: (context, box) => box.maxWidth >= _wide
-                              ? const SizedBox.shrink()
-                              : Padding(
-                                  padding: const EdgeInsets.only(top: 8),
-                                  child: Wrap(
-                                    alignment: WrapAlignment.end,
-                                    spacing: 8,
-                                    runSpacing: 6,
-                                    children: actions,
-                                  ),
-                                ),
-                        ),
                     ],
                   ),
                 ),
@@ -664,28 +675,128 @@ class TaskCard extends StatelessWidget {
 
 // -------------------------------------------------------------- Editor ---
 
-/// What a new task of your own is, chosen at the top of the editor.
-/// The status a new task of that kind gets.
-ReportStatus statusOf(TaskMode m) => switch (m) {
-  TaskMode.done => ReportStatus.done,
-  TaskMode.doing => ReportStatus.inProgress,
-  TaskMode.todo => ReportStatus.toDo,
-};
-
+/// What a new task of your own is: finished (submitted for review) or on
+/// your list to do.
 enum TaskMode {
-  done('Done today', Icons.check_circle_outline),
-  doing('Doing now', Icons.timelapse),
+  done('Done', Icons.check_circle_outline),
   todo('To do', Icons.radio_button_unchecked);
 
   const TaskMode(this.label, this.icon);
   final String label;
   final IconData icon;
+
+  /// The one remembered by [name] ("doing", from older versions, is To do).
+  static TaskMode named(String? name) => name == done.name ? done : todo;
+}
+
+/// The status a new task of that kind gets.
+ReportStatus statusOf(TaskMode m) =>
+    m == TaskMode.done ? ReportStatus.done : ReportStatus.toDo;
+
+/// Done or To do, as two buttons side by side. Each button's key is
+/// "[keyPrefix]-done" / "[keyPrefix]-todo".
+class TaskModeToggle extends StatelessWidget {
+  const TaskModeToggle({
+    super.key,
+    required this.value,
+    required this.onChanged,
+    required this.keyPrefix,
+    this.dense = false,
+  });
+
+  final TaskMode value;
+  final ValueChanged<TaskMode>? onChanged;
+  final String keyPrefix;
+
+  /// Smaller, for a line in a list.
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = Clarity.of(theme);
+    final h = dense ? 26.0 : 36.0;
+    Widget button(TaskMode m) {
+      final on = m == value;
+      final color = m == TaskMode.done
+          ? Dt.statusGreen(theme.brightness)
+          : theme.colorScheme.onSurface;
+      return Semantics(
+        button: true,
+        selected: on,
+        child: InkWell(
+          key: ValueKey('$keyPrefix-${m.name}'),
+          borderRadius: BorderRadius.circular(Dt.rPill),
+          onTap: onChanged == null || on ? null : () => onChanged!(m),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            height: h - 4,
+            padding: EdgeInsets.symmetric(horizontal: dense ? 9 : 14),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: on
+                  ? (m == TaskMode.done
+                        ? color.withValues(alpha: 0.14)
+                        : c.surface)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(Dt.rPill),
+              boxShadow: on && m == TaskMode.todo
+                  ? [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        blurRadius: 2,
+                        offset: const Offset(0, 1),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  on && m == TaskMode.done ? Icons.check_circle : m.icon,
+                  size: dense ? 13 : 16,
+                  color: on ? color : c.textMuted,
+                ),
+                SizedBox(width: dense ? 4 : 6),
+                Text(
+                  m.label,
+                  style:
+                      (dense
+                              ? theme.textTheme.labelSmall
+                              : theme.textTheme.labelLarge)
+                          ?.copyWith(
+                            color: on ? color : c.textMuted,
+                            fontWeight: on ? FontWeight.w600 : FontWeight.w500,
+                          ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      key: ValueKey(keyPrefix),
+      height: h,
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: c.track,
+        borderRadius: BorderRadius.circular(Dt.rPill),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [for (final m in TaskMode.values) button(m)],
+      ),
+    );
+  }
 }
 
 /// Adds a task (or changes [existing]).
 ///
 /// - Your own new task: [mode] Done today submits it straight away (that's
-///   "Add activity"); Doing now / To do put it on your list.
+///   "Add activity"); To do puts it on your list.
 /// - [assign]: a director, manager or head gives a task to one or more
 ///   people ([assignTo] chosen first, if known).
 ///
@@ -770,12 +881,7 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
   late final bool _assign = (_draft?.assign ?? widget.assign) && _e == null;
   late final ReportChoices _choices = ref.read(reportChoicesProvider);
   late TaskMode _mode =
-      _draft?.mode ??
-      widget.mode ??
-      TaskMode.values.firstWhere(
-        (m) => m.name == _choices.mode,
-        orElse: () => TaskMode.done,
-      );
+      _draft?.mode ?? widget.mode ?? TaskMode.named(_choices.mode);
   late final _title = TextEditingController(text: _from?.description);
   late final _details = TextEditingController(text: _full?.details);
   late final _reference = TextEditingController(text: _from?.reference);
@@ -1066,45 +1172,19 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
                 ),
               ),
             if (_isNew && !_assign) ...[
-              DropdownButtonFormField<TaskMode>(
-                key: const ValueKey('task-mode'),
-                initialValue: _mode,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Status'),
-                items: [
-                  for (final m in TaskMode.values)
-                    DropdownMenuItem(
-                      value: m,
-                      child: Row(
-                        children: [
-                          Icon(
-                            m.icon,
-                            size: 16,
-                            color: statusColor(statusOf(m), theme),
-                          ),
-                          const SizedBox(width: 10),
-                          Flexible(
-                            child: Text(
-                              m.label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-                onChanged: _busy
-                    ? null
-                    : (v) => setState(() => _mode = v ?? _mode),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TaskModeToggle(
+                  keyPrefix: 'task-mode',
+                  value: _mode,
+                  onChanged: _busy ? null : (m) => setState(() => _mode = m),
+                ),
               ),
               const SizedBox(height: 6),
               Text(switch (_mode) {
                 TaskMode.done =>
                   'Work you’ve finished. It’s submitted for today '
                       '(${taskDay(_today, today: _today)}) and goes for review.',
-                TaskMode.doing =>
-                  'Goes on your list as Doing. Submit it when it’s done.',
                 TaskMode.todo =>
                   'Goes on your list to do later. Your manager can see it.',
               }, style: muted),
@@ -1585,7 +1665,12 @@ class _SubmitDialog extends ConsumerStatefulWidget {
 }
 
 class _SubmitDialogState extends ConsumerState<_SubmitDialog> {
+  late final _title = TextEditingController(text: widget.task.description);
   late final _details = TextEditingController(text: widget.task.details);
+
+  /// Your own task's title can be changed here; an assigned one's can't.
+  late final bool _titleEditable = !widget.task.isAssigned;
+  bool get _returned => widget.task.review == ReviewState.returned;
   final _note = TextEditingController();
   late final Department? _dept = widget.meta.department(
     widget.task.departmentId,
@@ -1599,6 +1684,7 @@ class _SubmitDialogState extends ConsumerState<_SubmitDialog> {
 
   @override
   void dispose() {
+    _title.dispose();
     _details.dispose();
     _note.dispose();
     super.dispose();
@@ -1606,6 +1692,10 @@ class _SubmitDialogState extends ConsumerState<_SubmitDialog> {
 
   Future<void> _submit() async {
     if (_busy) return;
+    if (_titleEditable && _title.text.trim().isEmpty) {
+      setState(() => _error = 'Give the task a title.');
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -1617,6 +1707,7 @@ class _SubmitDialogState extends ConsumerState<_SubmitDialog> {
           .save(
             submit: true,
             t.copyWith(
+              description: _titleEditable ? _title.text.trim() : null,
               details: _details.text,
               outputs: {
                 for (final e in t.outputs.entries)
@@ -1650,7 +1741,7 @@ class _SubmitDialogState extends ConsumerState<_SubmitDialog> {
         ? t.assignedByName
         : 'your department head or manager';
     return AlertDialog(
-      title: Text('Submit ${t.ref}'),
+      title: Text('${_returned ? 'Resubmit' : 'Submit'} ${t.ref}'),
       scrollable: true,
       content: SizedBox(
         width: 540,
@@ -1658,21 +1749,7 @@ class _SubmitDialogState extends ConsumerState<_SubmitDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              t.description,
-              style: theme.textTheme.titleSmall?.copyWith(height: 1.3),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'It’s marked done and dated today, '
-              '${taskDay(widget.meta.today, today: widget.meta.today)}. '
-              '${t.review == ReviewState.returned ? 'It goes back' : 'It goes'} '
-              'to $reviewer to review.',
-              style: muted,
-            ),
-            if (t.review == ReviewState.returned &&
-                t.lastReviewNote.isNotEmpty) ...[
-              const SizedBox(height: 10),
+            if (_returned && t.lastReviewNote.isNotEmpty) ...[
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
@@ -1684,22 +1761,48 @@ class _SubmitDialogState extends ConsumerState<_SubmitDialog> {
                   style: theme.textTheme.bodySmall,
                 ),
               ),
+              const SizedBox(height: 6),
+              Text(
+                'What you sent before is filled in. Change what was asked '
+                'for and resubmit.',
+                style: muted,
+              ),
+              const SizedBox(height: 12),
             ],
+            if (_titleEditable)
+              TextField(
+                key: const ValueKey('submit-title'),
+                controller: _title,
+                enabled: !_busy,
+                maxLength: 300,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Task',
+                  counterText: '',
+                ),
+              )
+            else
+              Text(
+                t.description,
+                style: theme.textTheme.titleSmall?.copyWith(height: 1.3),
+              ),
             const SizedBox(height: 12),
             TextField(
               key: const ValueKey('submit-details'),
               controller: _details,
-              autofocus: true,
+              autofocus: !_returned,
               enabled: !_busy,
-              minLines: 3,
+              minLines: 2,
               maxLines: 8,
               maxLength: 4000,
               textCapitalization: TextCapitalization.sentences,
               decoration: const InputDecoration(
                 labelText: 'What you did',
                 hintText: 'The work done, results, anything left over',
+                counterText: '',
               ),
             ),
+            const SizedBox(height: 12),
             if (dept != null && dept.outputs.isNotEmpty) ...[
               Text('COUNTS', style: microLabel(theme)),
               const SizedBox(height: 6),
@@ -1719,9 +1822,18 @@ class _SubmitDialogState extends ConsumerState<_SubmitDialog> {
               enabled: !_busy,
               maxLength: 1000,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                labelText: 'Note to the reviewer (optional)',
+              decoration: InputDecoration(
+                labelText: _returned
+                    ? 'What you changed (optional)'
+                    : 'Note to $reviewer (optional)',
+                counterText: '',
               ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Dated today, ${taskDay(widget.meta.today, today: widget.meta.today)}, '
+              'and sent to $reviewer to review.',
+              style: muted,
             ),
             if (_error != null)
               Text(
@@ -1748,7 +1860,7 @@ class _SubmitDialogState extends ConsumerState<_SubmitDialog> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Icon(Icons.send, size: 16),
-          label: const Text('Submit'),
+          label: Text(_returned ? 'Resubmit' : 'Submit'),
         ),
       ],
     );
@@ -2118,10 +2230,12 @@ class _ReportDetailsState extends ConsumerState<_ReportDetails> {
           );
     final history = _history;
     final facts = <(String, String)>[
-      (
-        'Person',
-        [t.userName, t.departmentName].where((s) => s.isNotEmpty).join(' · '),
-      ),
+      // Your own task: no need to say it's yours.
+      if (!_mine)
+        (
+          'Person',
+          [t.userName, t.departmentName].where((s) => s.isNotEmpty).join(' · '),
+        ),
       if (t.isAssigned)
         (
           'Assigned by',
@@ -2135,7 +2249,10 @@ class _ReportDetailsState extends ConsumerState<_ReportDetails> {
               '${t.isOverdue(meta.today) ? ' · overdue' : ''}',
         ),
       if (t.review != ReviewState.none)
-        ('Submitted', submittedLabel(t).replaceFirst('Submitted ', '')),
+        (
+          t.review == ReviewState.returned ? 'Last submitted' : 'Submitted',
+          submittedLabel(t).replaceFirst('Submitted ', ''),
+        ),
       if (t.reviewedAt != null && t.review != ReviewState.submitted)
         (
           t.review == ReviewState.approved ? 'Approved' : 'Returned',
@@ -2155,9 +2272,8 @@ class _ReportDetailsState extends ConsumerState<_ReportDetails> {
             runSpacing: 6,
             children: [
               TaskPill(t.ref, c.textMuted, key: const ValueKey('task-id')),
-              UrgencyPill(t.urgency),
-              if (t.review == ReviewState.none ||
-                  t.review == ReviewState.returned)
+              if (t.urgency != TaskUrgency.normal) UrgencyPill(t.urgency),
+              if (t.review == ReviewState.none)
                 TaskPill(
                   t.status.label,
                   statusColor(t.status, theme),
@@ -2221,7 +2337,11 @@ class _ReportDetailsState extends ConsumerState<_ReportDetails> {
             ),
             const SizedBox(height: 14),
             field(
-              t.review == ReviewState.none ? 'Notes' : 'What they did',
+              t.review == ReviewState.none
+                  ? 'Notes'
+                  : _mine
+                  ? 'What you did'
+                  : 'What they did',
               t.details,
             ),
             field(
@@ -2259,6 +2379,7 @@ class _ReportDetailsState extends ConsumerState<_ReportDetails> {
                 onSubmitted: (_) => _sendComment(),
                 decoration: InputDecoration(
                   isDense: true,
+                  counterText: '',
                   hintText: 'Add a comment',
                   suffixIcon: IconButton(
                     key: const ValueKey('comment-send'),
@@ -2308,7 +2429,8 @@ class _ReportDetailsState extends ConsumerState<_ReportDetails> {
             onPressed: _again,
             child: const Text('Do again'),
           ),
-        if (_canEdit)
+        // Returned to you: Resubmit is where it's changed.
+        if (_canEdit && !(_mine && t.review == ReviewState.returned))
           OutlinedButton(
             key: const ValueKey('edit-report'),
             onPressed: _edit,

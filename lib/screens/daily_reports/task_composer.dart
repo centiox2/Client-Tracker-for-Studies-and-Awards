@@ -57,8 +57,8 @@ class _Item {
 }
 
 /// Where the day's work is written down: type an item and press Enter, as
-/// many as you like (or paste a list). Each one has its status (Done today,
-/// Doing now, To do) in a drop-down, its urgency and due day. Nothing is
+/// many as you like (or paste a list). Each one is Done or To do (two buttons),
+/// with its urgency and due day. Nothing is
 /// sent until Submit, which saves them all together; done items go for
 /// review, the rest go on your list. Kept on this device until then.
 class TaskComposer extends ConsumerStatefulWidget {
@@ -98,11 +98,7 @@ class _TaskComposerState extends ConsumerState<TaskComposer> {
 
   /// Status new items get: the one chosen here, else the one used last.
   TaskMode get _defaultMode =>
-      _mode ??
-      TaskMode.values.firstWhere(
-        (m) => m.name == ref.read(reportChoicesProvider).mode,
-        orElse: () => TaskMode.done,
-      );
+      _mode ?? TaskMode.named(ref.read(reportChoicesProvider).mode);
 
   static String _key(int user) => 'daily_reports_draft_$user';
 
@@ -144,10 +140,7 @@ class _TaskComposerState extends ConsumerState<TaskComposer> {
   _Item _fromJson(Map<String, Object?> j) => _Item(
     id: _next++,
     title: j['title'] as String? ?? '',
-    mode: TaskMode.values.firstWhere(
-      (m) => m.name == j['mode'],
-      orElse: () => TaskMode.todo,
-    ),
+    mode: TaskMode.named(j['mode'] as String?),
     urgency: TaskUrgency.fromCode(j['urgency'] as String?),
     due: DateTime.tryParse(j['due'] as String? ?? ''),
     outputs: {
@@ -331,39 +324,6 @@ class _TaskComposerState extends ConsumerState<TaskComposer> {
 
   // ------------------------------------------------------------ Menus ---
 
-  Widget _modeMenu(
-    ThemeData theme, {
-    required Key key,
-    required TaskMode value,
-    required ValueChanged<TaskMode> onSelected,
-    String tooltip = 'Status',
-  }) => PopupMenuButton<TaskMode>(
-    key: key,
-    tooltip: tooltip,
-    initialValue: value,
-    enabled: !_busy,
-    onSelected: onSelected,
-    itemBuilder: (_) => [
-      for (final m in TaskMode.values)
-        PopupMenuItem(
-          value: m,
-          child: Row(
-            children: [
-              Icon(m.icon, size: 16, color: statusColor(statusOf(m), theme)),
-              const SizedBox(width: 10),
-              Text(m.label),
-            ],
-          ),
-        ),
-    ],
-    child: TaskPill(
-      value.label,
-      statusColor(statusOf(value), theme),
-      icon: value.icon,
-      trailingIcon: Icons.arrow_drop_down,
-    ),
-  );
-
   Widget _urgencyMenu(ThemeData theme, _Item i) => PopupMenuButton<TaskUrgency>(
     key: ValueKey('draft-urgency-${i.id}'),
     tooltip: 'Urgency',
@@ -452,14 +412,16 @@ class _TaskComposerState extends ConsumerState<TaskComposer> {
   Widget _item(ThemeData theme, _Item i, bool narrow) {
     final c = Clarity.of(theme);
     final outputs = i.done ? (_dept?.outputs ?? const <OutputField>[]) : [];
-    final status = _modeMenu(
-      theme,
-      key: ValueKey('draft-mode-${i.id}'),
+    final status = TaskModeToggle(
+      keyPrefix: 'draft-mode-${i.id}',
+      dense: true,
       value: i.mode,
-      onSelected: (m) {
-        i.mode = m;
-        _changed();
-      },
+      onChanged: _busy
+          ? null
+          : (m) {
+              i.mode = m;
+              _changed();
+            },
     );
     final title = TextField(
       key: ValueKey('draft-title-${i.id}'),
@@ -584,15 +546,17 @@ class _TaskComposerState extends ConsumerState<TaskComposer> {
 
     final input = Row(
       children: [
-        _modeMenu(
-          theme,
-          key: const ValueKey('draft-default-mode'),
-          value: mode,
-          tooltip: 'Status for new items',
-          onSelected: (m) {
-            setState(() => _mode = m);
-            ref.read(reportChoicesProvider.notifier).remember(mode: m.name);
-          },
+        Tooltip(
+          message: 'Status for new items',
+          child: TaskModeToggle(
+            keyPrefix: 'draft-default-mode',
+            dense: true,
+            value: mode,
+            onChanged: (m) {
+              setState(() => _mode = m);
+              ref.read(reportChoicesProvider.notifier).remember(mode: m.name);
+            },
+          ),
         ),
         const SizedBox(width: 8),
         Expanded(
@@ -623,9 +587,9 @@ class _TaskComposerState extends ConsumerState<TaskComposer> {
                 focusedBorder: InputBorder.none,
                 disabledBorder: InputBorder.none,
                 hintText: _items.isEmpty
-                    ? 'What did you do, or what’s next? Type it and press Enter'
+                    ? 'Type a task and press Enter'
                     : 'Add another…',
-                hintMaxLines: 2,
+                hintMaxLines: 1,
               ),
             ),
           ),
@@ -686,32 +650,12 @@ class _TaskComposerState extends ConsumerState<TaskComposer> {
                   Divider(height: 1, color: c.border),
                 ],
                 input,
-                if (_items.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 2, 4, 4),
-                    child: Text(
-                      'Add as many as you like (or paste a list), set each '
-                      'one’s status, then submit them together. Words like '
-                      '“done”, “tomorrow”, “urgent” or a count are picked up.',
-                      style: muted,
-                    ),
-                  )
-                else
+                if (_items.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
                     child: Row(
                       children: [
-                        Expanded(
-                          child: Text(
-                            [
-                              if (sent > 0) '$sent for review today',
-                              if (listed > 0) '$listed for your list',
-                            ].join(' · '),
-                            textAlign: TextAlign.end,
-                            style: muted,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
+                        const Spacer(),
                         TextButton(
                           key: const ValueKey('draft-clear'),
                           onPressed: _busy ? null : _clear,
