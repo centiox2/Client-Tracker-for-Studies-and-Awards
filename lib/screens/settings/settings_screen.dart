@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -698,7 +699,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ],
       ),
     );
-    if (confirmed != true) return;
+    if (confirmed != true || !mounted) return;
+
+    // The web has no folder for the safety copy: download it first, and
+    // restore only once it's saved.
+    if (kIsWeb) {
+      final stamp = DateTime.now().toIso8601String().substring(0, 16);
+      final saved = await deliverFile(
+        context,
+        dialogTitle: 'Save a safety copy first',
+        fileName: 'before_restore_${stamp.replaceAll(':', '-')}.json',
+        extension: 'json',
+        bytes: Uint8List.fromList(
+          utf8.encode(ref.read(backupServiceProvider).currentJson()),
+        ),
+      );
+      if (!saved || !mounted) return;
+    }
 
     ref.read(backupServiceProvider).restoreJson(json);
     ref.read(dataVersionProvider.notifier).bump();

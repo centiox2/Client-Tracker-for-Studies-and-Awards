@@ -224,7 +224,13 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('week-picker')));
     await tester.pumpAndSettle();
     final label = shortRangeLabel(older.startDate, older.endDate);
-    await tester.tap(find.text(label).last);
+    // The menu's entry (the dashboard's week list opens the tracker).
+    await tester.tap(
+      find.descendant(
+        of: find.byType(MenuItemButton),
+        matching: find.text(label),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(

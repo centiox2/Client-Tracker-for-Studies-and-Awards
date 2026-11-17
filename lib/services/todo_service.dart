@@ -89,10 +89,9 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
   // ------------------------------------------------------ On the device ---
 
   Future<void> _load(int? owner) async {
+    String? raw;
     try {
-      final raw = (await SharedPreferences.getInstance()).getString(
-        _key(owner),
-      );
+      raw = (await SharedPreferences.getInstance()).getString(_key(owner));
       if (owner != _owner) return;
       if (raw != null) {
         final data = jsonDecode(raw);
@@ -110,7 +109,10 @@ class TodoListNotifier extends Notifier<List<TodoItem>> {
         }
         state = _sorted(_decodeAll(items));
       }
-    } catch (_) {}
+    } catch (_) {
+      // Unreadable: keep the original aside before anything overwrites it.
+      await keepUnreadable(_key(owner), raw);
+    }
     _loaded = true;
     _tidy();
     ref.notifyListeners();
@@ -566,11 +568,15 @@ class TodoPrefsNotifier extends Notifier<TodoPrefs> {
         _key(owner),
       );
       if (raw == null || owner != _owner) return;
-      final j = (jsonDecode(raw) as Map).cast<String, Object?>();
-      state = TodoPrefs(
-        reminderMinutes: (j['reminder'] as num?)?.toInt(),
-        clearAfterDays: (j['clear'] as num?)?.toInt(),
-      );
+      try {
+        final j = (jsonDecode(raw) as Map).cast<String, Object?>();
+        state = TodoPrefs(
+          reminderMinutes: (j['reminder'] as num?)?.toInt(),
+          clearAfterDays: (j['clear'] as num?)?.toInt(),
+        );
+      } catch (_) {
+        await keepUnreadable(_key(owner), raw);
+      }
     } catch (_) {}
   }
 
@@ -599,4 +605,16 @@ class TodoSendRequest extends Notifier<bool> {
     if (asked) state = false;
     return asked;
   }
+}
+
+/// Keeps a stored value that couldn’t be read under `KEY.unreadable`, so
+/// the next save can't silently replace the only copy.
+Future<void> keepUnreadable(String key, String? raw) async {
+  if (raw == null) return;
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getString('$key.unreadable') == null) {
+      await prefs.setString('$key.unreadable', raw);
+    }
+  } catch (_) {}
 }

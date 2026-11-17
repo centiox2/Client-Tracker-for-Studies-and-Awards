@@ -1060,9 +1060,31 @@ class _ReportEditorState extends ConsumerState<_ReportEditor> {
     try {
       ActivityReport? last;
       if (_assign) {
-        for (final person in _people) {
-          last = await service.save(_build(forUser: person));
+        // One at a time: whoever got it is taken off the list, so a failure
+        // part-way says how far it got and a retry never assigns twice.
+        final total = _people.length;
+        final everyone = [..._people];
+        for (final person in everyone) {
+          try {
+            last = await service.save(_build(forUser: person));
+          } catch (e) {
+            final done = total - _people.length;
+            if (done == 0) rethrow;
+            if (mounted) {
+              setState(() {
+                _busy = false;
+                _error =
+                    'Assigned to $done of $total. The rest weren’t '
+                    '(${describeReportError(e)}); press Assign to try them '
+                    'again.';
+              });
+            }
+            return;
+          }
+          _people.remove(person);
         }
+        // All done: the same people stay picked for "Add another".
+        _people.addAll(everyone);
       } else {
         last = (await outbox.save(_build(), submit: _submitting)).task;
       }

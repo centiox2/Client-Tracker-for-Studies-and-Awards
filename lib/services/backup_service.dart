@@ -43,6 +43,10 @@ class BackupService {
   /// platforms the current data is first written to
   /// `before_restore_<timestamp>.json` next to the database so nothing can be
   /// silently lost.
+  /// The current data as JSON: the safety copy the web saves itself
+  /// (there is no folder to write it to there).
+  String currentJson() => _db.exportToJson();
+
   void restoreJson(String json) {
     if (!kIsWeb) {
       try {
@@ -54,6 +58,21 @@ class BackupService {
               'before_restore_${DateTime.now().millisecondsSinceEpoch}.json',
             ),
           ).writeAsStringSync(_db.exportToJson());
+          // Only the latest few are kept.
+          final old =
+              Directory(dbFolder)
+                  .listSync()
+                  .whereType<File>()
+                  .where(
+                    (f) =>
+                        RegExp(r'^before_restore_\d+\.json$')
+                            .hasMatch(p.basename(f.path)),
+                  )
+                  .toList()
+                ..sort((a, b) => b.path.compareTo(a.path));
+          for (final f in old.skip(5)) {
+            f.deleteSync();
+          }
         }
       } catch (_) {
         // Safety copy is best effort.

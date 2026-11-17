@@ -25,7 +25,12 @@ Future<String?> saveFileBytes({
   web.document.body!.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  web.URL.revokeObjectURL(url);
+  // Revoked a little later: done at once, some browsers cancel the
+  // download before it has started.
+  Future<void>.delayed(
+    const Duration(seconds: 30),
+    () => web.URL.revokeObjectURL(url),
+  );
   return defaultName;
 }
 

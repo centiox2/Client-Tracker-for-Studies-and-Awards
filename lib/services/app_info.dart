@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.8.2';
+  static const version = '1.8.3';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,23 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.8.3', 'November 2026', [
+      'Passwords need at least 8 characters, and are stored with stronger '
+          'protection (older ones are upgraded the next time you sign in).',
+      'Too many wrong admin or profile passwords, or recovery codes, lock '
+          'that sign-in for 15 minutes; kept sign-ins end after 90 days.',
+      'Sync: one change the online database refuses no longer holds up the '
+          'rest. It is set aside in Settings to save, retry or discard.',
+      'An account given no pages now really gets none.',
+      'Imports: a short CSV row keeps the values it doesn\'t include, two-'
+          'digit years are read, and a failed Excel import changes nothing '
+          '(with warnings for repeated rows and fractions).',
+      'Fixes: the week number around New Year, refund totals in Scan '
+          'photo, averages that counted numbers typed ahead, "Offers this '
+          'month", and the dashboard\'s week list now opens the week.',
+      'Undo, backups and assigning a task to several people are safer when '
+          'something goes wrong part-way.',
+    ]),
     Release('1.8.2', 'November 2026', [
       'Safer sign-in: a temporary password only lets you set a new one, and '
           'each account only reads and changes the pages it may open.',

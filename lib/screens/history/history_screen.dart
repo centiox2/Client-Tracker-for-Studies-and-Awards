@@ -167,11 +167,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   void _openWeek(int weekId) {
     final actions = ref.read(appActionsProvider);
     if (widget.readOnly) {
+      // Gone already (deleted on another device): nothing to open.
       final week = ref
           .read(historyProvider)
-          .firstWhere((w) => w.week.id == weekId)
-          .week;
-      actions.openWeekReport(week.startDate);
+          .where((w) => w.week.id == weekId)
+          .firstOrNull
+          ?.week;
+      if (week != null) actions.openWeekReport(week.startDate);
     } else {
       actions.selectTab(AppTab.week, weekId: weekId);
     }

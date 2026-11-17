@@ -1284,6 +1284,7 @@ class _TeamTabState extends ConsumerState<_TeamTab> {
         from = range.start;
         to = range.end;
     }
+    if (!mounted) return;
     setState(() {
       _period = p;
       _from = from;

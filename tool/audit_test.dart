@@ -250,7 +250,12 @@ List<_Shot> _pages(
     size: size,
     ratio: ratio,
     dark: dark,
-    steps: [ValueKey('more'), 'Settings', ValueKey('settings-cat-about'), 'What’s new'],
+    steps: [
+      ValueKey('more'),
+      'Settings',
+      ValueKey('settings-cat-about'),
+      'What’s new',
+    ],
   ),
 ];
 

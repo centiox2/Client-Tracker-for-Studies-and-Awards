@@ -135,6 +135,7 @@ class _TodoScreenState extends ConsumerState<TodoScreen> {
       firstDate: today,
       lastDate: DateTime(today.year + 2),
     );
+    if (!mounted) return;
     if (d != null) {
       setState(() {
         _optDay = d;
@@ -162,6 +163,7 @@ class _TodoScreenState extends ConsumerState<TodoScreen> {
       initialTime: const TimeOfDay(hour: 17, minute: 0),
       helpText: 'Deadline time (Cancel for none)',
     );
+    if (!mounted) return;
     setState(() {
       _optDue = time == null
           ? d

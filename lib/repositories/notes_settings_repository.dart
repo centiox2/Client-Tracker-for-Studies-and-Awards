@@ -1,3 +1,4 @@
+import '../models/text_clip.dart';
 import '../database/database.dart';
 
 /// Short notes on working days ("System down 2–4pm", "Outreach day"), so
@@ -41,11 +42,7 @@ class DayNotesRepository {
       'INSERT INTO day_notes (day_id, note, updated_at) VALUES (?, ?, ?) '
       'ON CONFLICT(day_id) DO UPDATE SET note = excluded.note, '
       'updated_at = excluded.updated_at;',
-      [
-        dayId,
-        text.length > maxLength ? text.substring(0, maxLength) : text,
-        DateTime.now().toIso8601String(),
-      ],
+      [dayId, clipText(text, maxLength), DateTime.now().toIso8601String()],
     );
   }
 }

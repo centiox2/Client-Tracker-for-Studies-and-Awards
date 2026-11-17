@@ -134,7 +134,8 @@ class CloudChange {
 /// wrong_password, not_signed_in, already_claimed, unclaimed,
 /// wrong_recovery_code, password_too_short, locked, deactivated,
 /// bad_username, username_taken, last_admin, own_account, same_password,
-/// or other.
+/// needs_update (the online database or this app is out of date), the
+/// report and Airtable codes listed in `SupabaseCloudApi`, or other.
 class CloudException implements Exception {
   CloudException(this.code, [this.detail]);
 

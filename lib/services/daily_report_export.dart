@@ -74,7 +74,11 @@ Uint8List operationsReportToExcel(OperationsReport report) {
       final v = cells[c];
       s.updateCell(
         CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r),
-        v is int ? IntCellValue(v) : TextCellValue('${v ?? ''}'),
+        switch (v) {
+          final int i => IntCellValue(i),
+          final double d => DoubleCellValue(d),
+          _ => TextCellValue('${v ?? ''}'),
+        },
         cellStyle: style,
       );
     }
@@ -191,7 +195,7 @@ Uint8List operationsReportToExcel(OperationsReport report) {
   entriesSheet('Entries', report.entries);
   final open =
       {
-        for (final e in [...s.overdue, ...s.attention]) e.id: e,
+        for (final e in [...s.overdue, ...s.attention]) e.id ?? e: e,
       }.values.toList()..sort(
         (a, b) => (a.dueDate ?? DateTime(9999)).compareTo(
           b.dueDate ?? DateTime(9999),
@@ -355,7 +359,7 @@ Future<Uint8List> operationsReportToPdf(
   };
   final open =
       {
-        for (final e in [...s.overdue, ...s.attention]) e.id: e,
+        for (final e in [...s.overdue, ...s.attention]) e.id ?? e: e,
       }.values.toList()..sort(
         (a, b) => (a.dueDate ?? DateTime(9999)).compareTo(
           b.dueDate ?? DateTime(9999),

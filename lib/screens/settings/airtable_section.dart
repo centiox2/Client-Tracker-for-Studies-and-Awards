@@ -41,8 +41,10 @@ class _AirtableSectionState extends ConsumerState<AirtableSection> {
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(describeAirtableError(e))));
     } finally {
-      if (mounted) setState(() => _busy = false);
-      ref.invalidate(airtableStatusProvider);
+      if (mounted) {
+        setState(() => _busy = false);
+        ref.invalidate(airtableStatusProvider);
+      }
     }
   }
 

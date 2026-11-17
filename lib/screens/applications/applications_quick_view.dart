@@ -959,6 +959,7 @@ Future<void> showHandling(
     List<Application> sorted(List<Application> list) => [...list]
       ..sort((a, b) {
         final x = lastActivity(a), y = lastActivity(b);
+        if (x == null && y == null) return 0;
         if (x == null || y == null) return x == null ? -1 : 1;
         return x.compareTo(y);
       });

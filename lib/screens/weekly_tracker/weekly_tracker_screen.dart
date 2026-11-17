@@ -241,7 +241,7 @@ class _EditorialBoardState extends ConsumerState<_EditorialBoard> {
                   ),
                   const SizedBox(width: 8),
                   WeekRangeButton(
-                    prefix: 'Week ${_isoWeekNumber(data.week.startDate)} · ',
+                    prefix: 'Week ${isoWeekNumber(data.week.startDate)} · ',
                   ),
                   const SizedBox(width: 8),
                   _RoundIconButton(
@@ -1710,6 +1710,9 @@ class _MobileWeekViewState extends State<_MobileWeekView> {
   @override
   Widget build(BuildContext context) {
     final days = widget.data.days;
+    if (days.isEmpty) {
+      return const Center(child: Text('This week has no days.'));
+    }
     final theme = Theme.of(context);
     final today = DateTime.now();
     final todayEntry = days
@@ -2150,7 +2153,11 @@ class _MobileStaffRow extends ConsumerWidget {
 // ---------------------------------------------------------------- helpers ---
 
 /// ISO-8601 week number (the spreadsheet's "Week 41" convention).
-int _isoWeekNumber(DateTime date) {
-  final ordinal = date.difference(DateTime(date.year, 1, 1)).inDays + 1;
-  return ((ordinal - date.weekday + 10) ~/ 7);
+/// Counted from the week's Thursday, so days around New Year land in the
+/// right year's week (Fri 1 Jan 2027 is week 53 of 2026, never week 0).
+int isoWeekNumber(DateTime date) {
+  final day = DateTime.utc(date.year, date.month, date.day);
+  final thursday = day.add(Duration(days: DateTime.thursday - day.weekday));
+  final ordinal = thursday.difference(DateTime.utc(thursday.year)).inDays;
+  return ordinal ~/ 7 + 1;
 }

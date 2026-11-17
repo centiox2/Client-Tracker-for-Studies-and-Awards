@@ -218,7 +218,10 @@ class _StartWeekBanner extends ConsumerWidget {
           FilledButton.icon(
             onPressed: () {
               final actions = ref.read(appActionsProvider);
-              final week = actions.createWeek(monday);
+              // Started meanwhile (another device, a second tap): open it.
+              final week =
+                  ref.read(weekRepositoryProvider).findByDate(monday) ??
+                  actions.createWeek(monday);
               actions.selectTab(AppTab.home, weekId: week.id);
               ScaffoldMessenger.of(
                 context,
@@ -783,8 +786,9 @@ class _ApplicationsPanel extends ConsumerWidget {
     final apps = ref.read(applicationRepositoryProvider).all();
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final first = DateTime(now.year, now.month);
-    bool thisMonth(DateTime? d) => d != null && !d.isBefore(first);
+    // The same rule as the Applications page: this calendar month only.
+    bool thisMonth(DateTime? d) =>
+        d != null && d.year == now.year && d.month == now.month;
     final inProgress = apps.where((a) => a.inProgress).length;
     final offers = apps.where((a) => thisMonth(a.offerDate)).length;
     final coes = apps.where((a) => thisMonth(a.coeDate)).length;
@@ -1032,9 +1036,10 @@ class _RecentWeeks extends ConsumerWidget {
                           ? 'in progress'
                           : null,
                       '${w.totals.total}',
-                      () {
-                        ref.read(currentWeekIdProvider.notifier).set(w.week.id);
-                      },
+                      // Opens that week in the tracker (not a silent switch).
+                      () => ref
+                          .read(appActionsProvider)
+                          .selectTab(AppTab.week, weekId: w.week.id),
                     ),
                 ],
               ),

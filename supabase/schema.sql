@@ -6703,3 +6703,10 @@ begin
     where id = p_user_id;
   return private.user_json(p_user_id);
 end $$;
+
+-- L2: indexes for the change-log columns that are joined on. (No foreign
+-- keys: synced rows can arrive before the row they point to.)
+create index if not exists count_changes_staff_idx on public.count_changes (staff_id);
+create index if not exists revenue_changes_entry_idx on public.revenue_changes (entry_id);
+create index if not exists application_changes_import_idx on public.application_changes (import_id);
+create index if not exists todo_items_sent_idx on public.todo_items (sent_id);

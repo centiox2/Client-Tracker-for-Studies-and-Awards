@@ -233,7 +233,14 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
           );
           return;
         }
-        await _load(await csv.readAsBytes(), csv.name);
+        try {
+          await _load(await csv.readAsBytes(), csv.name);
+        } catch (e) {
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Couldn’t read ${csv.name}: $e')),
+          );
+        }
       },
       child: Stack(
         children: [

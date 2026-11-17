@@ -583,11 +583,13 @@ class _ReviewDialogState extends State<_ReviewDialog> {
     for (final s in widget.sources) {
       _readText[s] = s.text;
     }
-    // Oldest first, as they happened.
+    // Oldest first, as they happened; undated ones last, in reading order.
+    final order = {for (final (i, c) in _items.indexed) c: i};
     _items.sort((a, b) {
       final ta = a.when, tb = b.when;
-      if (ta == null || tb == null) return 0;
-      return ta.compareTo(tb);
+      if (ta != null && tb != null && ta != tb) return ta.compareTo(tb);
+      if ((ta == null) != (tb == null)) return ta == null ? 1 : -1;
+      return order[a]!.compareTo(order[b]!);
     });
     final saved = widget.existing([for (final c in _items) ?c.payment.code]);
     _saved
@@ -697,7 +699,11 @@ class _ReviewDialogState extends State<_ReviewDialog> {
       for (final c in _items)
         if (_ticked[c] ?? false) c,
     ];
-    final total = chosen.fold<int>(0, (s, c) => s + c.payment.amountCents);
+    // Signed like the adds themselves: a refund takes away.
+    final total = chosen.fold<int>(
+      0,
+      (s, c) => s + revenueAmountFor(c.payment),
+    );
     final photos = _photos.length;
     final empty = [
       for (final s in widget.sources)

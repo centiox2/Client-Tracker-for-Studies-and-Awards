@@ -293,7 +293,12 @@ int? _number(Data? cell) {
 }
 
 int? _numberText(String text) {
-  final t = text.replaceAll(RegExp(r'[,\s]'), '');
+  var t = text.trim();
+  // A comma or space is a thousands mark only between groups of three;
+  // "1,5" is not 15.
+  if (RegExp(r'^\d{1,3}([,\s]\d{3})+(\.\d*)?$').hasMatch(t)) {
+    t = t.replaceAll(RegExp(r'[,\s]'), '');
+  }
   if (t.isEmpty) return null;
   return int.tryParse(t) ?? double.tryParse(t)?.round();
 }

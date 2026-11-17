@@ -10,17 +10,28 @@ on:
       - lib/services/payment_text_parser.dart
       - tool/ocr_check.dart
       - test/fixtures/**
+      - pubspec.yaml
+      - pubspec.lock
       - .github/workflows/windows-ocr-check.yml
   workflow_dispatch:
+
+# It only reads the code.
+permissions:
+  contents: read
 
 jobs:
   ocr-check:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+      # Pinned to a commit (the tag in the comment), like the release builds.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e # v2.21.0
         with:
           channel: stable
+          # The same Flutter as the release build.
+          flutter-version: 3.47.9
           cache: true
       - run: flutter pub get
       - name: Read the sample photo

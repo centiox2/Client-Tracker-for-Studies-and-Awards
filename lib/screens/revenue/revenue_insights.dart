@@ -594,7 +594,9 @@ class _RevenueInsightsState extends ConsumerState<RevenueInsights> {
     if (before == 0) {
       return now == 0 ? 'Nothing vs $against' : 'Nothing on $against';
     }
-    final pct = ((now - before) * 100 / before).round();
+    // Against the size of the earlier figure, so a period of refunds
+    // (negative) still reads up when it gets better.
+    final pct = ((now - before) * 100 / before.abs()).round();
     if (pct == 0) return 'Same as $against';
     return '${pct > 0 ? '+' : '−'}${pct.abs()}% vs $against';
   }

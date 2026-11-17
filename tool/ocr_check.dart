@@ -9,6 +9,10 @@ import 'package:client_tracker/services/payment_text_parser.dart';
 import 'package:client_tracker/services/windows_ocr.dart';
 
 Future<void> main(List<String> args) async {
+  if (args.length != 1) {
+    stderr.writeln('Usage: dart run tool/ocr_check.dart <photo.png>');
+    exit(64);
+  }
   final sample = args.single;
   final results = await readTextsOnWindows([
     sample,

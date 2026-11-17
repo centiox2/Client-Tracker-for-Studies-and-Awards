@@ -75,6 +75,7 @@ class _NotificationsDialogState extends ConsumerState<_NotificationsDialog> {
       });
       if (items.any((n) => !n.read)) {
         await service.markRead();
+        if (!mounted) return;
         ref.read(reportBadgeProvider.notifier).refresh();
       }
     } catch (e) {

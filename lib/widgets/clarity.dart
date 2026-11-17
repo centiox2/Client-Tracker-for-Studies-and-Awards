@@ -299,13 +299,16 @@ class _KpiGridState extends ConsumerState<KpiGrid> {
   Widget build(BuildContext context) {
     ref.watch(cardOrderVersionProvider);
     final c = context.clarity;
-    final byId = {
-      for (final (i, w) in widget.children.indexed)
-        (widget.ids != null && i < widget.ids!.length
-                ? widget.ids![i]
-                : _idOf(w, i)):
-            w,
-    };
+    // Two cards with the same label each keep a place: a repeat gets
+    // "#n" added rather than replacing the first.
+    final byId = <String, Widget>{};
+    for (final (i, w) in widget.children.indexed) {
+      var id = widget.ids != null && i < widget.ids!.length
+          ? widget.ids![i]
+          : _idOf(w, i);
+      if (byId.containsKey(id)) id = '$id#$i';
+      byId[id] = w;
+    }
     final order = widget.orderKey == null
         ? byId.keys.toList()
         : _ordered(byId.keys.toList());

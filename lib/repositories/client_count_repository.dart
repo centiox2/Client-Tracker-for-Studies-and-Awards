@@ -372,6 +372,7 @@ class ClientCountRepository {
     final dayRows = _db.raw.select(
       '''
       SELECT wd.id            AS day_id,
+             MIN(wd.date)     AS date,
              COALESCE(SUM(cc.new_clients), 0)      AS new_total,
              COALESCE(SUM(cc.existing_clients), 0) AS existing_total
       FROM work_days wd
@@ -383,8 +384,9 @@ class ClientCountRepository {
       [weekId],
     );
 
+    final today = _dateKey(DateTime.now());
     final perDay = <int, DayTotals>{};
-    var newTotal = 0, existingTotal = 0;
+    var newTotal = 0, existingTotal = 0, soFar = 0;
     for (final r in dayRows) {
       final n = r['new_total']! as int;
       final e = r['existing_total']! as int;
@@ -394,18 +396,21 @@ class ClientCountRepository {
       );
       newTotal += n;
       existingTotal += e;
+      // The average only counts days up to today, so numbers typed ahead
+      // for a later day can't inflate it.
+      if ((r['date']! as String).compareTo(today) <= 0) soFar += n + e;
     }
     final days =
         _db.raw.select(
               'SELECT COUNT(*) AS c FROM work_days wd '
               'WHERE wd.week_id = ? AND wd.date <= ? AND $_staffedDay;',
-              [weekId, _dateKey(DateTime.now())],
+              [weekId, today],
             ).first['c']!
             as int;
     return WeekTotals(
       newClients: newTotal,
       existingClients: existingTotal,
-      dailyAverage: days == 0 ? 0 : (newTotal + existingTotal) / days,
+      dailyAverage: days == 0 ? 0 : soFar / days,
       perDay: perDay,
     );
   }
@@ -472,9 +477,24 @@ class ClientCountRepository {
 
     final n = rows.first['new_total']! as int;
     final e = rows.first['existing_total']! as int;
-    // Same rule as weekTotals: staffed days in the month up to today.
+    // Same rule as weekTotals: staffed days in the month up to today, and
+    // only their numbers.
     final today = _dateKey(DateTime.now());
     final upTo = today.compareTo(range[1]) < 0 ? today : range[1];
+    final soFar =
+        _db.raw
+                .select(
+                  '''
+              SELECT COALESCE(SUM(cc.new_clients + cc.existing_clients), 0)
+                     AS t
+              FROM work_days wd
+              JOIN client_counts cc ON cc.day_id = wd.id
+              WHERE wd.date BETWEEN ? AND ? AND $_notOff;
+            ''',
+                  [range[0], upTo],
+                )
+                .first['t']!
+            as int;
     final dayCount =
         _db.raw.select(
               'SELECT COUNT(*) AS c FROM work_days wd '
@@ -485,7 +505,7 @@ class ClientCountRepository {
     return MonthTotals(
       newClients: n,
       existingClients: e,
-      dailyAverage: dayCount == 0 ? 0 : (n + e) / dayCount,
+      dailyAverage: dayCount == 0 ? 0 : soFar / dayCount,
       staffTotals: staff,
     );
   }

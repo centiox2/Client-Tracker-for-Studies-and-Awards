@@ -6,6 +6,7 @@
 /// a command-line check (tool/ocr_check.dart) can use it too.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -163,26 +164,42 @@ Future<List<WindowsOcrResult>> readTextsOnWindows(
   final fileMark = RegExp(r'^===CT_FILE:(\d+)===$');
   final errorMark = RegExp(r'^===CT_ERROR:(\d+):(.*)===$');
   final stderrText = process.stderr.transform(utf8.decoder).join();
-  await for (final line
-      in process.stdout
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())
-          .timeout(const Duration(seconds: 120))) {
-    final f = fileMark.firstMatch(line);
-    final e = errorMark.firstMatch(line);
-    if (f != null) {
-      current = int.parse(f.group(1)!);
-      texts[current] = StringBuffer();
-      onProgress?.call(++done);
-    } else if (e != null) {
-      current = null;
-      errors[int.parse(e.group(1)!)] = e.group(2)!.trim();
-      onProgress?.call(++done);
-    } else if (current != null) {
-      texts[current]!.writeln(line);
-    } else {
-      general.writeln(line);
+  // A photo counts as done when the next one starts (or the run ends).
+  void finishCurrent() {
+    if (current != null) onProgress?.call(++done);
+  }
+
+  try {
+    await for (final line
+        in process.stdout
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .timeout(const Duration(seconds: 120))) {
+      final f = fileMark.firstMatch(line);
+      final e = errorMark.firstMatch(line);
+      if (f != null) {
+        finishCurrent();
+        current = int.parse(f.group(1)!);
+        texts[current] = StringBuffer();
+      } else if (e != null) {
+        finishCurrent();
+        current = null;
+        errors[int.parse(e.group(1)!)] = e.group(2)!.trim();
+        onProgress?.call(++done);
+      } else if (current != null) {
+        texts[current]!.writeln(line);
+      } else {
+        general.writeln(line);
+      }
     }
+    finishCurrent();
+  } on TimeoutException {
+    // Stuck: stop PowerShell rather than leave it running.
+    process.kill();
+    throw WindowsOcrException(
+      'Reading the photos took too long, so it was stopped. Try fewer '
+      'photos at a time, or use Paste message instead.',
+    );
   }
   final exitCode = await process.exitCode;
   final err = await stderrText;

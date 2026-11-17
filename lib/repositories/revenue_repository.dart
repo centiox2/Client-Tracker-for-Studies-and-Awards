@@ -1,3 +1,4 @@
+import '../models/text_clip.dart';
 import '../database/database.dart';
 import '../services/search_text.dart';
 
@@ -285,10 +286,11 @@ class RevenueRepository {
     if (before != null) _log(id, 'deleted', before: before);
   });
 
-  /// Puts back a deleted entry exactly as it was (Undo).
+  /// Puts back a deleted entry exactly as it was (Undo). Already back
+  /// (synced in meanwhile): left as it is.
   void restore(RevenueEntry e) => _db.transaction(() {
     _db.raw.execute(
-      'INSERT INTO revenue_entries '
+      'INSERT OR IGNORE INTO revenue_entries '
       '(id, date, amount_cents, note, created_at, updated_at, purpose) '
       'VALUES (?, ?, ?, ?, ?, ?, ?);',
       [
@@ -301,6 +303,7 @@ class RevenueRepository {
         e.purpose,
       ],
     );
+    if (_db.raw.updatedRows == 0) return;
     _log(e.id, 'restored', after: e);
   });
 
@@ -416,18 +419,24 @@ class RevenueRepository {
 
   static String _cleanPurpose(String p) {
     final t = p.trim();
-    return t.length > 40 ? t.substring(0, 40) : t;
+    return clipText(t, 40);
   }
 
   static String _clean(String note) {
     final t = note.trim().replaceAll(RegExp(r'\s+'), ' ');
-    return t.length > maxNoteLength ? t.substring(0, maxNoteLength) : t;
+    return clipText(t, maxNoteLength);
   }
 
   /// Reads a typed amount: "1,500", "1500.50", "KSh 2 000". Returns cents,
   /// or null when it isn't a positive amount with at most two decimals.
+  /// A comma or space only counts as a thousands mark between groups of
+  /// three ("1,500"); "1,5" is refused rather than read as 15.
   static int? parseAmount(String text) {
-    final t = text.replaceAll(RegExp(r'[^0-9.]'), '');
+    var t = text.replaceAll(RegExp(r'[^0-9., ]'), '').trim();
+    if (RegExp(r'^\d{1,3}([, ]\d{3})+(\.\d*)?$').hasMatch(t)) {
+      t = t.replaceAll(RegExp(r'[, ]'), '');
+    }
+    if (!RegExp(r'^\d*(\.\d*)?$').hasMatch(t)) return null;
     if (t.isEmpty || '.'.allMatches(t).length > 1) return null;
     final parts = t.split('.');
     if (parts.length == 2 && parts[1].length > 2) return null;

@@ -746,7 +746,9 @@ class ApplicationRepository {
       } catch (_) {}
     }
     final iso = RegExp(r'^(\d{4})-(\d{1,2})-(\d{1,2})').firstMatch(s);
-    final dmy = RegExp(r'^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})').firstMatch(s);
+    // Two-digit years ("2/2/24") too, like the notes and calendar read them.
+    final dmy = RegExp(r'^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})(?!\d)')
+        .firstMatch(s);
     int? y, m, d;
     if (iso != null) {
       y = int.parse(iso[1]!);
@@ -756,6 +758,7 @@ class ApplicationRepository {
       d = int.parse(dmy[1]!);
       m = int.parse(dmy[2]!);
       y = int.parse(dmy[3]!);
+      if (y < 100) y += 2000;
     }
     if (y == null || m! < 1 || m > 12 || d! < 1 || d > 31) return null;
     final t = DateTime(y, m, d);

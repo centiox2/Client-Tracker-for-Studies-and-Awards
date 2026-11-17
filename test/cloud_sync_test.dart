@@ -42,7 +42,8 @@ class FakeCloud implements CloudApi {
   final emitted = <CloudChange>[];
 
   void _online() {
-    if (offline) throw Exception('offline');
+    // What a lost connection looks like to the app.
+    if (offline) throw const SocketException('offline');
   }
 
   String? recoveryCode;

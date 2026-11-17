@@ -11,28 +11,37 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Same online database as the Windows build. Repository secrets with the
-# same names, if set, take priority. Keep this repository private.
+# Same online database as the Windows build. The publishable key is meant
+# to ship inside the app: it reads nothing by itself (every table is closed
+# to it; data only comes through signed-in functions). Repository secrets
+# with the same names, if set, take priority.
 env:
   SUPABASE_URL_DEFAULT: https://dpmluuckgstycdctqwym.supabase.co
   SUPABASE_KEY_DEFAULT: sb_publishable_qsw0KVpDbNr616WaSmG70w_QplfFMPs
 
-# Publishing the APK to a GitHub Release needs write access.
+# Read-only by default; only the build job (which publishes the release)
+# gets write access.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      # Pinned to a commit (the tag in the comment), so a moved tag can't
+      # change what runs with the signing secrets.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e # v2.21.0
         with:
           channel: stable
           # Pinned: a new Flutter release can need newer Android/Gradle
@@ -95,7 +104,11 @@ jobs:
             echo "::error::The APK is signed with the debug key."
             exit 1
           fi
-          rm -f android/key.properties "$RUNNER_TEMP/release.jks"
+
+      # Whatever happened above, the key and its passwords leave the runner.
+      - name: Remove the signing key
+        if: always()
+        run: rm -f android/key.properties "$RUNNER_TEMP/release.jks"
 
       # Published to the "android-latest" GitHub Release (replacing the
       # previous one) rather than as a build artifact: artifacts count

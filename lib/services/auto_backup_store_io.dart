@@ -75,7 +75,12 @@ class _FolderStore extends AutoBackupStore {
   @override
   Future<void> save(String name, String json) async {
     Directory(folder).createSync(recursive: true);
-    File(p.join(folder, name)).writeAsStringSync(json);
+    // Written beside it first, then renamed into place: a crash mid-write
+    // never leaves a cut-off file that counts as today's backup.
+    final target = File(p.join(folder, name));
+    final tmp = File('${target.path}.tmp');
+    tmp.writeAsStringSync(json, flush: true);
+    tmp.renameSync(target.path);
     final all = await list();
     for (final old in all.skip(keep)) {
       try {

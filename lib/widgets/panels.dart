@@ -193,7 +193,8 @@ class StackedDayChart extends StatelessWidget {
   /// Height of the plot area (bars), without the labels.
   final double height;
 
-  /// A round axis top for [max] with four equal steps (17 → 20, 43 → 60).
+  /// A round axis top for [max] with four equal steps of 1, 2 or 5 × 10ⁿ
+  /// (17 → 20, 43 → 80, 120 → 200).
   static int niceTop(int max) {
     if (max <= 0) return 20;
     final raw = max / 4;

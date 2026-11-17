@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../state/app_state.dart';
 import '../state/cloud_sync.dart';
 import 'cloud/cloud_api.dart';
+import 'cloud/connection_error.dart';
 
 /// What Daily reports opens with (see [DailyReportsService.start]).
 class ReportsStart {
@@ -584,8 +585,9 @@ class ReportOutboxNotifier extends Notifier<List<QueuedTask>> {
       return (task: saved, queued: false);
     } on CloudException {
       rethrow;
-    } catch (_) {
-      // No connection: kept here and sent later.
+    } catch (e) {
+      // Only a lost connection is queued; any other fault is shown.
+      if (!isConnectionError(e)) rethrow;
       return (task: _queue(report, submit, note), queued: true);
     }
   }
