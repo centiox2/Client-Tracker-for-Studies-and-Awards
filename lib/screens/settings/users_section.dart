@@ -570,6 +570,9 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
 
   bool get _isNew => widget.user == null;
 
+  /// The account once saved here (a later page-access step may still fail).
+  AppUser? _saved;
+
   @override
   void dispose() {
     _name.dispose();
@@ -635,7 +638,7 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
       final saved = await ref
           .read(cloudSyncProvider.notifier)
           .saveUser(
-            id: widget.user?.id,
+            id: _saved?.id ?? widget.user?.id,
             username: username,
             fullName: name,
             role: _role,
@@ -643,14 +646,27 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
             departmentId: _departmentId,
             reportAccess: _access,
             active: widget.user?.active ?? true,
-            password: _isNew ? _password.text : null,
+            password: _isNew && _saved == null ? _password.text : null,
           );
+      // Saved now: saving again updates this account, never adds another.
+      _saved = saved;
       final pages = _effectivePages;
       var result = saved;
       if (!_samePages(pages, saved.pages)) {
-        result = await ref
-            .read(cloudSyncProvider.notifier)
-            .setUserPages(saved.id, pages);
+        try {
+          result = await ref
+              .read(cloudSyncProvider.notifier)
+              .setUserPages(saved.id, pages);
+        } catch (e) {
+          if (!mounted) return;
+          setState(() {
+            _busy = false;
+            _error =
+                'The account was saved, but its page access wasn’t '
+                '(${describeAccountError(e)}). Press Save to try again.';
+          });
+          return;
+        }
       }
       if (!mounted) return;
       Navigator.of(context)
@@ -665,12 +681,13 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
   }
 
   /// The page list to save: null when every page the role allows is on.
+  /// Nothing left (e.g. after a role change) stays "nothing", never "all".
   Set<String>? get _effectivePages {
     final pages = _pages;
     if (pages == null) return null;
     final allowed = {for (final p in pagesForRole(_role)) p.$1};
     final kept = pages.intersection(allowed);
-    return kept.isEmpty || kept.length == allowed.length ? null : kept;
+    return kept.length == allowed.length ? null : kept;
   }
 
   static bool _samePages(Set<String>? a, Set<String>? b) =>

@@ -17,7 +17,7 @@ class SupabaseCloudApi implements CloudApi {
   final _changes = StreamController<CloudChange>.broadcast();
   final _connection = StreamController<bool>.broadcast();
 
-  static const _codes = [
+  static const _codes = {
     'wrong_password',
     'not_signed_in',
     'already_claimed',
@@ -47,21 +47,75 @@ class SupabaseCloudApi implements CloudApi {
     'unknown_department',
     'bad_access',
     'has_reports',
-  ];
+    'too_many_items',
+    'bad_request',
+    'not_submitted',
+    'blocker_required',
+    'bad_urgency',
+    'bad_status',
+    'already_submitted',
+    'comment_required',
+    'bad_decision',
+    'title_required',
+    'accounts_only',
+    'airtable_token_rejected',
+    'no_airtable_token',
+    'airtable_not_found',
+    'airtable_limit',
+    'airtable_budget',
+    'airtable_empty',
+    'airtable_too_many_pages',
+  };
+
+  /// How long one call may take before it counts as no connection. The
+  /// full download gets longer (it is the biggest answer).
+  static const _timeout = Duration(seconds: 30);
+  static const _longTimeout = Duration(seconds: 90);
+  static const _long = {
+    'sync_read',
+    'sync_push',
+    'admin_backup',
+    'admin_restore_online',
+    'airtable_sync_now',
+  };
 
   Future<T> _call<T>(String fn, [Map<String, Object?>? params]) async {
     try {
-      return await _client.rpc(fn, params: params) as T;
+      final reply = await _client
+          .rpc(fn, params: params)
+          .timeout(_long.contains(fn) ? _longTimeout : _timeout);
+      return reply as T;
+    } on TypeError catch (e) {
+      throw CloudException('other', 'Unexpected answer from $fn: $e');
     } on PostgrestException catch (e) {
       // The function isn't there: the online database hasn't had this
       // version's update (supabase/migrations) applied yet.
       if (e.code == 'PGRST202') throw CloudException('needs_update', e.message);
-      final code = _codes.firstWhere(
-        (c) => e.message.contains(c),
-        orElse: () => 'other',
-      );
-      throw CloudException(code, e.message);
+      throw CloudException(codeOf(e.message), e.message);
     }
+  }
+
+  /// Reads an answer of an unexpected shape as a refusal ("other"), not a
+  /// crash.
+  static R _shape<R>(String fn, R Function() read) {
+    try {
+      return read();
+    } on TypeError catch (e) {
+      throw CloudException('other', 'Unexpected answer from $fn: $e');
+    }
+  }
+
+  /// The refusal code in a server message. The server raises its codes as
+  /// the whole message ("not_allowed", or "has_reports:3"), so only an
+  /// exact code at the start counts: a database error that merely contains
+  /// a code word ("table is locked") is "other", never mistaken for a
+  /// refusal (and never signs anyone out).
+  static String codeOf(String message) {
+    final m = RegExp(r'^([a-z][a-z0-9_]*)(?::|$)').firstMatch(message.trim());
+    final word = m?.group(1);
+    if (word == null) return 'other';
+    if (word == 'update_required') return 'needs_update';
+    return _codes.contains(word) ? word : 'other';
   }
 
   @override
@@ -69,13 +123,16 @@ class SupabaseCloudApi implements CloudApi {
     final data = await _call<Map<String, dynamic>>('sync_read', {
       'p_token': token,
     });
-    return {
-      for (final MapEntry(:key, :value) in data.entries)
-        key: [
-          for (final row in value as List)
-            Map<String, Object?>.from(row as Map),
-        ],
-    };
+    return _shape(
+      'sync_read',
+      () => {
+        for (final MapEntry(:key, :value) in data.entries)
+          key: [
+            for (final row in value as List)
+              Map<String, Object?>.from(row as Map),
+          ],
+      },
+    );
   }
 
   @override
@@ -91,7 +148,7 @@ class SupabaseCloudApi implements CloudApi {
 
   @override
   Future<String> login(String password) =>
-      _call<String>('admin_login', {'p_password': password});
+      _token('admin_login', {'p_password': password}, 'wrong_password');
 
   @override
   Future<void> setPassword(String token, String newPassword) => _call<dynamic>(
@@ -139,8 +196,11 @@ class SupabaseCloudApi implements CloudApi {
       _call<bool>('admin_has_recovery', {'p_token': token});
 
   @override
-  Future<String> recover(String code, String newPassword) =>
-      _call<String>('admin_recover', {'p_code': code, 'p_new': newPassword});
+  Future<String> recover(String code, String newPassword) => _token(
+    'admin_recover',
+    {'p_code': code, 'p_new': newPassword},
+    'wrong_recovery_code',
+  );
 
   @override
   Future<Map<String, bool>> profileStatus() async {
@@ -155,8 +215,23 @@ class SupabaseCloudApi implements CloudApi {
   }
 
   @override
-  Future<String> profileLogin(String role, String password) =>
-      _call<String>('profile_login', {'p_role': role, 'p_password': password});
+  Future<String> profileLogin(String role, String password) => _token(
+    'profile_login',
+    {'p_role': role, 'p_password': password},
+    'wrong_password',
+  );
+
+  /// A sign-in that answers NULL for a wrong password or code: the server
+  /// counts wrong tries, and a raised error would undo that count.
+  Future<String> _token(
+    String fn,
+    Map<String, Object?> params,
+    String wrongCode,
+  ) async {
+    final t = await _call<String?>(fn, params);
+    if (t == null || t.isEmpty) throw CloudException(wrongCode, wrongCode);
+    return t;
+  }
 
   @override
   Future<void> setProfilePassword(String token, String role, String password) =>
@@ -171,9 +246,12 @@ class SupabaseCloudApi implements CloudApi {
   UserSignIn _signIn(Map<String, dynamic> data) {
     final error = data['error'];
     if (error is String) throw CloudException(error);
-    return UserSignIn(
-      data['token'] as String,
-      AppUser.fromJson(Map<String, Object?>.from(data['user'] as Map)),
+    return _shape(
+      'sign-in',
+      () => UserSignIn(
+        data['token'] as String,
+        AppUser.fromJson(Map<String, Object?>.from(data['user'] as Map)),
+      ),
     );
   }
 
@@ -211,11 +289,15 @@ class SupabaseCloudApi implements CloudApi {
   );
 
   @override
-  Future<AppUser> userSession(String token) async => AppUser.fromJson(
-    Map<String, Object?>.from(
-      await _call<Map<String, dynamic>>('user_session', {'p_token': token}),
-    ),
-  );
+  Future<AppUser> userSession(String token) async {
+    final data = await _call<Map<String, dynamic>>('user_session', {
+      'p_token': token,
+    });
+    return _shape(
+      'user_session',
+      () => AppUser.fromJson(Map<String, Object?>.from(data)),
+    );
+  }
 
   @override
   Future<void> userLogout(String token) =>
@@ -234,10 +316,13 @@ class SupabaseCloudApi implements CloudApi {
     final data = await _call<List<dynamic>>('admin_list_users', {
       'p_token': token,
     });
-    return [
-      for (final u in data)
-        AppUser.fromJson(Map<String, Object?>.from(u as Map)),
-    ];
+    return _shape(
+      'admin_list_users',
+      () => [
+        for (final u in data)
+          AppUser.fromJson(Map<String, Object?>.from(u as Map)),
+      ],
+    );
   }
 
   @override
@@ -266,8 +351,9 @@ class SupabaseCloudApi implements CloudApi {
   void dispose() {
     final channel = _channel;
     if (channel != null) _client.removeChannel(channel);
+    _channel = null;
     _client.dispose();
-    _changes.close();
-    _connection.close();
+    // The streams stay open: a late listener gets nothing rather than a
+    // StateError from a closed controller.
   }
 }

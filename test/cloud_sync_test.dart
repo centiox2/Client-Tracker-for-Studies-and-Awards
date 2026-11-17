@@ -21,6 +21,7 @@ import 'package:client_tracker/repositories/revenue_repository.dart';
 import 'package:client_tracker/repositories/staff_repository.dart';
 import 'package:client_tracker/repositories/week_repository.dart';
 import 'package:client_tracker/services/cloud/cloud_api.dart';
+import 'package:client_tracker/services/cloud/supabase_cloud_api.dart';
 import 'package:client_tracker/services/cloud/sync_engine.dart';
 import 'package:client_tracker/state/app_state.dart';
 import 'package:client_tracker/state/cloud_sync.dart';
@@ -157,9 +158,14 @@ class FakeCloud implements CloudApi {
     };
   }
 
+  /// Rows the online database refuses (a bad row, a rule it breaks).
+  bool Function(String table, Map<String, Object?> row)? refuseRow;
+  int pushes = 0;
+
   @override
   Future<void> push(String token, Map<String, Object?> payload) async {
     _online();
+    pushes++;
     final userRole = _userRole(token);
     final team = teamTokens.contains(token) || userRole == 'admin_team';
     if (!tokens.contains(token) && !team && userRole != 'admin') {
@@ -167,6 +173,13 @@ class FakeCloud implements CloudApi {
     }
     final deletes = (payload['deletes'] as Map? ?? {}).cast<String, List>();
     final upserts = (payload['upserts'] as Map? ?? {}).cast<String, List>();
+    if (refuseRow case final refuse?) {
+      for (final MapEntry(key: t, value: rows) in upserts.entries) {
+        if (rows.any((r) => refuse(t, (r as Map).cast<String, Object?>()))) {
+          throw CloudException('bad_request');
+        }
+      }
+    }
     if (team &&
         [
           'revenue_entries',
@@ -1275,7 +1288,7 @@ void main() {
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
-    AuthRepository.iterations = 10;
+    AuthRepository.iterationsForTests = 10;
     admin = openInMemoryDatabase();
     boss = openInMemoryDatabase();
     cloud = FakeCloud();
@@ -1346,8 +1359,8 @@ void main() {
     final a = SyncEngine(admin, cloud);
     await a.pull(token: token, readToken: token);
     final b = SyncEngine(boss, cloud);
-    await b.pull(readToken: await cloud.profileLogin('director', ''));
-    final sub = cloud.changes().listen(b.apply);
+    final read = await cloud.profileLogin('director', '');
+    await b.pull(readToken: read);
 
     final day = WeekRepository(admin).getDays(week.id)[2];
     ClientCountRepository(admin).saveCount(
@@ -1357,7 +1370,7 @@ void main() {
       existingClients: 0,
     );
     await a.flush(token);
-    await Future<void>.delayed(Duration.zero);
+    await b.pull(readToken: read);
     expect(
       ClientCountRepository(boss)
           .countValues(day.id, staffId(boss, 'Ian'))
@@ -1368,9 +1381,8 @@ void main() {
 
     WeekRepository(admin).deleteWeek(week.id);
     await a.flush(token);
-    await Future<void>.delayed(Duration.zero);
+    await b.pull(readToken: read);
     expect(WeekRepository(boss).getAllWeeks(), isEmpty);
-    await sub.cancel();
   });
 
   test('unsent local edits are never overwritten by cloud data', () async {
@@ -1387,20 +1399,10 @@ void main() {
       newClients: 12,
       existingClients: 0,
     );
-    // A late cloud echo of an older value for the same row.
-    final row = admin.raw.select(
-      'SELECT * FROM client_counts WHERE day_id = ? AND staff_id = ?;',
-      [day.id, joy],
-    ).first;
-    a.apply(
-      CloudChange(
-        table: 'client_counts',
-        deleted: false,
-        row: {...row, 'new_clients': 1},
-      ),
-    );
+    // Offline: the change waits (a pull without the edit token keeps it),
+    // then goes up.
+    expect(await a.pull(readToken: token), isFalse);
     expect(counts.countValues(day.id, joy).newClients, 12);
-    // Offline: the change waits, then goes up.
     cloud.offline = true;
     await expectLater(a.flush(token), throwsException);
     expect(a.pending, greaterThan(0));
@@ -1428,6 +1430,87 @@ void main() {
     expect(
       cloud.tables['weeks']!.values.map((w) => w['start_date']),
       containsAll(['2026-09-07', '2026-09-14']),
+    );
+  });
+
+  test('one refused change is set aside; the rest still go up', () async {
+    final token = await cloud.claim('pass1234');
+    final week = WeekRepository(admin).createWeekFor(DateTime(2026, 10, 12));
+    final a = SyncEngine(admin, cloud);
+    await a.pull(token: token, readToken: token);
+    final days = WeekRepository(admin).getDays(week.id);
+    final counts = ClientCountRepository(admin);
+    cloud.refuseRow = (t, r) => t == 'client_counts' && r['new_clients'] == 99;
+    counts.saveCount(
+      dayId: days[0].id,
+      staffId: staffId(admin, 'Joy'),
+      newClients: 99,
+      existingClients: 0,
+    );
+    counts.saveCount(
+      dayId: days[1].id,
+      staffId: staffId(admin, 'Ian'),
+      newClients: 5,
+      existingClients: 0,
+    );
+    await a.flush(token);
+    expect(a.pending, 0, reason: 'the queue is no longer stuck');
+    expect(
+      cloud.tables['client_counts']!.values.where((r) => r['new_clients'] == 5),
+      hasLength(1),
+    );
+    expect(a.heldBack, hasLength(1));
+    expect(a.heldBack.single.table, 'client_counts');
+    expect(a.heldBack.single.reason, 'bad_request');
+
+    // Later changes are not held up.
+    counts.saveCount(
+      dayId: days[2].id,
+      staffId: staffId(admin, 'Ian'),
+      newClients: 3,
+      existingClients: 0,
+    );
+    final before = cloud.pushes;
+    await a.flush(token);
+    expect(cloud.pushes, before + 1);
+    expect(a.pending, 0);
+
+    // Fixed online: sent again from the copy kept here.
+    cloud.refuseRow = null;
+    a.retryHeldBack();
+    expect(a.heldBack, isEmpty);
+    await a.flush(token);
+    expect(
+      cloud.tables['client_counts']!.values.where(
+        (r) => r['new_clients'] == 99,
+      ),
+      hasLength(1),
+    );
+  });
+
+  test('a lost sign-in keeps the whole queue waiting', () async {
+    final token = await cloud.claim('pass1234');
+    final a = SyncEngine(admin, cloud);
+    await a.pull(token: token, readToken: token);
+    WeekRepository(admin).createWeekFor(DateTime(2026, 11, 2));
+    final waiting = a.pending;
+    await expectLater(a.flush('not-a-token'), throwsA(isA<CloudException>()));
+    expect(a.pending, waiting);
+    expect(a.heldBack, isEmpty);
+  });
+
+  test('server refusal codes are read exactly', () {
+    expect(SupabaseCloudApi.codeOf('not_allowed'), 'not_allowed');
+    expect(SupabaseCloudApi.codeOf('has_reports:3'), 'has_reports');
+    expect(SupabaseCloudApi.codeOf('update_required'), 'needs_update');
+    // A database error that only mentions a code word is not that code.
+    expect(
+      SupabaseCloudApi.codeOf('could not obtain lock: table is locked'),
+      'other',
+    );
+    expect(
+      SupabaseCloudApi.codeOf('relation not_signed_in_x does not exist'),
+      'other',
     );
   });
 
@@ -1600,21 +1683,21 @@ void main() {
   testWidgets('a profile password set on another device is asked for here', (
     tester,
   ) async {
-    cloud.profilePasswords['director'] = 'd-pass';
+    cloud.profilePasswords['director'] = 'director-pass';
     final container = await pumpApp(tester, boss);
     expect(AuthRepository(boss).isLocked(UserRole.director), isTrue);
     await tester.tap(find.byKey(const ValueKey('profile-director')));
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const ValueKey('profile-password')),
-      'd-pass',
+      'director-pass',
     );
     await tester.tap(find.byKey(const ValueKey('profile-open')));
     await tester.pumpAndSettle();
     expect(container.read(adminSessionProvider), UserRole.director);
     // Remembered here, so it opens offline next time.
     expect(
-      AuthRepository(boss).verifyProfile(UserRole.director, 'd-pass'),
+      AuthRepository(boss).verifyProfile(UserRole.director, 'director-pass'),
       true,
     );
     container.dispose();
@@ -1635,12 +1718,15 @@ void main() {
   testWidgets('kept signed in, until the admin changes the password', (
     tester,
   ) async {
-    cloud.profilePasswords['director'] = 'd-pass';
+    cloud.profilePasswords['director'] = 'director-pass';
     final auth = AuthRepository(boss);
-    auth.setProfilePassword(UserRole.director, 'd-pass');
+    auth.setProfilePassword(UserRole.director, 'director-pass');
     auth.rememberProfile(UserRole.director, version: 'v0');
     SharedPreferences.setMockInitialValues({
-      'cloud_director_token': await cloud.profileLogin('director', 'd-pass'),
+      'cloud_director_token': await cloud.profileLogin(
+        'director',
+        'director-pass',
+      ),
     });
     var container = await pumpApp(tester, boss);
     expect(container.read(adminSessionProvider), UserRole.director);
@@ -1754,9 +1840,9 @@ void main() {
   testWidgets('kept signed in from an older version: asked once more', (
     tester,
   ) async {
-    cloud.profilePasswords['director'] = 'd-pass';
+    cloud.profilePasswords['director'] = 'director-pass';
     final auth = AuthRepository(boss);
-    auth.setProfilePassword(UserRole.director, 'd-pass');
+    auth.setProfilePassword(UserRole.director, 'director-pass');
     auth.rememberProfile(UserRole.director, version: 'v0');
     final container = await pumpApp(tester, boss); // no saved sign-in
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));

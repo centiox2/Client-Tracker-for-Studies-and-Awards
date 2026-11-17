@@ -221,16 +221,36 @@ class ClientCountRepository {
     newClients = newClients.clamp(0, maxClients);
     existingClients = existingClients.clamp(0, maxClients);
     final now = DateTime.now().toIso8601String();
-    if (log) {
-      _logChange(
-        dayId: dayId,
-        staffId: staffId,
-        before: countValues(dayId, staffId),
-        newClients: newClients,
-        existingClients: existingClients,
-        at: now,
-      );
-    }
+    // The value and its history line are one change: if the write fails,
+    // no history line is added (or merged away) for it.
+    return _db.transaction(() {
+      final before = log ? countValues(dayId, staffId) : null;
+      _write(dayId, staffId, newClients, existingClients, now);
+      if (before != null) {
+        _logChange(
+          dayId: dayId,
+          staffId: staffId,
+          before: before,
+          newClients: newClients,
+          existingClients: existingClients,
+          at: now,
+        );
+      }
+      final row = _db.raw.select(
+        'SELECT * FROM client_counts WHERE day_id = ? AND staff_id = ?;',
+        [dayId, staffId],
+      ).first;
+      return ClientCount.fromRow(row);
+    });
+  }
+
+  void _write(
+    int dayId,
+    int staffId,
+    int newClients,
+    int existingClients,
+    String now,
+  ) {
     _db.raw.execute(
       'INSERT INTO client_counts '
       '(id, day_id, staff_id, new_clients, existing_clients, updated_at) '
@@ -241,11 +261,6 @@ class ClientCountRepository {
       'updated_at = excluded.updated_at;',
       [dayId, staffId, newClients, existingClients, now],
     );
-    final row = _db.raw.select(
-      'SELECT * FROM client_counts WHERE day_id = ? AND staff_id = ?;',
-      [dayId, staffId],
-    ).first;
-    return ClientCount.fromRow(row);
   }
 
   void _logChange({

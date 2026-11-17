@@ -53,7 +53,7 @@ class _NewWeekDialogState extends ConsumerState<_NewWeekDialog> {
       lastDate: DateTime(2100),
       helpText: 'Pick any day in the week',
     );
-    if (picked != null) {
+    if (picked != null && mounted) {
       setState(() {
         _monday = WeekRepository.mondayOf(picked);
       });

@@ -12,14 +12,19 @@ import 'cloud_api.dart';
 /// - **sends** local changes (noted in `sync_outbox` by triggers) to the
 ///   cloud — only with an admin token, since only the admin edits;
 /// - **downloads** the cloud's data when a device starts (or reconnects);
-/// - **applies** live changes from other devices as they arrive.
+/// - **downloads again** when another device signals a change.
 ///
 /// Rules that keep data safe:
-/// - Local edits not yet sent are never overwritten by cloud data.
+/// - While a device is joined, local edits not yet sent go up before any
+///   download, so cloud data never overwrites them.
 /// - A device joins ("connects") once: if the cloud already has data, it
-///   replaces this device's starter data; if the cloud is empty, the first
-///   admin device uploads everything it has. Work made offline before the
-///   first join is kept as a recovery copy ([recovery]) rather than lost.
+///   replaces this device's data; if the cloud is empty, the first admin
+///   device uploads everything it has. That join, and "Download fresh
+///   copy", are the two moments cloud data replaces edits that weren't
+///   sent: they are then kept whole as a recovery copy ([recovery]) to
+///   save or restore, never silently dropped.
+/// - A change the online database refuses on its own is set aside with
+///   the reason ([heldBack]) so it can't block everything after it.
 /// - Uploads go one at a time (and never alongside a download), so an
 ///   older upload can't land after a newer one.
 class SyncEngine {
@@ -143,86 +148,175 @@ class SyncEngine {
   /// Sends waiting local changes. Returns how many rows went up.
   Future<int> flush(String token) => _serial(() => _flush(token));
 
+  /// Refusals about the sign-in or the app's version, not one change: the
+  /// whole queue waits for those.
+  static const _waitCodes = {'not_signed_in', 'needs_update'};
+
   Future<int> _flush(String token) async {
     final entries = _db.raw.select(
       'SELECT seq, tbl, pk FROM sync_outbox ORDER BY seq;',
     );
     if (entries.isEmpty) return 0;
     final maxSeq = entries.last['seq']! as int;
-    final keys = <String, Set<String>>{};
+    final waiting = <String, Set<String>>{};
     for (final e in entries) {
-      keys.putIfAbsent(e['tbl']! as String, () => {}).add(e['pk']! as String);
+      waiting
+          .putIfAbsent(e['tbl']! as String, () => {})
+          .add(e['pk']! as String);
     }
-    final upserts = <String, List<Map<String, Object?>>>{};
-    final deletes = <String, List<Object?>>{};
-    var count = 0;
-    for (final MapEntry(key: table, value: pks) in keys.entries) {
-      final pkCol = AppDatabase.syncedTables[table];
-      if (pkCol == null) continue;
-      for (final pk in pks) {
-        final rows = _db.raw.select(
-          'SELECT * FROM $table WHERE CAST($pkCol AS TEXT) = ?;',
-          [pk],
-        );
-        if (rows.isEmpty) {
-          deletes.putIfAbsent(table, () => []).add(_key(pkCol, pk));
-        } else {
-          upserts.putIfAbsent(table, () => []).add(_row(rows.first));
-        }
-        count++;
+    // Parents before children for new rows; children before parents for
+    // deletes (the order the online database checks them in).
+    final changes = <_Change>[];
+    final deletes = <_Change>[];
+    for (final MapEntry(key: table, value: pkCol)
+        in AppDatabase.syncedTables.entries) {
+      for (final pk in waiting[table] ?? const <String>{}) {
+        final row = _readRow(table, pkCol, pk);
+        (row == null ? deletes : changes).add(_Change(table, pkCol, pk, row));
       }
     }
-    await _api.push(token, {'upserts': upserts, 'deletes': deletes});
+    changes.addAll(deletes.reversed);
+    try {
+      await _api.push(token, _payload(changes));
+    } on CloudException catch (e) {
+      if (_waitCodes.contains(e.code)) rethrow;
+      // Refused: find which change it was, one at a time, so one bad row
+      // can't hold up everything else. The ones refused on their own are
+      // set aside ([heldBack]); the rest go up.
+      return _sendOneByOne(token, changes, maxSeq);
+    }
     // Only what was sent; anything edited meanwhile stays queued.
     _db.raw.execute('DELETE FROM sync_outbox WHERE seq <= ?;', [maxSeq]);
     if (!connected) _setState(_connectedKey, '1');
-    return count;
+    return changes.length;
   }
 
-  /// Applies one live change from another device. Returns false when the
-  /// change couldn't be applied in place (the caller then pulls everything).
-  bool apply(CloudChange change) {
-    final pkCol = AppDatabase.syncedTables[change.table];
-    if (pkCol == null) return true;
-    final pk = change.row[pkCol];
-    if (pk == null) return false;
-    // This device has newer, unsent edits to the same row: keep them.
-    final waiting = _db.raw.select(
-      'SELECT 1 FROM sync_outbox WHERE tbl = ? AND pk = ? LIMIT 1;',
-      [change.table, '$pk'],
+  Future<int> _sendOneByOne(
+    String token,
+    List<_Change> changes,
+    int maxSeq,
+  ) async {
+    var sent = 0;
+    void done(_Change c) => _db.raw.execute(
+      'DELETE FROM sync_outbox WHERE seq <= ? AND tbl = ? AND pk = ?;',
+      [maxSeq, c.table, c.pk],
     );
-    if (waiting.isNotEmpty) return true;
+    for (final c in changes) {
+      try {
+        await _api.push(token, _payload([c]));
+        sent++;
+      } on CloudException catch (e) {
+        if (_waitCodes.contains(e.code)) rethrow;
+        _holdBack(c, e);
+      }
+      // Sent, or set aside: either way it no longer blocks the queue. A
+      // lost connection part-way keeps the rest queued (thrown above).
+      done(c);
+    }
+    return sent;
+  }
+
+  Map<String, Object?> _payload(List<_Change> changes) {
+    final upserts = <String, List<Map<String, Object?>>>{};
+    final deletes = <String, List<Object?>>{};
+    for (final c in changes) {
+      if (c.row == null) {
+        deletes.putIfAbsent(c.table, () => []).add(_key(c.pkCol, c.pk));
+      } else {
+        upserts.putIfAbsent(c.table, () => []).add(c.row!);
+      }
+    }
+    return {'upserts': upserts, 'deletes': deletes};
+  }
+
+  /// The row as it is now, or null when it has been deleted. Compared
+  /// without a cast, so the primary key's index is used.
+  Map<String, Object?>? _readRow(String table, String pkCol, String pk) {
+    final key = _keyOrNull(pkCol, pk);
+    if (key == null) return null;
+    final rows = _db.raw.select('SELECT * FROM $table WHERE $pkCol = ?;', [
+      key,
+    ]);
+    return rows.isEmpty ? null : _row(rows.first);
+  }
+
+  // ---- Changes the online database refused --------------------------------
+
+  static const _heldBackKey = 'held_back';
+
+  /// Changes the online database refused on their own (newest last): kept
+  /// here, with the reason, until they are sent again or discarded.
+  List<HeldBackChange> get heldBack {
+    final raw = _state(_heldBackKey);
+    if (raw == null || raw.isEmpty) return const [];
     try {
-      _db.applyingRemote(() {
-        if (change.deleted) {
-          _db.raw.execute('DELETE FROM ${change.table} WHERE $pkCol = ?;', [
-            pk,
-          ]);
-          return;
-        }
-        final cols = _columns(change.table);
-        final row = {
-          for (final c in cols)
-            if (change.row.containsKey(c)) c: change.row[c],
-        };
-        final names = row.keys.toList();
-        final updates = names
-            .where((c) => c != pkCol)
-            .map((c) => '$c = excluded.$c')
-            .join(', ');
-        _db.raw.execute(
-          'INSERT INTO ${change.table} (${names.join(', ')}) '
-          'VALUES (${List.filled(names.length, '?').join(', ')}) '
-          'ON CONFLICT($pkCol) DO '
-          '${updates.isEmpty ? 'NOTHING' : 'UPDATE SET $updates'};',
-          [for (final c in names) row[c]],
-        );
-      });
-      return true;
+      return [
+        for (final j in jsonDecode(raw) as List)
+          HeldBackChange.fromJson((j as Map).cast<String, Object?>()),
+      ];
     } catch (_) {
-      return false;
+      return const [];
     }
   }
+
+  void _holdBack(_Change c, CloudException e) {
+    final list = [
+      for (final h in heldBack)
+        if (h.table != c.table || h.pk != c.pk) h,
+      HeldBackChange(
+        table: c.table,
+        pk: c.pk,
+        row: c.row,
+        reason: e.code,
+        detail: e.detail,
+        at: DateTime.now().toUtc(),
+      ),
+    ];
+    // A runaway list never grows without end: the oldest go first.
+    final kept = list.length > 500 ? list.sublist(list.length - 500) : list;
+    _setState(_heldBackKey, jsonEncode([for (final h in kept) h.toJson()]));
+  }
+
+  /// Puts the set-aside changes back as they were and queues them to be
+  /// sent again (after, say, the admin fixed what was wrong).
+  void retryHeldBack() {
+    final list = heldBack;
+    if (list.isEmpty) return;
+    _db.transaction(() {
+      for (final h in list) {
+        final pkCol = AppDatabase.syncedTables[h.table];
+        if (pkCol == null) continue;
+        final key = _keyOrNull(pkCol, h.pk);
+        if (key == null) continue;
+        final row = h.row;
+        if (row == null) {
+          _db.raw.execute('DELETE FROM ${h.table} WHERE $pkCol = ?;', [key]);
+        } else {
+          final cols = _columns(h.table).where(row.containsKey).toList();
+          final updates = [
+            for (final c in cols)
+              if (c != pkCol) '$c = excluded.$c',
+          ].join(', ');
+          _db.raw.execute(
+            'INSERT INTO ${h.table} (${cols.join(', ')}) '
+            'VALUES (${List.filled(cols.length, '?').join(', ')}) '
+            'ON CONFLICT($pkCol) DO '
+            '${updates.isEmpty ? 'NOTHING' : 'UPDATE SET $updates'};',
+            [for (final c in cols) row[c]],
+          );
+        }
+        // Queued again even if nothing changed here.
+        _db.raw.execute('INSERT INTO sync_outbox (tbl, pk) VALUES (?, ?);', [
+          h.table,
+          h.pk,
+        ]);
+      }
+      clearHeldBack();
+    });
+  }
+
+  void clearHeldBack() =>
+      _db.raw.execute('DELETE FROM sync_state WHERE k = ?;', [_heldBackKey]);
 
   /// Takes the cloud's data as it is in place of waiting local changes —
   /// the way out if a change can't be sent. Nothing changes here until the
@@ -288,8 +382,12 @@ class SyncEngine {
     ],
   );
 
-  static Object _key(String pkCol, String pk) =>
-      pkCol == 'key' ? pk : int.parse(pk);
+  static Object _key(String pkCol, String pk) => _keyOrNull(pkCol, pk) ?? pk;
+
+  /// The key as stored: text for settings, a number for everything else
+  /// (null for a damaged note, which is then skipped, not thrown).
+  static Object? _keyOrNull(String pkCol, String pk) =>
+      pkCol == 'key' ? pk : int.tryParse(pk);
 
   static Map<String, Object?> _row(Map<String, Object?> r) => {
     for (final k in r.keys) k: r[k],
@@ -304,5 +402,55 @@ class SyncEngine {
     'INSERT INTO sync_state (k, v) VALUES (?, ?) '
     'ON CONFLICT(k) DO UPDATE SET v = excluded.v;',
     [key, value],
+  );
+}
+
+class _Change {
+  _Change(this.table, this.pkCol, this.pk, this.row);
+  final String table;
+  final String pkCol;
+  final String pk;
+
+  /// Null: deleted.
+  final Map<String, Object?>? row;
+}
+
+/// A change the online database refused on its own, set aside so the rest
+/// of the queue could go up.
+class HeldBackChange {
+  const HeldBackChange({
+    required this.table,
+    required this.pk,
+    required this.row,
+    required this.reason,
+    required this.at,
+    this.detail,
+  });
+
+  final String table;
+  final String pk;
+
+  /// The row as it was sent (null: a delete).
+  final Map<String, Object?>? row;
+  final String reason;
+  final String? detail;
+  final DateTime at;
+
+  Map<String, Object?> toJson() => {
+    'table': table,
+    'pk': pk,
+    'row': row,
+    'reason': reason,
+    'detail': ?detail,
+    'at': at.toIso8601String(),
+  };
+
+  factory HeldBackChange.fromJson(Map<String, Object?> j) => HeldBackChange(
+    table: j['table'] as String,
+    pk: '${j['pk']}',
+    row: (j['row'] as Map?)?.cast<String, Object?>(),
+    reason: j['reason'] as String? ?? 'other',
+    detail: j['detail'] as String?,
+    at: DateTime.tryParse(j['at'] as String? ?? '') ?? DateTime.now(),
   );
 }

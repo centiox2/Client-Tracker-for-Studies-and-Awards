@@ -20,7 +20,7 @@ import 'test_helpers.dart';
 void main() {
   late AppDatabase db;
 
-  setUpAll(() => AuthRepository.iterations = 10);
+  setUpAll(() => AuthRepository.iterationsForTests = 10);
   setUp(() => db = openInMemoryDatabase());
   tearDown(() => db.close());
 

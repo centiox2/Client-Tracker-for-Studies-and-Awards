@@ -36,6 +36,7 @@ class CloudSyncState {
     this.adminLinked = false,
     this.claimed,
     this.message,
+    this.heldBack = 0,
   });
 
   final SyncPhase phase;
@@ -51,6 +52,10 @@ class CloudSyncState {
   final bool? claimed;
   final String? message;
 
+  /// Changes the online database refused on their own, set aside so the
+  /// rest could be sent (see [CloudSyncController.heldBack]).
+  final int heldBack;
+
   CloudSyncState copyWith({
     SyncPhase? phase,
     DateTime? lastSynced,
@@ -59,6 +64,7 @@ class CloudSyncState {
     bool? claimed,
     String? message,
     bool clearMessage = false,
+    int? heldBack,
   }) => CloudSyncState(
     phase: phase ?? this.phase,
     lastSynced: lastSynced ?? this.lastSynced,
@@ -66,6 +72,7 @@ class CloudSyncState {
     adminLinked: adminLinked ?? this.adminLinked,
     claimed: claimed ?? this.claimed,
     message: clearMessage ? null : (message ?? this.message),
+    heldBack: heldBack ?? this.heldBack,
   );
 }
 
@@ -148,26 +155,18 @@ class CloudSyncController extends Notifier<CloudSyncState> {
   bool _again = false;
   Timer? _pingTimer;
   Timer? _flushTimer;
-  Timer? _refreshTimer;
   Timer? _heartbeat;
   StreamSubscription<CloudChange>? _changes;
   StreamSubscription<bool>? _connection;
   bool _connecting = false;
 
-  /// Version bumps caused by changes from the cloud (not to be sent back).
-  int _remoteBumps = 0;
-
   @override
   CloudSyncState build() {
     ref.onDispose(_stop);
     // Any local change: send it shortly (debounced while typing).
-    ref.listen(dataVersionProvider, (_, _) {
-      if (_remoteBumps > 0) {
-        _remoteBumps--;
-        return;
-      }
-      _scheduleFlush();
-    });
+    // Changes from the cloud are applied without queueing anything, so
+    // whether there is something to send is read from the queue itself.
+    ref.listen(dataVersionProvider, (_, _) => _scheduleFlush());
     // Signed out (from the account menu, say): end it online too.
     ref.listen(currentUserProvider, (before, now) {
       if (before != null && now == null) _endUserSession();
@@ -266,6 +265,7 @@ class CloudSyncController extends Notifier<CloudSyncState> {
         claimed: claimed,
         lastSynced: DateTime.now(),
         pending: engine.pending,
+        heldBack: engine.heldBack.length,
         clearMessage: true,
       );
     } on CloudException catch (e) {
@@ -284,8 +284,11 @@ class CloudSyncController extends Notifier<CloudSyncState> {
   }
 
   void _scheduleFlush() {
-    if (_engine == null) return;
-    state = state.copyWith(pending: _engine!.pending);
+    final engine = _engine;
+    if (engine == null) return;
+    final pending = engine.pending;
+    if (pending != state.pending) state = state.copyWith(pending: pending);
+    if (pending == 0) return;
     _flushTimer?.cancel();
     _flushTimer = Timer(const Duration(milliseconds: 700), _flush);
   }
@@ -306,6 +309,7 @@ class CloudSyncController extends Notifier<CloudSyncState> {
         phase: SyncPhase.live,
         lastSynced: DateTime.now(),
         pending: engine.pending,
+        heldBack: engine.heldBack.length,
         clearMessage: true,
       );
     } on CloudException catch (e) {
@@ -329,10 +333,7 @@ class CloudSyncController extends Notifier<CloudSyncState> {
     });
   }
 
-  void _bumpFromRemote() {
-    _remoteBumps++;
-    ref.read(dataVersionProvider.notifier).bump();
-  }
+  void _bumpFromRemote() => ref.read(dataVersionProvider.notifier).bump();
 
   void _refused(CloudException e) {
     if (!ref.mounted) return;
@@ -361,9 +362,12 @@ class CloudSyncController extends Notifier<CloudSyncState> {
       );
       return;
     }
+    // The code only: the database's own wording stays out of sight.
     state = state.copyWith(
       phase: SyncPhase.error,
-      message: 'The online database refused a change ($e).',
+      message: e.code == 'needs_update'
+          ? 'The online database needs this version\'s update.'
+          : 'The online database refused a change (${e.code}).',
     );
   }
 
@@ -526,6 +530,8 @@ class CloudSyncController extends Notifier<CloudSyncState> {
         return ref.mounted;
       }
       if (signIn.user.mustChange) {
+        // That sign-in is not used: end it online too.
+        unawaited(api.userLogout(signIn.token).then((_) {}, onError: (_) {}));
         await signOutUser(
           notice: 'An admin gave you a new password. Sign in with it.',
         );
@@ -696,7 +702,7 @@ class CloudSyncController extends Notifier<CloudSyncState> {
   );
 
   /// Admin: limits which pages account [userId] opens ([pages] are AppTab
-  /// names; null or empty means every page its role allows).
+  /// names; null means every page its role allows, empty means none).
   Future<AppUser> setUserPages(int userId, Set<String>? pages) async {
     final saved = AppUser.fromJson(
       Map<String, Object?>.from(
@@ -881,6 +887,26 @@ class CloudSyncController extends Notifier<CloudSyncState> {
 
   void discardRecovery() => _engine?.clearRecovery();
 
+  /// Changes the online database refused on their own (each with why),
+  /// set aside so the rest of the queue could be sent.
+  List<HeldBackChange> get heldBack => _engine?.heldBack ?? const [];
+
+  /// Sends the set-aside changes again (after the cause was fixed).
+  void retryHeldBack() {
+    final engine = _engine;
+    if (engine == null) return;
+    engine.retryHeldBack();
+    state = state.copyWith(heldBack: 0, pending: engine.pending);
+    _bumpFromRemote();
+    unawaited(_flush());
+  }
+
+  /// Gives up on the set-aside changes (the online data stays as it is).
+  void discardHeldBack() {
+    _engine?.clearHeldBack();
+    state = state.copyWith(heldBack: 0);
+  }
+
   /// Takes the cloud's data in place of waiting local changes (which are
   /// kept as [recovery]). False when nothing was changed: offline, or the
   /// online data is empty.
@@ -946,7 +972,6 @@ class CloudSyncController extends Notifier<CloudSyncState> {
   void _stop() {
     _pingTimer?.cancel();
     _flushTimer?.cancel();
-    _refreshTimer?.cancel();
     _heartbeat?.cancel();
     _changes?.cancel();
     _connection?.cancel();

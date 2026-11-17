@@ -28,12 +28,15 @@ class RowSnapshot {
 
   int get rowCount => _rows.fold(0, (n, p) => n + p.$2.length);
 
+  /// A row that is back already (re-made, or synced in meanwhile) is left
+  /// as it is: REPLACE would delete it first, and with it, through
+  /// ON DELETE CASCADE, its live child rows.
   void restore(AppDatabase db) => db.transaction(() {
     for (final (table, rows) in _rows) {
       for (final row in rows) {
         final cols = row.keys.toList();
         db.raw.execute(
-          'INSERT OR REPLACE INTO $table (${cols.join(', ')}) '
+          'INSERT OR IGNORE INTO $table (${cols.join(', ')}) '
           'VALUES (${List.filled(cols.length, '?').join(', ')});',
           [for (final c in cols) row[c]],
         );

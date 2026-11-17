@@ -99,7 +99,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final target = ref.watch(dailyTargetProvider);
     final lastBackup = ref.watch(lastBackupProvider);
     // Rebuilt after each sync, so a recovery copy shows when it's made.
-    ref.watch(cloudSyncProvider.select((c) => c.lastSynced));
+    ref.watch(cloudSyncProvider.select((c) => (c.lastSynced, c.heldBack)));
     final theme = Theme.of(context);
     if (!_targetSeeded) {
       _target.text = target?.toString() ?? '';
@@ -288,6 +288,62 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         '${DateFormat('d MMM y, HH:mm').format(lastBackup)}',
               style: muted,
             ),
+            if (ref.read(cloudSyncProvider.notifier).heldBack case final held
+                when held.isNotEmpty) ...[
+              const SizedBox(height: Dt.s12),
+              Text(
+                '${held.length == 1 ? '1 change' : '${held.length} changes'} '
+                'made on this device couldn’t be sent: the online database '
+                'refused ${held.length == 1 ? 'it' : 'them'} '
+                '(${{for (final h in held) h.reason}.join(', ')}). Everything '
+                'else was sent. Save a copy, try again once the cause is '
+                'fixed, or discard ${held.length == 1 ? 'it' : 'them'}.',
+                key: const ValueKey('held-back-note'),
+              ),
+              const SizedBox(height: Dt.s8),
+              Wrap(
+                spacing: Dt.s8,
+                runSpacing: Dt.s8,
+                children: [
+                  OutlinedButton.icon(
+                    key: const ValueKey('held-back-save'),
+                    onPressed: () => deliverFile(
+                      context,
+                      dialogTitle: 'Save the changes that weren’t sent',
+                      fileName:
+                          'client_tracker_not_sent_'
+                          '${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}'
+                          '.json',
+                      extension: 'json',
+                      bytes: Uint8List.fromList(
+                        utf8.encode(
+                          const JsonEncoder.withIndent('  ')
+                              .convert([for (final h in held) h.toJson()]),
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.download_outlined, size: 16),
+                    label: const Text('Save a copy'),
+                  ),
+                  OutlinedButton(
+                    key: const ValueKey('held-back-retry'),
+                    onPressed: () {
+                      ref.read(cloudSyncProvider.notifier).retryHeldBack();
+                      setState(() {});
+                    },
+                    child: const Text('Try again'),
+                  ),
+                  TextButton(
+                    key: const ValueKey('held-back-discard'),
+                    onPressed: () {
+                      ref.read(cloudSyncProvider.notifier).discardHeldBack();
+                      setState(() {});
+                    },
+                    child: const Text('Discard'),
+                  ),
+                ],
+              ),
+            ],
             if (ref.read(cloudSyncProvider.notifier).recovery
                 case final kept?) ...[
               const SizedBox(height: Dt.s12),
@@ -1221,6 +1277,7 @@ class _PasswordDialogState extends ConsumerState<_PasswordDialog> {
   final _next = TextEditingController();
   final _confirm = TextEditingController();
   String? _error;
+  bool _busy = false;
 
   @override
   void dispose() {
@@ -1230,7 +1287,8 @@ class _PasswordDialogState extends ConsumerState<_PasswordDialog> {
     super.dispose();
   }
 
-  void _save() {
+  Future<void> _save() async {
+    if (_busy) return;
     final auth = ref.read(authRepositoryProvider);
     const min = AuthRepository.minPasswordLength;
     String? error;
@@ -1245,10 +1303,28 @@ class _PasswordDialogState extends ConsumerState<_PasswordDialog> {
       setState(() => _error = error);
       return;
     }
+    // Same password online, so other devices keep working with it: when
+    // this device is signed in online, the online change must work first.
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final online = ref.read(cloudSyncProvider).adminLinked;
+    if (online &&
+        !await ref
+            .read(cloudSyncProvider.notifier)
+            .changePassword(_next.text)) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error =
+            'The online password couldn’t be changed (no connection?). '
+            'Nothing was changed; try again.';
+      });
+      return;
+    }
     auth.setAdminPassword(_next.text);
-    // Same password online, so other devices keep working with it.
-    ref.read(cloudSyncProvider.notifier).changePassword(_next.text);
-    Navigator.pop(context, true);
+    if (mounted) Navigator.pop(context, true);
   }
 
   @override
@@ -1293,7 +1369,10 @@ class _PasswordDialogState extends ConsumerState<_PasswordDialog> {
           onPressed: () => Navigator.pop(context, false),
           child: const Text('Cancel'),
         ),
-        FilledButton(onPressed: _save, child: const Text('Save')),
+        FilledButton(
+          onPressed: _busy ? null : _save,
+          child: const Text('Save'),
+        ),
       ],
     );
   }

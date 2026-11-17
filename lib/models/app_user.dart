@@ -61,10 +61,9 @@ class AppUser {
     locked: json['locked'] as bool? ?? false,
     departmentId: (json['department_id'] as num?)?.toInt(),
     reportAccess: ReportAccess.fromCode(json['report_access'] as String?),
+    // An empty list is a real choice (no pages), not "every page".
     pages: switch (json['pages']) {
-      final List<dynamic> list when list.isNotEmpty => {
-        for (final p in list) '$p',
-      },
+      final List<dynamic> list => {for (final p in list) '$p'},
       _ => null,
     },
   );

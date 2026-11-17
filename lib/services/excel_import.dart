@@ -165,6 +165,12 @@ ExcelImport parseExcelImport(List<int> bytes) {
           );
           continue;
         }
+        if (byDate.containsKey(resolved)) {
+          warnings.add(
+            '${DateFormat('EEE d MMM y').format(resolved)} appears more than '
+            'once (sheet “$sheetName”); its rows were put together.',
+          );
+        }
         current = byDate.putIfAbsent(resolved, () => ImportDay(resolved));
         continue;
       }
@@ -228,6 +234,24 @@ ExcelImport parseExcelImport(List<int> bytes) {
           );
         }
         continue;
+      }
+      bool isFraction(int col) =>
+          col < row.length &&
+          switch (row[col]?.value) {
+            final DoubleCellValue d => d.value != d.value.roundToDouble(),
+            _ => false,
+          };
+      if (isFraction(nCol) || isFraction(eCol)) {
+        warnings.add(
+          '$head on $day (sheet “$sheetName”) has a number with a fraction; '
+          'it was rounded to a whole number of clients.',
+        );
+      }
+      if (current.entries.containsKey(head)) {
+        warnings.add(
+          '$head appears more than once on $day (sheet “$sheetName”); the '
+          'last row was used.',
+        );
       }
       current.entries[head] = ImportEntry(
         newClients: (n ?? 0).clamp(0, 100000),
@@ -376,7 +400,17 @@ class ImportOutcome {
 
 /// Writes [data] into the database. Weeks that don't exist yet are created.
 /// Unless [overwrite], staff-days that already have numbers are left alone.
+/// All or nothing: if anything fails part-way, nothing is imported.
 ImportOutcome applyExcelImport(
+  AppDatabase db,
+  ExcelImport data,
+  Map<String, ImportTarget> targets, {
+  required bool overwrite,
+}) => db.transaction(
+  () => _applyExcelImport(db, data, targets, overwrite: overwrite),
+);
+
+ImportOutcome _applyExcelImport(
   AppDatabase db,
   ExcelImport data,
   Map<String, ImportTarget> targets, {

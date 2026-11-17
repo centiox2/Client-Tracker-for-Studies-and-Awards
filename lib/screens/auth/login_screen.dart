@@ -411,15 +411,21 @@ class _SignInFormState extends ConsumerState<_SignInForm> {
       if (!mounted) return;
       final auth = ref.read(authRepositoryProvider);
       final user = auth.verifyOffline(username, password);
-      if (user != null) {
+      if (user != null && user.mustChange) {
+        // A temporary password has to be changed, and that needs internet.
+        error =
+            'You need to choose a new password, and that needs internet. '
+            'Connect and try again.';
+      } else if (user != null) {
         unawaited(_rememberUsername(username));
         sync.signInOffline(user, password, remember: _remember);
         return;
+      } else {
+        error = auth.knowsUser(username)
+            ? 'Username or password is incorrect.'
+            : 'No internet connection. Without internet you can only sign in '
+                  'on a device you’ve signed in on before.';
       }
-      error = auth.knowsUser(username)
-          ? 'Username or password is incorrect.'
-          : 'No internet connection. Without internet you can only sign in '
-                'on a device you’ve signed in on before.';
     }
     if (!mounted) return;
     setState(() {

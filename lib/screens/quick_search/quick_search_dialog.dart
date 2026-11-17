@@ -80,12 +80,15 @@ class _QuickSearchDialogState extends ConsumerState<_QuickSearchDialog> {
 
     final role = ref.read(sessionProvider);
     final user = ref.read(currentUserProvider);
+    final accounts = ref.read(accountsEnabledProvider);
+    // With accounts on, nobody signed in may open nothing from here.
     bool may(AppTab tab) =>
+        (!accounts || user != null) &&
         (tab == AppTab.settings ||
             tab == AppTab.todo ||
             (user?.mayOpen(tab.name) ?? true)) &&
         (tab != AppTab.revenue || (role?.seesRevenue ?? false)) &&
-        (tab != AppTab.dailyReports || ref.read(accountsEnabledProvider)) &&
+        (tab != AppTab.dailyReports || accounts) &&
         ((role?.canEdit ?? false) ||
             !const {AppTab.home, AppTab.week}.contains(tab));
 
@@ -129,7 +132,7 @@ class _QuickSearchDialogState extends ConsumerState<_QuickSearchDialog> {
       }
     }
 
-    if (!search.isEmpty) {
+    if (!search.isEmpty && may(AppTab.staff)) {
       final staff = ref
           .read(staffListProvider)
           .where((s) => search.matches(s.name))
@@ -170,8 +173,13 @@ class _QuickSearchDialogState extends ConsumerState<_QuickSearchDialog> {
           title: 'New week…',
           subtitle: 'Create or open a Monday–Friday week',
           run: (context, ref) async {
+            // This dialog's ref is gone once the week dialog returns; read
+            // through the (still open) shell instead.
+            final container = ProviderScope.containerOf(context, listen: false);
             final id = await showNewWeekDialog(context, ref);
-            if (id != null) ref.read(appActionsProvider).selectTab(AppTab.week);
+            if (id != null) {
+              container.read(appActionsProvider).selectTab(AppTab.week);
+            }
           },
         ),
       );

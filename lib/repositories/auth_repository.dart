@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 
 import '../database/database.dart';
 import '../models/app_user.dart';
@@ -20,10 +20,21 @@ class AuthRepository {
 
   final AppDatabase _db;
 
-  /// PBKDF2 rounds. Lowered in tests to keep them fast.
-  static int iterations = 20000;
+  /// PBKDF2 rounds for new hashes. Each hash keeps its own count
+  /// (`pbkdf2$ROUNDS$HASH`), so a change here never locks anyone out
+  /// and older hashes are upgraded the next time the password is checked.
+  static const int defaultIterations = 120000;
 
-  static const int minPasswordLength = 4;
+  /// Rounds hashes had before the count was stored with them.
+  static const int legacyIterations = 20000;
+
+  /// Tests only: fewer rounds so they run quickly. Never set in the app.
+  @visibleForTesting
+  static int? iterationsForTests;
+
+  static int get _iterations => iterationsForTests ?? defaultIterations;
+
+  static const int minPasswordLength = AppUser.minPasswordLength;
 
   bool get hasAdminPassword => _db.raw
       .select("SELECT 1 FROM app_accounts WHERE role = 'admin';")
@@ -36,6 +47,10 @@ class AuthRepository {
         'Password must be at least $minPasswordLength characters.',
       );
     }
+    _storeAdmin(password);
+  }
+
+  void _storeAdmin(String password) {
     final salt = _randomSalt();
     _db.raw.execute(
       'INSERT INTO app_accounts (role, password_hash, salt, updated_at) '
@@ -57,7 +72,10 @@ class AuthRepository {
     if (rows.isEmpty) return false;
     final salt = base64Decode(rows.first['salt']! as String);
     final expected = rows.first['password_hash']! as String;
-    return _constantTimeEquals(_hash(password, salt), expected);
+    final ok = _check(password, salt, expected);
+    // An older (shorter) password still opens; it just gets more rounds.
+    if (ok && _needsUpgrade(expected)) _storeAdmin(password);
+    return ok;
   }
 
   // ---- The other profiles (Admin team, Director, Team) -------------------
@@ -89,15 +107,18 @@ class AuthRepository {
     );
   }
 
-  /// What the online database says: locked or open. A lock without a known
-  /// password here keeps any hash already stored (the same password).
+  /// What the online database says: locked or open. Only the lock changes:
+  /// any hash already stored here is kept (the same password), and so is
+  /// "Keep me signed in".
   void markProfile(UserRole role, {required bool locked}) {
-    if (!locked) {
-      if (isLocked(role)) _putProfile(role, locked: false);
-      return;
-    }
-    if (isLocked(role)) return;
-    _putProfile(role, locked: true);
+    if (isLocked(role) == locked) return;
+    _db.raw.execute(
+      'INSERT INTO profile_passwords (role, locked, updated_at) '
+      'VALUES (?, ?, ?) '
+      'ON CONFLICT(role) DO UPDATE SET locked = excluded.locked, '
+      'updated_at = excluded.updated_at;',
+      [role.serverName, locked ? 1 : 0, DateTime.now().toIso8601String()],
+    );
   }
 
   /// Checks [password] for [role] on this device: true or false, or null
@@ -112,7 +133,7 @@ class AuthRepository {
     final hash = rows.first['password_hash'] as String?;
     final salt = rows.first['salt'] as String?;
     if (hash == null || salt == null) return null;
-    return _constantTimeEquals(_hash(password, base64Decode(salt)), hash);
+    return _check(password, base64Decode(salt), hash);
   }
 
   // ---- Keep me signed in on this device ----------------------------------
@@ -271,13 +292,18 @@ class AuthRepository {
     final hash = rows.first['password_hash'] as String?;
     final salt = rows.first['salt'] as String?;
     if (hash == null || salt == null) return null;
-    if (!_constantTimeEquals(_hash(password, base64Decode(salt)), hash)) {
-      return null;
-    }
+    if (!_check(password, base64Decode(salt), hash)) return null;
     final user = AppUser.fromJson(
       (jsonDecode(rows.first['user_json']! as String) as Map)
           .cast<String, Object?>(),
     );
+    if (_needsUpgrade(hash)) {
+      final fresh = _randomSalt();
+      _db.raw.execute(
+        'UPDATE user_signins SET password_hash = ?, salt = ? WHERE username = ?;',
+        [_hash(password, fresh), base64Encode(fresh), user.username],
+      );
+    }
     return user.active ? user : null;
   }
 
@@ -292,8 +318,34 @@ class AuthRepository {
     return Uint8List.fromList(List.generate(16, (_) => rng.nextInt(256)));
   }
 
-  /// PBKDF2-HMAC-SHA256, one 32-byte block (all we need for a 256-bit key).
+  /// A stored hash: `pbkdf2$ROUNDS$HASH`, or a bare hash from before
+  /// the rounds were stored ([legacyIterations]).
   static String _hash(String password, List<int> salt) {
+    final n = _iterations;
+    return 'pbkdf2\$$n\$${_pbkdf2(password, salt, n)}';
+  }
+
+  static bool _check(String password, List<int> salt, String stored) {
+    final parts = stored.split(r'$');
+    if (parts.length == 3 && parts[0] == 'pbkdf2') {
+      final n = int.tryParse(parts[1]);
+      if (n == null || n < 1) return false;
+      return _constantTimeEquals(_pbkdf2(password, salt, n), parts[2]);
+    }
+    return _constantTimeEquals(
+      _pbkdf2(password, salt, legacyIterations),
+      stored,
+    );
+  }
+
+  static bool _needsUpgrade(String stored) {
+    final parts = stored.split(r'$');
+    if (parts.length != 3 || parts[0] != 'pbkdf2') return true;
+    return (int.tryParse(parts[1]) ?? 0) < _iterations;
+  }
+
+  /// PBKDF2-HMAC-SHA256, one 32-byte block (all we need for a 256-bit key).
+  static String _pbkdf2(String password, List<int> salt, int iterations) {
     final hmac = Hmac(sha256, utf8.encode(password));
     var u = hmac.convert([...salt, 0, 0, 0, 1]).bytes;
     final out = List<int>.from(u);

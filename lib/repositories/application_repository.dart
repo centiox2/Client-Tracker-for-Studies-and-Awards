@@ -449,16 +449,14 @@ class ApplicationRepository {
   void _carryOverKeys(List<ApplicationCsvRow> rows) {
     final matches = _carryOverMatches(rows, all());
     for (final MapEntry(key: next, value: old) in matches.entries) {
-      _db.transaction(() {
-        _db.raw.execute(
-          'UPDATE applications SET app_key = ? WHERE app_key = ?;',
-          [next, old],
-        );
-        _db.raw.execute(
-          'UPDATE application_changes SET app_key = ? WHERE app_key = ?;',
-          [next, old],
-        );
-      });
+      _db.raw.execute(
+        'UPDATE applications SET app_key = ? WHERE app_key = ?;',
+        [next, old],
+      );
+      _db.raw.execute(
+        'UPDATE application_changes SET app_key = ? WHERE app_key = ?;',
+        [next, old],
+      );
     }
   }
 
@@ -478,14 +476,17 @@ class ApplicationRepository {
   ApplicationImportResult importCsv(String text, {String fileName = ''}) {
     final rows = parseApplicationsCsv(text);
     final now = DateTime.now().toIso8601String();
-    _carryOverKeys(rows);
-    final existing = {for (final a in all()) a.key: a};
-    final first = existing.isEmpty && latestImport == null;
     var added = 0, changed = 0, removed = 0;
+    var first = false;
     final seen = <String>{};
     final changes = <List<Object?>>[];
 
+    // One transaction for all of it, key carry-over included: a failed
+    // import leaves no renames behind (or queued to other devices).
     _db.transaction(() {
+      _carryOverKeys(rows);
+      final existing = {for (final a in all()) a.key: a};
+      first = existing.isEmpty && latestImport == null;
       for (final (i, row) in rows.indexed) {
         seen.add(row.key);
         final before = existing[row.key];
@@ -644,20 +645,22 @@ class ApplicationRepository {
     final todo = col((h) => h.contains('todo'));
     final follow = col((h) => h.contains('follow'));
     // In the same order as ApplicationCsvRow.fields.
-    final present = [
-      for (final c in [
-        rto,
-        country,
-        doc,
-        app,
-        offer,
-        coe,
-        status,
-        assignee,
-        todo,
-        follow,
-      ])
-        c >= 0,
+    final columns = [
+      rto,
+      country,
+      doc,
+      app,
+      offer,
+      coe,
+      status,
+      assignee,
+      todo,
+      follow,
+    ];
+    // Per row: a column the file lacks, or that a short row stops before
+    // (Excel drops trailing blanks, a cut-off line), keeps what's stored.
+    List<bool> presentIn(List<String> r) => [
+      for (final c in columns) c >= 0 && c < r.length,
     ];
 
     // A row with more fields than the header was split wrongly (a stray
@@ -708,7 +711,7 @@ class ApplicationRepository {
         ApplicationCsvRow(
           key: n == 1 ? key : '$key #$n',
           student: name,
-          present: present,
+          present: presentIn(r),
           fields: [
             _clean(at(r, rto)),
             _clean(at(r, country)),

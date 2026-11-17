@@ -23,6 +23,7 @@ class SyncStatusBadge extends ConsumerWidget {
     final (icon, color, label, tip) = describeSync(s, theme);
     final tone = switch (s.phase) {
       SyncPhase.live when s.pending > 0 && !s.adminLinked => PillTone.warning,
+      SyncPhase.live when s.heldBack > 0 => PillTone.warning,
       SyncPhase.live when s.pending == 0 => PillTone.positive,
       SyncPhase.error => PillTone.negative,
       _ => PillTone.neutral,
@@ -72,6 +73,14 @@ class SyncStatusBadge extends ConsumerWidget {
       theme.colorScheme.error,
       '$waiting waiting',
       'Sign in as admin to send $waiting online',
+    ),
+    SyncPhase.live when s.heldBack > 0 => (
+      Icons.cloud_done_outlined,
+      theme.colorScheme.error,
+      '${s.heldBack} not sent',
+      'Everything else is up to date, but the online database refused '
+          '${s.heldBack == 1 ? 'one change' : '${s.heldBack} changes'}. '
+          'See Settings › Backup.',
     ),
     SyncPhase.live => (
       Icons.cloud_done_outlined,

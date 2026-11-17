@@ -89,15 +89,34 @@ class _ImportPreviewDialogState extends ConsumerState<ImportPreviewDialog> {
     _ => MatchStaff(v),
   };
 
-  void _import() {
-    final outcome = applyExcelImport(
-      ref.read(databaseProvider),
-      widget.data,
-      _targets,
-      overwrite: _overwrite,
-    );
-    ref.read(dataVersionProvider.notifier).bump();
-    Navigator.pop(context, outcome);
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _import() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    // Let the busy state show before the (synchronous) import runs.
+    await Future<void>.delayed(const Duration(milliseconds: 16));
+    if (!mounted) return;
+    try {
+      final outcome = applyExcelImport(
+        ref.read(databaseProvider),
+        widget.data,
+        _targets,
+        overwrite: _overwrite,
+      );
+      ref.read(dataVersionProvider.notifier).bump();
+      if (mounted) Navigator.pop(context, outcome);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = 'The import failed, so nothing was imported ($e).';
+      });
+    }
   }
 
   @override
@@ -225,7 +244,9 @@ class _ImportPreviewDialogState extends ConsumerState<ImportPreviewDialog> {
               const SizedBox(height: 12),
               CheckboxListTile(
                 value: _overwrite,
-                onChanged: (v) => setState(() => _overwrite = v ?? false),
+                onChanged: _busy
+                    ? null
+                    : (v) => setState(() => _overwrite = v ?? false),
                 contentPadding: EdgeInsets.zero,
                 controlAffinity: ListTileControlAffinity.leading,
                 title: const Text('Replace numbers already in the app'),
@@ -234,18 +255,31 @@ class _ImportPreviewDialogState extends ConsumerState<ImportPreviewDialog> {
                   style: muted,
                 ),
               ),
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _error!,
+                  key: const ValueKey('import-error'),
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
+              ],
             ],
           ),
         ),
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context),
+          onPressed: _busy ? null : () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
         FilledButton.icon(
-          onPressed: _import,
-          icon: const Icon(Icons.file_download_done_outlined, size: 16),
+          onPressed: _busy ? null : _import,
+          icon: _busy
+              ? const SizedBox.square(
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.file_download_done_outlined, size: 16),
           label: Text('Import ${data.days.length} days'),
         ),
       ],
