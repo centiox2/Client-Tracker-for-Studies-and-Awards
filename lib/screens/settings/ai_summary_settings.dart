@@ -91,7 +91,7 @@ class _AiSummarySettingsState extends ConsumerState<AiSummarySettings> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const Text(
-                      'One company-wide summary, generated daily at 5:05 pm Africa/Nairobi, even when the app is closed. Failed runs retry at 5:15 and 5:25 pm.',
+                      'One company-wide summary, scheduled daily at 5:05 pm Africa/Nairobi, even when the app is closed. Failed scheduled runs retry at 5:15 and 5:25 pm. Admin can also use Generate report now on Overview or AI summary at any time, including with the schedule off.',
                     ),
                     const SizedBox(height: 12),
                     const Text(

@@ -49,6 +49,10 @@ class AiSummaryPreview extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(summaryStatus(data)),
+                  if (data['can_generate'] == true) ...[
+                    const SizedBox(height: 12),
+                    AiGenerateReportButton(data: data),
+                  ],
                   if (latest != null) ...[
                     const SizedBox(height: 12),
                     Text(
@@ -125,6 +129,13 @@ class _AiSummaryScreenState extends ConsumerState<AiSummaryScreen> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(summaryStatus(data)),
+                        if (data['can_generate'] == true) ...[
+                          const SizedBox(height: 12),
+                          AiGenerateReportButton(
+                            data: data,
+                            onRequested: () => setState(() => selected = null),
+                          ),
+                        ],
                         const SizedBox(height: 16),
                         if (rows.isNotEmpty)
                           DropdownButtonFormField<String>(
@@ -202,7 +213,7 @@ class _AiSummaryScreenState extends ConsumerState<AiSummaryScreen> {
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 32),
                             child: Text(
-                              'No summary yet. Summaries will appear here once Gemini is configured and the scheduled run completes.',
+                              'No report yet. Admin can generate one now after adding a Gemini key, or enable the daily schedule.',
                             ),
                           ),
                       ],
@@ -213,5 +224,82 @@ class _AiSummaryScreenState extends ConsumerState<AiSummaryScreen> {
             );
           },
         );
+  }
+}
+
+/// Requests a server-side refresh; the key never leaves the server.
+class AiGenerateReportButton extends ConsumerStatefulWidget {
+  const AiGenerateReportButton({
+    super.key,
+    required this.data,
+    this.onRequested,
+  });
+  final Map<String, dynamic> data;
+  final VoidCallback? onRequested;
+  @override
+  ConsumerState<AiGenerateReportButton> createState() =>
+      _AiGenerateReportButtonState();
+}
+
+class _AiGenerateReportButtonState
+    extends ConsumerState<AiGenerateReportButton> {
+  bool _busy = false;
+  Future<void> _generate() async {
+    setState(() => _busy = true);
+    var requested = false;
+    try {
+      await ref.read(aiSummaryServiceProvider).generate();
+      requested = true;
+      if (!mounted) return;
+      widget.onRequested?.call();
+      ref.invalidate(aiSummariesProvider);
+      await ref.read(aiSummariesProvider.future);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              requested
+                  ? 'Report requested. Refresh the page to check its progress.'
+                  : 'Could not request the report. Check the Gemini key in Settings and your connection, then retry.',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.data['can_generate'] != true) return const SizedBox.shrink();
+    final active =
+        _busy || const {'queued', 'running'}.contains(widget.data['status']);
+    final configured = widget.data['configured'] == true;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        FilledButton.icon(
+          key: const ValueKey('generate-ai-report'),
+          onPressed: active || !configured ? null : _generate,
+          icon: active
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.auto_awesome_outlined, size: 18),
+          label: Text(active ? 'Generating report…' : 'Generate report now'),
+        ),
+        if (!configured)
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text(
+              'Add your Gemini API key in Settings → Team → AI daily summary first.',
+            ),
+          ),
+      ],
+    );
   }
 }

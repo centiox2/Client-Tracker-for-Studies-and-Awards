@@ -24,12 +24,30 @@ Deno.serve(async (req: Request) => {
   if (!token || token.length !== 64) {
     return new Response("Unauthorized", { status: 401 });
   }
+  let manualJob: string | null = null;
+  try {
+    const body = await req.json();
+    if (body.manual_job_id !== undefined) {
+      if (
+        typeof body.manual_job_id !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          body.manual_job_id,
+        )
+      ) {
+        return new Response("Invalid job", { status: 400 });
+      }
+      manualJob = body.manual_job_id;
+    }
+  } catch {
+    return new Response("Invalid request", { status: 400 });
+  }
   const run = crypto.randomUUID();
   let claimed = false;
   try {
-    const job = await rpc("ai_summary_claim", {
+    const job = await rpc("ai_summary_claim_job", {
       p_job_token: token,
       p_run_id: run,
+      p_manual_job: manualJob,
     });
     if (!job) return Response.json({ status: "skipped" });
     claimed = true;

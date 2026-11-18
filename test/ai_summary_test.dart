@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:client_tracker/services/ai_summary_service.dart';
 import 'package:client_tracker/screens/ai_summary/ai_summary_screen.dart';
 import 'package:client_tracker/screens/settings/ai_summary_settings.dart';
@@ -9,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Map<String, dynamic> summaryFixture() => {
+  'can_generate': true,
   'enabled': true,
   'configured': true,
   'today': '2026-11-18',
@@ -223,4 +226,167 @@ void main() {
       isEmpty,
     );
   });
+  testWidgets(
+    'Admin can generate with schedule off; repeated clicks are disabled and the previous report stays visible',
+    (tester) async {
+      var data = summaryFixture()..['enabled'] = false;
+      var requests = 0;
+      final pending = Completer<Object?>();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            aiSummaryAccessProvider.overrideWith((ref) async => true),
+            aiSummariesProvider.overrideWith((ref) async => data),
+            aiSummaryServiceProvider.overrideWithValue(
+              AiSummaryService((name, [args]) async {
+                expect(name, 'ai_summary_generate');
+                expect(args, isNull);
+                requests++;
+                return pending.future;
+              }),
+            ),
+          ],
+          child: const MaterialApp(home: Scaffold(body: AiSummaryScreen())),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final button = find.byKey(const ValueKey('generate-ai-report'));
+      await tester.tap(button);
+      await tester.pump();
+      expect(tester.widget<FilledButton>(button).onPressed, isNull);
+      await tester.tap(button);
+      await tester.pump();
+      expect(requests, 1);
+      expect(
+        find.text('Daily company overview for 2026-11-18.'),
+        findsOneWidget,
+      );
+      data = {...data, 'status': 'queued'};
+      pending.complete({'status': 'queued'});
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(tester.widget<FilledButton>(button).onPressed, isNull);
+      expect(
+        find.text('Daily company overview for 2026-11-18.'),
+        findsOneWidget,
+      );
+      data = summaryFixture();
+      (data['summaries'] as List).first['content']['brief'] =
+          'Freshly generated report.';
+      ProviderScope.containerOf(tester.element(find.byType(AiSummaryScreen)))
+          .invalidate(aiSummariesProvider);
+      await tester.pumpAndSettle();
+      expect(find.text('Freshly generated report.'), findsOneWidget);
+      expect(tester.widget<FilledButton>(button).onPressed, isNotNull);
+    },
+  );
+  testWidgets('Assigned readers cannot generate reports', (tester) async {
+    final data = summaryFixture()..['can_generate'] = false;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          aiSummaryAccessProvider.overrideWith((ref) async => true),
+          aiSummariesProvider.overrideWith((ref) async => data),
+        ],
+        child: const MaterialApp(home: Scaffold(body: AiSummaryScreen())),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('generate-ai-report')), findsNothing);
+  });
+  testWidgets('An Admin without a saved key sees configuration guidance', (
+    tester,
+  ) async {
+    final data = summaryFixture()..['configured'] = false;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          aiSummaryAccessProvider.overrideWith((ref) async => true),
+          aiSummariesProvider.overrideWith((ref) async => data),
+        ],
+        child: const MaterialApp(home: Scaffold(body: AiSummaryScreen())),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const ValueKey('generate-ai-report')),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(find.textContaining('Add your Gemini API key'), findsOneWidget);
+  });
+  testWidgets('A failed request offers retry without losing the saved report', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          aiSummaryAccessProvider.overrideWith((ref) async => true),
+          aiSummariesProvider.overrideWith((ref) async => summaryFixture()),
+          aiSummaryServiceProvider.overrideWithValue(
+            AiSummaryService(
+              (name, [args]) async => throw StateError('offline'),
+            ),
+          ),
+        ],
+        child: const MaterialApp(home: Scaffold(body: AiSummaryScreen())),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('generate-ai-report')));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Could not request the report.'),
+      findsOneWidget,
+    );
+    expect(find.text('Daily company overview for 2026-11-18.'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const ValueKey('generate-ai-report')),
+          )
+          .onPressed,
+      isNotNull,
+    );
+  });
+  testWidgets(
+    'A running report refreshes automatically when generation completes',
+    (tester) async {
+      var reads = 0;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            accountsEnabledProvider.overrideWithValue(false),
+            aiSummaryAccessProvider.overrideWith((ref) async => true),
+            aiSummaryServiceProvider.overrideWithValue(
+              AiSummaryService((name, [args]) async {
+                expect(name, 'ai_summary_read');
+                reads++;
+                final data = summaryFixture();
+                if (reads == 1) {
+                  data['status'] = 'running';
+                } else {
+                  (data['summaries'] as List).first['content']['brief'] =
+                      'Automatically updated report.';
+                }
+                return data;
+              }),
+            ),
+          ],
+          child: const MaterialApp(home: Scaffold(body: AiSummaryScreen())),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(reads, 1);
+      expect(find.text('Generating report…'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+      expect(reads, 2);
+      expect(find.text('Automatically updated report.'), findsOneWidget);
+    },
+  );
 }
