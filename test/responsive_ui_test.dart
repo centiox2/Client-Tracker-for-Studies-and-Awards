@@ -254,6 +254,22 @@ void main() {
           await tester.tap(target);
           await tester.pumpAndSettle();
         }
+        if (name == 'home') {
+          expect(
+            find.text('Call the embassy about visa documents'),
+            findsOneWidget,
+          );
+          expect(
+            find.text('Confirm outstanding university offer letters'),
+            findsOneWidget,
+          );
+          expect(
+            find.text('Prepare the department weekly performance summary'),
+            findsOneWidget,
+          );
+          expect(find.text('Recent weeks'), findsNothing);
+          expect(find.text('Staff performance'), findsNothing);
+        }
         if (name == 'settings-ai') {
           await tester.ensureVisible(find.text('AI daily summary'));
           await tester.pumpAndSettle();

@@ -16,7 +16,8 @@ String _stamp(Object? raw) {
 }
 
 class AiSummaryPreview extends ConsumerWidget {
-  const AiSummaryPreview({super.key});
+  const AiSummaryPreview({super.key, this.bottomPadding = 24});
+  final double bottomPadding;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (!summaryAccessGranted(ref.watch(aiSummaryAccessProvider))) {
@@ -24,7 +25,7 @@ class AiSummaryPreview extends ConsumerWidget {
     }
     final state = ref.watch(aiSummariesProvider);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 24),
+      padding: EdgeInsets.only(bottom: bottomPadding),
       child: AppPanel(
         title: 'AI daily summary',
         compactHeader: true,

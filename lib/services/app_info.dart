@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.9.0';
+  static const version = '1.9.1';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,12 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.9.1', 'November 2026', [
+      'Overview restores the client graphs, daily numbers and week comparisons, '
+          'alongside revenue, applications and the AI summary.',
+      'One staff count card and one to-do card showing your open items and shared team list. '
+          'Extra page summaries have been removed.',
+    ]),
     Release('1.9.0', 'November 2026', [
       'Overview now shows a concise snapshot and link for each available page.',
       'Company-wide Gemini summaries: an Overview card, a dedicated history and details page, '

@@ -13,6 +13,8 @@ import 'package:client_tracker/state/app_state.dart';
 
 import 'test_helpers.dart';
 
+import 'package:client_tracker/widgets/panels.dart';
+
 import 'package:client_tracker/widgets/week_label.dart';
 
 /// Quick search, week picker, start-week banner and "vs last week" deltas.
@@ -65,7 +67,7 @@ void main() {
   });
 
   testWidgets(
-    'weekly snapshot shows selected week rather than the previous week',
+    'client chart uses the selected week rather than the previous week',
     (tester) async {
       final weeks = WeekRepository(db);
       final now = DateTime.now();
@@ -75,11 +77,10 @@ void main() {
       saveMonday(current.id, newClients: 5);
       await pumpApp(tester);
       final card = find.byKey(const ValueKey('overview-week'));
-      expect(
-        find.descendant(of: card, matching: find.text('5')),
-        findsNWidgets(2),
+      final chart = tester.widget<StackedDayChart>(
+        find.descendant(of: card, matching: find.byType(StackedDayChart)),
       );
-      expect(find.descendant(of: card, matching: find.text('2')), findsNothing);
+      expect(chart.days.first.newClients, 5);
     },
   );
 
@@ -184,23 +185,33 @@ void main() {
     expect(find.text('Off'), findsOneWidget);
   });
 
-  testWidgets('overview replaces detailed charts with page links', (
+  testWidgets(
+    'client graphs remain alongside revenue, applications and to-do',
+    (tester) async {
+      final week = WeekRepository(db).createWeekFor(DateTime.now());
+      saveMonday(week.id, newClients: 6);
+      await pumpApp(tester);
+      expect(
+        find.byKey(const ValueKey('overview-open-revenue')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('overview-open-applications')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('overview-open-todo')), findsOneWidget);
+      expect(find.byKey(const ValueKey('client-mix')), findsOneWidget);
+      expect(find.byType(StackedDayChart), findsOneWidget);
+    },
+  );
+
+  testWidgets('total clients card shows the selected-week daily average', (
     tester,
   ) async {
     final week = WeekRepository(db).createWeekFor(DateTime.now());
-    saveMonday(week.id, newClients: 6);
-    await pumpApp(tester);
-    expect(find.byKey(const ValueKey('overview-open-reports')), findsOneWidget);
-    expect(find.byKey(const ValueKey('overview-open-staff')), findsOneWidget);
-    expect(find.byKey(const ValueKey('client-mix')), findsNothing);
-  });
-
-  testWidgets('total and month cards show the daily average', (tester) async {
-    final week = WeekRepository(db).createWeekFor(DateTime.now());
     saveMonday(week.id, newClients: 12);
     await pumpApp(tester);
-
-    expect(find.textContaining(' / day'), findsNWidgets(2));
+    expect(find.textContaining(' / day'), findsOneWidget);
   });
 
   testWidgets('week picker switches the tracker week', (tester) async {

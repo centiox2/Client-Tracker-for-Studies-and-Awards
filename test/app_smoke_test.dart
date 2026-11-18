@@ -48,12 +48,12 @@ void main() {
     await pumpApp(tester);
 
     expect(find.text('New clients'), findsWidgets);
-    expect(find.text('Clients in the selected week'), findsOneWidget);
-    expect(find.text('Clients this month'), findsOneWidget);
+    expect(find.text('Total clients'), findsOneWidget);
+    expect(find.text('Clients this month'), findsNothing);
     expect(find.text('Active staff'), findsOneWidget);
   });
 
-  testWidgets('wide overview exposes page snapshots without clipping', (
+  testWidgets('wide overview retains only requested areas without clipping', (
     tester,
   ) async {
     WeekRepository(db).createWeekFor(DateTime.now());
@@ -63,13 +63,16 @@ void main() {
       AppTab.todo,
       AppTab.revenue,
       AppTab.applications,
-      AppTab.history,
       AppTab.staff,
-      AppTab.reports,
-      AppTab.settings,
     ]) {
       expect(find.byKey(ValueKey('overview-${tab.name}')), findsOneWidget);
     }
+    for (final name in ['history', 'reports', 'settings', 'dailyReports']) {
+      expect(find.byKey(ValueKey('overview-$name')), findsNothing);
+    }
+    expect(find.text('Staff performance'), findsNothing);
+    expect(find.text('Recent weeks'), findsNothing);
+    expect(find.byKey(const ValueKey('client-mix')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -89,7 +92,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('No week yet'), findsNothing);
-    expect(find.text('Clients in the selected week'), findsOneWidget);
+    expect(find.text('Total clients'), findsOneWidget);
   });
 
   testWidgets('New week dialog lists Mon–Fri and creates the week', (

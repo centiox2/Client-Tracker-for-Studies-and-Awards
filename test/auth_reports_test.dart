@@ -343,7 +343,7 @@ void main() {
       await tester.tap(find.text('Create password and sign in'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Clients this month'), findsOneWidget);
+      expect(find.text('Total clients'), findsOneWidget);
       expect(
         find.descendant(
           of: find.byKey(const ValueKey('account-menu')),
@@ -366,7 +366,7 @@ void main() {
     await tester.enterText(find.byType(TextField), 'admin-pass');
     await tester.tap(find.text('Sign in to workspace'));
     await tester.pumpAndSettle();
-    expect(find.text('Clients this month'), findsOneWidget);
+    expect(find.text('Total clients'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('switch-profile')));
     await tester.pumpAndSettle();

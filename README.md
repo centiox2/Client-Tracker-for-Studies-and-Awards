@@ -252,3 +252,5 @@ The live database's RPC-based account system intentionally exposes token-checkin
 SECURITY DEFINER entry points to anon/authenticated, while private tables have no
 client policies. Supabase's corresponding advisor notices are expected for this
 architecture; generation and persistence RPCs are service-role-only.
+
+Overview retains its client KPIs, daily chart/table and client-mix graph, plus revenue, applications, AI summary, one staff count and one card with the current user’s open personal and shared team to-do items. It omits separate History, Reports, Settings and staff-performance summaries.

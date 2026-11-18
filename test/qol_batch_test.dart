@@ -280,11 +280,11 @@ void main() {
       find
           .descendant(
             of: find.byKey(ValueKey('overview-$label')),
-            matching: find.text(label == 'todo' ? 'To-do' : 'Weekly tracker'),
+            matching: find.byType(Text),
           )
           .first,
     );
-    expect(at('todo').dx, lessThan(at('week').dx));
+    expect(at('todo').dx, greaterThan(at('week').dx));
 
     // Tests run as Android: press and hold, then drag.
     final gesture = await tester.startGesture(at('todo'));
@@ -298,7 +298,7 @@ void main() {
 
     expect(at('todo').dy, lessThan(at('week').dy));
     final saved = db.raw.select(
-      "SELECT v FROM sync_state WHERE k = 'ui.board.workspace-overview.3';",
+      "SELECT v FROM sync_state WHERE k = 'ui.board.overview.3';",
     );
     expect(saved, isNotEmpty);
 
@@ -308,7 +308,7 @@ void main() {
     container.read(uiPrefProvider).clearPrefix(CardBoard.prefPrefix);
     container.read(cardOrderVersionProvider.notifier).bump();
     await tester.pumpAndSettle();
-    expect(at('todo').dx, lessThan(at('week').dx));
+    expect(at('todo').dx, greaterThan(at('week').dx));
   });
 
   testWidgets('phone bottom bar: Applications where Daily reports was', (
@@ -351,7 +351,7 @@ void main() {
       find
           .descendant(
             of: find.byKey(ValueKey('overview-$label')),
-            matching: find.text(label == 'todo' ? 'To-do' : 'Weekly tracker'),
+            matching: find.byType(Text),
           )
           .first,
     );
