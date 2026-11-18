@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../design/app_theme.dart';
 import '../../state/app_state.dart';
+import '../../state/mobile_navigation.dart';
 import '../../widgets/week_label.dart';
 import '../history/history_screen.dart' show weekMatchesQuery;
 import '../weekly_tracker/new_week_dialog.dart';
@@ -51,6 +52,7 @@ const _pages = <(AppTab, String, IconData)>[
   (AppTab.history, 'History', Icons.history),
   (AppTab.staff, 'Staff', Icons.groups_2_outlined),
   (AppTab.reports, 'Reports', Icons.insights_outlined),
+  (AppTab.aiSummary, 'AI summary', Icons.auto_awesome_outlined),
   (AppTab.settings, 'Settings', Icons.settings_outlined),
 ];
 
@@ -81,16 +83,9 @@ class _QuickSearchDialogState extends ConsumerState<_QuickSearchDialog> {
     final role = ref.read(sessionProvider);
     final user = ref.read(currentUserProvider);
     final accounts = ref.read(accountsEnabledProvider);
-    // With accounts on, nobody signed in may open nothing from here.
+    final allowed = ref.read(availableAppTabsProvider);
     bool may(AppTab tab) =>
-        (!accounts || user != null) &&
-        (tab == AppTab.settings ||
-            tab == AppTab.todo ||
-            (user?.mayOpen(tab.name) ?? true)) &&
-        (tab != AppTab.revenue || (role?.seesRevenue ?? false)) &&
-        (tab != AppTab.dailyReports || accounts) &&
-        ((role?.canEdit ?? false) ||
-            !const {AppTab.home, AppTab.week}.contains(tab));
+        (!accounts || user != null) && allowed.contains(tab);
 
     // Clients first: the most common thing to look for.
     if (!search.isEmpty && may(AppTab.applications)) {

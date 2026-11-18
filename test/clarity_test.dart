@@ -71,30 +71,36 @@ void main() {
     );
   });
 
-  testWidgets('Overview: each day spelled out; empty days show a dash', (
-    tester,
-  ) async {
-    final week = WeekRepository(db).createWeekFor(DateTime.now());
-    final monday = WeekRepository(db).getDays(week.id).first;
-    final staff = StaffRepository(db).getAll().first;
-    ClientCountRepository(db).saveCount(
-      dayId: monday.id,
-      staffId: staff.id,
-      newClients: 2,
-      existingClients: 3,
-    );
-    await pumpApp(tester);
+  testWidgets(
+    'Overview: selected-week snapshot is concise and links to detail',
+    (tester) async {
+      final week = WeekRepository(db).createWeekFor(DateTime.now());
+      final monday = WeekRepository(db).getDays(week.id).first;
+      final staff = StaffRepository(db).getAll().first;
+      ClientCountRepository(db).saveCount(
+        dayId: monday.id,
+        staffId: staff.id,
+        newClients: 2,
+        existingClients: 3,
+      );
+      await pumpApp(tester);
 
-    expect(find.text('Overview'), findsWidgets);
-    expect(currentWeekTitle(), findsOneWidget);
-    expect(find.text('Entered'), findsOneWidget);
-    // The other four days have no numbers: "—", never "0".
-    expect(find.text('—'), findsNWidgets(4 * 3));
-    expect(find.text('Staff performance'), findsOneWidget);
-    expect(find.text('Recent weeks'), findsOneWidget);
-    expect(find.text('New'), findsWidgets); // legend
-    expect(tester.takeException(), isNull);
-  });
+      expect(find.text('Overview'), findsWidgets);
+      final card = find.byKey(const ValueKey('overview-week'));
+      expect(
+        find.descendant(of: card, matching: find.text('5')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: card, matching: find.text('New clients')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('overview-open-week')), findsOneWidget);
+      expect(find.text('Staff performance'), findsNothing);
+      expect(find.text('Recent weeks'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('the moon button switches light and dark', (tester) async {
     await pumpApp(tester);

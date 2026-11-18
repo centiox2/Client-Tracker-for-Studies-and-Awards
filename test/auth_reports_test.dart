@@ -136,11 +136,11 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('Weekly tracker'), findsOneWidget);
+    expect(find.text('Weekly tracker'), findsWidgets);
     expect(find.text('Overview'), findsWidgets);
     expect(find.text('Revenue'), findsNothing);
     // Settings holds only their own part (theme, password…), no workspace.
-    await tester.tap(find.text('Settings'));
+    await tester.tap(find.text('Settings').first);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('settings-cat-you')), findsOneWidget);
     expect(find.byKey(const ValueKey('settings-cat-workspace')), findsNothing);
@@ -257,7 +257,7 @@ void main() {
     tester,
   ) async {
     await pumpApp(tester, admin: true);
-    await tester.tap(find.text('Settings'));
+    await tester.tap(find.text('Settings').first);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('settings-cat-team')));
     await tester.pumpAndSettle();

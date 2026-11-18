@@ -48,38 +48,28 @@ void main() {
     await pumpApp(tester);
 
     expect(find.text('New clients'), findsWidgets);
-    expect(find.text('Total clients'), findsOneWidget);
+    expect(find.text('Clients in the selected week'), findsOneWidget);
     expect(find.text('Clients this month'), findsOneWidget);
     expect(find.text('Active staff'), findsOneWidget);
   });
 
-  testWidgets('wide dashboard metrics fit one row without clipping', (
+  testWidgets('wide overview exposes page snapshots without clipping', (
     tester,
   ) async {
-    const size = Size(1864, 884);
     WeekRepository(db).createWeekFor(DateTime.now());
-    await pumpApp(tester, size: size);
-
-    final metricLabels = [
-      'New clients',
-      'Existing clients',
-      'Total clients',
-      'Clients this month',
-      'Active staff',
-    ];
-    final labelTops = metricLabels
-        .map((label) => tester.getTopLeft(find.text(label).first).dy)
-        .toList();
-    expect(
-      labelTops.every((top) => (top - labelTops.first).abs() < 1),
-      isTrue,
-      reason: 'all five metric cards should use one row at wide widths',
-    );
-    expect(
-      tester.getBottomRight(find.text('Enter today’s numbers')).dy,
-      lessThan(size.height - 10),
-      reason: 'the main action should remain above the viewport edge',
-    );
+    await pumpApp(tester, size: const Size(1864, 884));
+    for (final tab in [
+      AppTab.week,
+      AppTab.todo,
+      AppTab.revenue,
+      AppTab.applications,
+      AppTab.history,
+      AppTab.staff,
+      AppTab.reports,
+      AppTab.settings,
+    ]) {
+      expect(find.byKey(ValueKey('overview-${tab.name}')), findsOneWidget);
+    }
     expect(tester.takeException(), isNull);
   });
 
@@ -99,7 +89,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('No week yet'), findsNothing);
-    expect(currentWeekTitle(), findsOneWidget);
+    expect(find.text('Clients in the selected week'), findsOneWidget);
   });
 
   testWidgets('New week dialog lists Mon–Fri and creates the week', (
@@ -107,9 +97,9 @@ void main() {
   ) async {
     await pumpApp(tester);
 
-    await tester.tap(find.byKey(const ValueKey('week-picker')));
+    await tester.tap(find.text('Weekly tracker').first);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('new-week-menu')));
+    await tester.tap(find.text('New week').first);
     await tester.pumpAndSettle();
 
     final fmt = DateFormat('EEEE – dd/MM/yyyy');
@@ -124,8 +114,8 @@ void main() {
     await tester.tap(find.text('Create week'));
     await tester.pumpAndSettle();
 
-    expect(currentWeekTitle(), findsOneWidget);
-    expect(find.text('Enter today’s numbers'), findsOneWidget);
+    expect(WeekRepository(db).getAllWeeks(), hasLength(1));
+    expect(find.byKey(const ValueKey('week-summary')), findsOneWidget);
   });
 
   testWidgets('tracker board: typing a number updates totals instantly', (

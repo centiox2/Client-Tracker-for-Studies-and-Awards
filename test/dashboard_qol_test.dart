@@ -54,34 +54,34 @@ void main() {
     );
   }
 
-  testWidgets('start-week banner creates the week in one click', (
+  testWidgets('overview opens tracker without silently creating a week', (
     tester,
   ) async {
     await pumpApp(tester);
-    expect(find.text('Start week'), findsOneWidget);
-
-    await tester.tap(find.text('Start week'));
+    await tester.tap(find.byKey(const ValueKey('overview-open-week')));
     await tester.pumpAndSettle();
-
-    expect(find.text('Start week'), findsNothing);
-    expect(find.text('No week started'), findsNothing);
-    expect(WeekRepository(db).getAllWeeks(), hasLength(1));
+    expect(find.text('No week selected'), findsOneWidget);
+    expect(WeekRepository(db).getAllWeeks(), isEmpty);
   });
 
-  testWidgets('metric cards compare with the previous week', (tester) async {
-    final weeks = WeekRepository(db);
-    final now = DateTime.now();
-    final last = weeks.createWeekFor(now.subtract(const Duration(days: 7)));
-    final current = weeks.createWeekFor(now);
-    saveMonday(last.id, newClients: 2);
-    saveMonday(current.id, newClients: 5);
-
-    await pumpApp(tester);
-
-    // New and Total both went 2 → 5; Existing stayed at 0.
-    expect(find.text('↑ 3 (150%) vs last week'), findsNWidgets(2));
-    expect(find.text('Same as last week'), findsOneWidget);
-  });
+  testWidgets(
+    'weekly snapshot shows selected week rather than the previous week',
+    (tester) async {
+      final weeks = WeekRepository(db);
+      final now = DateTime.now();
+      final last = weeks.createWeekFor(now.subtract(const Duration(days: 7)));
+      final current = weeks.createWeekFor(now);
+      saveMonday(last.id, newClients: 2);
+      saveMonday(current.id, newClients: 5);
+      await pumpApp(tester);
+      final card = find.byKey(const ValueKey('overview-week'));
+      expect(
+        find.descendant(of: card, matching: find.text('5')),
+        findsNWidgets(2),
+      );
+      expect(find.descendant(of: card, matching: find.text('2')), findsNothing);
+    },
+  );
 
   test('week and month averages divide by working days so far', () {
     final weeks = WeekRepository(db);
@@ -184,26 +184,15 @@ void main() {
     expect(find.text('Off'), findsOneWidget);
   });
 
-  testWidgets('client mix and staff bars actually draw', (tester) async {
+  testWidgets('overview replaces detailed charts with page links', (
+    tester,
+  ) async {
     final week = WeekRepository(db).createWeekFor(DateTime.now());
     saveMonday(week.id, newClients: 6);
     await pumpApp(tester);
-    // Every coloured segment has height: a childless box in a row that
-    // doesn't stretch collapses to nothing, leaving an empty bar.
-    for (final key in ['client-mix', 'staff-meter-${joyId()}']) {
-      final boxes = find.descendant(
-        of: find.byKey(ValueKey(key)),
-        matching: find.byType(ColoredBox),
-      );
-      expect(boxes, findsWidgets, reason: key);
-      for (final e in boxes.evaluate()) {
-        expect(
-          e.size!.height,
-          greaterThan(0),
-          reason: '$key: a bar segment has no height',
-        );
-      }
-    }
+    expect(find.byKey(const ValueKey('overview-open-reports')), findsOneWidget);
+    expect(find.byKey(const ValueKey('overview-open-staff')), findsOneWidget);
+    expect(find.byKey(const ValueKey('client-mix')), findsNothing);
   });
 
   testWidgets('total and month cards show the daily average', (tester) async {
@@ -214,13 +203,15 @@ void main() {
     expect(find.textContaining(' / day'), findsNWidgets(2));
   });
 
-  testWidgets('week picker switches the dashboard week', (tester) async {
+  testWidgets('week picker switches the tracker week', (tester) async {
     final weeks = WeekRepository(db);
     final now = DateTime.now();
     final older = weeks.createWeekFor(now.subtract(const Duration(days: 14)));
     weeks.createWeekFor(now.add(const Duration(days: 7)));
     await pumpApp(tester);
 
+    await tester.tap(find.text('Weekly tracker').first);
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('week-picker')));
     await tester.pumpAndSettle();
     final label = shortRangeLabel(older.startDate, older.endDate);
@@ -228,7 +219,7 @@ void main() {
     await tester.tap(
       find.descendant(
         of: find.byType(MenuItemButton),
-        matching: find.text(label),
+        matching: find.textContaining(label),
       ),
     );
     await tester.pumpAndSettle();
@@ -236,7 +227,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('week-picker')),
-        matching: find.text(label),
+        matching: find.textContaining(label),
       ),
       findsOneWidget,
       reason: 'the week button shows the picked week',

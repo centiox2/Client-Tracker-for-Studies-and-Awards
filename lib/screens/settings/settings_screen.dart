@@ -24,6 +24,7 @@ import '../auth/login_screen.dart' show showChangeOwnPassword;
 import '../history/change_history_dialog.dart';
 import '../reports/reports_screen.dart' show showStaffProfile;
 import 'about_section.dart';
+import 'ai_summary_settings.dart';
 import 'airtable_section.dart';
 import 'import_dialog.dart';
 import 'departments_section.dart';
@@ -479,6 +480,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         const UsersSection(),
         const DepartmentsSection(),
         const AirtableSection(),
+        const AiSummarySettings(),
       ] else ...[
         const _ProfilesSection(),
         _Section(

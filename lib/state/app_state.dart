@@ -193,6 +193,7 @@ enum AppTab {
   history,
   staff,
   reports,
+  aiSummary,
   settings,
 }
 

@@ -20,6 +20,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'test_helpers.dart';
+import 'ai_summary_test.dart' show summaryFixture;
+
+import 'package:client_tracker/services/ai_summary_service.dart';
 
 class _InitialTab extends NavTabNotifier {
   _InitialTab(this.tab);
@@ -142,6 +145,7 @@ void main() {
     (AppTab.settings, 'settings-workspace', ['Workspace']),
     (AppTab.settings, 'settings-data', ['Data']),
     (AppTab.settings, 'settings-team', ['Team']),
+    (AppTab.settings, 'settings-ai', ['Team']),
     (AppTab.settings, 'settings-about', ['About']),
     (AppTab.dailyReports, 'daily-submissions', ['My submissions']),
     (AppTab.todo, 'todo-history', ['History']),
@@ -216,9 +220,21 @@ void main() {
               adminSessionProvider.overrideWith(SignedInSession.new),
               navTabProvider.overrideWith(() => _InitialTab(tab)),
               accountsEnabledProvider.overrideWithValue(
-                tab == AppTab.dailyReports,
+                tab == AppTab.dailyReports ||
+                    tab == AppTab.aiSummary ||
+                    name == 'settings-ai',
               ),
               reportViewProvider.overrideWithValue(_reports()),
+              aiSummaryAccessProvider.overrideWith((ref) async => true),
+              aiSummariesProvider.overrideWith((ref) async => summaryFixture()),
+              aiSummarySettingsProvider.overrideWith(
+                (ref) async => {
+                  'enabled': false,
+                  'configured': false,
+                  'model': 'gemini-3.8-flash',
+                  'users': [],
+                },
+              ),
             ],
             child: const ClientTrackerApp(),
           ),
@@ -236,6 +252,10 @@ void main() {
           await tester.ensureVisible(target);
           await tester.pumpAndSettle();
           await tester.tap(target);
+          await tester.pumpAndSettle();
+        }
+        if (name == 'settings-ai') {
+          await tester.ensureVisible(find.text('AI daily summary'));
           await tester.pumpAndSettle();
         }
         expect(tester.takeException(), isNull);

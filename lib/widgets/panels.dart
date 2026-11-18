@@ -16,6 +16,7 @@ class AppPanel extends StatelessWidget {
     this.subtitle,
     this.trailing,
     this.trailingWidget,
+    this.compactHeader = false,
   });
 
   final String title;
@@ -30,6 +31,9 @@ class AppPanel extends StatelessWidget {
 
   /// Header content on the right that isn't plain text (a legend, a link).
   final Widget? trailingWidget;
+
+  /// Keep short headings and a single icon action on one row.
+  final bool compactHeader;
 
   @override
   Widget build(BuildContext context) {
@@ -85,7 +89,7 @@ class AppPanel extends StatelessWidget {
                       ?trailingWidget,
                     ],
                   );
-                  if (constraints.maxWidth < 440) {
+                  if (constraints.maxWidth < 440 && !compactHeader) {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
@@ -99,7 +103,9 @@ class AppPanel extends StatelessWidget {
                     );
                   }
                   return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: compactHeader
+                        ? CrossAxisAlignment.center
+                        : CrossAxisAlignment.start,
                     children: [
                       Expanded(flex: 3, child: heading),
                       if (trailing != null || trailingWidget != null) ...[

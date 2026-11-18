@@ -276,32 +276,39 @@ void main() {
   ) async {
     WeekRepository(db).createWeekFor(DateTime.now());
     await pumpApp(tester);
-    Offset at(String label) => tester.getCenter(find.text(label).first);
-    expect(at('New clients').dx, lessThan(at('Total clients').dx));
+    Offset at(String label) => tester.getCenter(
+      find
+          .descendant(
+            of: find.byKey(ValueKey('overview-$label')),
+            matching: find.text(label == 'todo' ? 'To-do' : 'Weekly tracker'),
+          )
+          .first,
+    );
+    expect(at('todo').dx, lessThan(at('week').dx));
 
     // Tests run as Android: press and hold, then drag.
-    final gesture = await tester.startGesture(at('New clients'));
+    final gesture = await tester.startGesture(at('todo'));
     await tester.pump(const Duration(milliseconds: 700));
     await gesture.moveBy(const Offset(20, 0));
     await tester.pump();
-    await gesture.moveTo(at('Total clients'));
+    await gesture.moveTo(at('week'));
     await tester.pump();
     await gesture.up();
     await tester.pumpAndSettle();
 
-    expect(at('New clients').dx, greaterThan(at('Total clients').dx));
+    expect(at('todo').dy, lessThan(at('week').dy));
     final saved = db.raw.select(
-      "SELECT v FROM sync_state WHERE k = 'ui.cards.overview';",
+      "SELECT v FROM sync_state WHERE k = 'ui.board.workspace-overview.3';",
     );
     expect(saved, isNotEmpty);
 
     final container = ProviderScope.containerOf(
       tester.element(find.byType(ClientTrackerApp)),
     );
-    container.read(uiPrefProvider).clearPrefix('cards.');
+    container.read(uiPrefProvider).clearPrefix(CardBoard.prefPrefix);
     container.read(cardOrderVersionProvider.notifier).bump();
     await tester.pumpAndSettle();
-    expect(at('New clients').dx, lessThan(at('Total clients').dx));
+    expect(at('todo').dx, lessThan(at('week').dx));
   });
 
   testWidgets('phone bottom bar: Applications where Daily reports was', (
@@ -332,7 +339,7 @@ void main() {
 
     await tester.tap(find.byTooltip('More pages'));
     await tester.pumpAndSettle();
-    expect(find.text('Daily reports'), findsOneWidget);
+    expect(find.text('Daily reports'), findsWidgets);
   });
 
   testWidgets('on a Windows PC a card moves only after press and hold', (
@@ -340,8 +347,15 @@ void main() {
   ) async {
     WeekRepository(db).createWeekFor(DateTime.now());
     await pumpApp(tester);
-    Offset at(String label) => tester.getCenter(find.text(label).first);
-    final before = at('Existing clients');
+    Offset at(String label) => tester.getCenter(
+      find
+          .descendant(
+            of: find.byKey(ValueKey('overview-$label')),
+            matching: find.text(label == 'todo' ? 'To-do' : 'Weekly tracker'),
+          )
+          .first,
+    );
+    final before = at('todo');
     final lifted = find.byKey(const ValueKey('board-lifted'));
 
     // A click is a click: it never lifts the card, and the card's own
@@ -350,7 +364,7 @@ void main() {
       tester.element(find.byType(ClientTrackerApp)),
     );
     final click = await tester.startGesture(
-      at('Existing clients'),
+      at('todo'),
       kind: PointerDeviceKind.mouse,
     );
     await tester.pump(const Duration(milliseconds: 60));
@@ -364,21 +378,21 @@ void main() {
 
     // Nor does a click that drifts as it's pressed.
     var gesture = await tester.startGesture(
-      at('Existing clients'),
+      at('todo'),
       kind: PointerDeviceKind.mouse,
     );
     await gesture.moveBy(const Offset(30, 0));
     await tester.pump();
-    await gesture.moveTo(at('Active staff'));
+    await gesture.moveTo(at('week'));
     await tester.pump();
     expect(lifted, findsNothing);
     await gesture.up();
     await tester.pumpAndSettle();
-    expect(at('Existing clients'), before);
+    expect(at('todo'), before);
 
     // Hold: it lifts with a white outline, then moves where it's dropped.
     gesture = await tester.startGesture(
-      at('Existing clients'),
+      at('todo'),
       kind: PointerDeviceKind.mouse,
     );
     await tester.pump(const Duration(milliseconds: CardBoard.holdMs + 50));
@@ -388,13 +402,12 @@ void main() {
     final outline =
         tester.widget<DecoratedBox>(lifted).decoration as BoxDecoration;
     expect((outline.border! as Border).top.color, Colors.white);
-    await gesture.moveTo(at('Active staff'));
+    await gesture.moveTo(at('week'));
     await tester.pump();
     await gesture.up();
     await tester.pumpAndSettle();
     expect(lifted, findsNothing);
-    expect(at('Existing clients').dy, at('Active staff').dy);
-    expect(at('Existing clients').dx, greaterThan(at('Active staff').dx));
+    expect(at('todo').dy, lessThan(at('week').dy));
   }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
   for (final size in const [Size(390, 844), Size(820, 1180)]) {

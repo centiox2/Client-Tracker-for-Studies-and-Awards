@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'design/app_theme.dart';
+import 'screens/ai_summary/ai_summary_screen.dart';
 import 'screens/daily_reports/daily_reports_screen.dart';
 import 'screens/daily_reports/notifications_sheet.dart';
 import 'services/daily_reports_service.dart';
@@ -118,6 +119,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     _AppTabInfo(AppTab.history, 'History', Icons.history),
     _AppTabInfo(AppTab.staff, 'Staff', Icons.people_outline),
     _reportsTab,
+    _AppTabInfo(AppTab.aiSummary, 'AI summary', Icons.auto_awesome_outlined),
     _AppTabInfo(AppTab.settings, 'Settings', Icons.settings_outlined),
   ];
 
@@ -457,6 +459,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     AppTab.staff => StaffManagementScreen(readOnly: _isViewer),
     AppTab.reports => const ReportsScreen(),
     AppTab.settings => const SettingsScreen(),
+    AppTab.aiSummary => const AiSummaryScreen(),
   };
 
   /// Every page starts with its Clarity header (date, title, sync). The

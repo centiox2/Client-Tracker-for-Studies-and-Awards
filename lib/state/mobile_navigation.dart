@@ -3,12 +3,15 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app_state.dart';
+import '../services/ai_summary_service.dart';
 
 /// The same access rules drive the sidebar, bottom bar and its editor.
 final availableAppTabsProvider = Provider<List<AppTab>>((ref) {
   final role = ref.watch(sessionProvider);
   final user = ref.watch(currentUserProvider);
   final accounts = ref.watch(accountsEnabledProvider);
+  final aiAccess =
+      accounts && summaryAccessGranted(ref.watch(aiSummaryAccessProvider));
   final tabs = role?.canEdit == true
       ? AppTab.values
       : const [
@@ -19,17 +22,20 @@ final availableAppTabsProvider = Provider<List<AppTab>>((ref) {
           AppTab.applications,
           AppTab.history,
           AppTab.staff,
+          AppTab.aiSummary,
           AppTab.settings,
         ];
   final byRole = [
     for (final tab in tabs)
       if ((tab != AppTab.revenue || (role?.seesRevenue ?? false)) &&
-          (tab != AppTab.dailyReports || accounts))
+          (tab != AppTab.dailyReports || accounts) &&
+          (tab != AppTab.aiSummary || aiAccess))
         tab,
   ];
   final limited = [
     for (final tab in byRole)
-      if (tab == AppTab.settings ||
+      if (tab == AppTab.aiSummary ||
+          tab == AppTab.settings ||
           tab == AppTab.todo ||
           (user?.mayOpen(tab.name) ?? true))
         tab,

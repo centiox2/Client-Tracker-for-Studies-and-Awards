@@ -23,6 +23,7 @@ String pageTitle(AppTab tab) => switch (tab) {
   AppTab.staff => 'Staff',
   AppTab.reports => 'Reports',
   AppTab.settings => 'Settings',
+  AppTab.aiSummary => 'AI summary',
 };
 
 /// The top of every page: today's date and the time (ticking each minute,

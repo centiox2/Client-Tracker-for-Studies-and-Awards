@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.8.5';
+  static const version = '1.9.0';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,13 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.9.0', 'November 2026', [
+      'Overview now shows a concise snapshot and link for each available page.',
+      'Company-wide Gemini summaries: an Overview card, a dedicated history and details page, '
+          'and Admin controls for the API key and assigned viewers in Settings > Team.',
+      'Summaries run after 5 pm Nairobi time, even when the app is closed. '
+          'Admin must add a key and enable the schedule first.',
+    ]),
     Release('1.8.5', 'November 2026', [
       'Clearing reported problems handles connection or database errors '
           'without losing the displayed reports. Repeated clicks are disabled '
