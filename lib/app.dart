@@ -28,6 +28,7 @@ import 'screens/staff_management/staff_management_screen.dart';
 import 'screens/weekly_tracker/new_week_dialog.dart';
 import 'screens/weekly_tracker/weekly_tracker_screen.dart';
 import 'state/app_state.dart';
+import 'state/mobile_navigation.dart';
 import 'services/auto_backup.dart';
 import 'services/error_reporter.dart';
 import 'screens/settings/about_section.dart';
@@ -142,61 +143,16 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     Icons.payments_outlined,
   );
 
-  /// The phone's bottom bar holds five buttons at most; with more pages the
-  /// first four of these this profile has stay, in this order, and the rest
-  /// go under "More" (Daily reports included: its dot shows on More).
-  static const _phoneMain = [
-    AppTab.home,
-    AppTab.applications,
-    AppTab.week,
-    AppTab.reports,
-    AppTab.revenue,
-  ];
-
-  /// Signed out: Reports plus read-only History and Staff — nothing that
-  /// can change data.
-  static const _viewerTabs = <_AppTabInfo>[
-    _dailyReportsTab,
-    _todoTab,
-    _reportsTab,
-    _revenueTab,
-    _applicationsTab,
-    _AppTabInfo(AppTab.history, 'History', Icons.history),
-    _AppTabInfo(AppTab.staff, 'Staff', Icons.people_outline),
-    _AppTabInfo(AppTab.settings, 'Settings', Icons.settings_outlined),
-  ];
-
   /// View-only profiles (Director, Team): nothing that changes data.
   bool get _isViewer => !ref.read(canEditProvider);
 
   /// The pages this profile may open: revenue only for the admin and the
   /// director; Settings for everyone (their own part of it).
   List<_AppTabInfo> get _tabs {
-    final role = ref.read(sessionProvider);
-    final base = _isViewer ? _viewerTabs : _adminTabs;
-    final byRole = [
-      for (final t in base)
-        if ((t.tab != AppTab.revenue || (role?.seesRevenue ?? false)) &&
-            // Daily reports live with personal accounts (online only).
-            (t.tab != AppTab.dailyReports || ref.read(accountsEnabledProvider)))
-          t,
+    return [
+      for (final tab in ref.read(availableAppTabsProvider))
+        _adminTabs.firstWhere((item) => item.tab == tab),
     ];
-    // The admin may have limited this account to some pages (Settings ›
-    // Users › Page access). Never none: a list that leaves nothing open is
-    // ignored rather than locking the person out.
-    final user = ref.read(currentUserProvider);
-    // Settings always stays: everyone has their own (theme, text size,
-    // password, sessions); the workspace parts in it are admin only.
-    final limited = [
-      for (final t in byRole)
-        if (t.tab == AppTab.settings ||
-            t.tab == AppTab.todo ||
-            (user?.mayOpen(t.tab.name) ?? true))
-          t,
-    ];
-    return limited.any((t) => t.tab != AppTab.settings && t.tab != AppTab.todo)
-        ? limited
-        : byRole;
   }
 
   /// Notices when the date changes so "today" (Quick view, the tracker's
@@ -515,7 +471,15 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       children: [
         Padding(
           padding: EdgeInsets.fromLTRB(h, phone ? 20 : 28, h, 4),
-          child: AppPageHeader(tab: tab, actions: _headerActions(tab)),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: Dt.contentMaxWidth),
+              child: SizedBox(
+                width: double.infinity,
+                child: AppPageHeader(tab: tab, actions: _headerActions(tab)),
+              ),
+            ),
+          ),
         ),
         Expanded(child: page),
       ],
@@ -526,12 +490,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   List<Widget> _headerActions(AppTab tab) {
     final canEdit = ref.read(canEditProvider);
     final narrow = MediaQuery.sizeOf(context).width < 920;
-    Widget refresh() => OutlinedButton.icon(
-      key: const ValueKey('header-refresh'),
-      onPressed: () => ref.read(dataVersionProvider.notifier).bump(),
-      icon: const Icon(Icons.refresh),
-      label: const Text('Refresh'),
-    );
     Widget newWeek() => FilledButton.icon(
       key: const ValueKey('header-new-week'),
       onPressed: () => showNewWeekDialog(context, ref),
@@ -542,10 +500,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       AppTab.week => [
         // Narrow screens: the week (wide ones have it on the board).
         if (narrow) WeekRangeButton(canStart: canEdit),
-        if (!narrow) refresh(),
         if (canEdit && !narrow) newWeek(),
       ],
-      AppTab.history => [refresh(), if (canEdit) newWeek()],
+      AppTab.history => [if (canEdit) newWeek()],
       AppTab.revenue when !narrow => [
         OutlinedButton.icon(
           key: const ValueKey('header-change-log'),
@@ -564,21 +521,23 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       context: context,
       showDragHandle: true,
       builder: (sheet) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final item in tabs)
-              ListTile(
-                leading: Icon(item.icon),
-                title: Text(item.label),
-                selected: item.tab == current,
-                onTap: () {
-                  Navigator.of(sheet).pop();
-                  ref.read(navTabProvider.notifier).set(item.tab);
-                },
-              ),
-            const SizedBox(height: 8),
-          ],
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final item in tabs)
+                ListTile(
+                  leading: Icon(item.icon),
+                  title: Text(item.label),
+                  selected: item.tab == current,
+                  onTap: () {
+                    Navigator.of(sheet).pop();
+                    ref.read(navTabProvider.notifier).set(item.tab);
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );
@@ -671,32 +630,15 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     );
 
     if (!desktop) {
-      final tabs = allowed;
-      final useMore = tabs.length > 5;
-      // Four main pages (the most important this profile has) plus More.
-      // Applications takes Daily reports' place in the bar (Daily reports
-      // moves under More); without Daily reports the bar is as it was.
-      final hasDaily = tabs.any((i) => i.tab == AppTab.dailyReports);
-      final main = useMore
-          ? (([
-              for (final t in _phoneMain)
-                if (tabs.any((i) => i.tab == t) &&
-                    (t != AppTab.applications || hasDaily))
-                  t,
-            ]).take(4).toSet())
-          : const <AppTab>{};
-      final barTabs = useMore
-          ? [
-              for (final t in _phoneMain)
-                if (main.contains(t)) tabs.firstWhere((i) => i.tab == t),
-            ]
-          : tabs;
-      final moreTabs = useMore
-          ? [
-              for (final t in tabs)
-                if (!main.contains(t.tab)) t,
-            ]
-          : const <_AppTabInfo>[];
+      final main = ref.watch(mobileBarTabsProvider);
+      final barTabs = [
+        for (final tab in main) allowed.firstWhere((item) => item.tab == tab),
+      ];
+      final moreTabs = [
+        for (final item in allowed)
+          if (!main.contains(item.tab)) item,
+      ];
+      final useMore = moreTabs.isNotEmpty;
       final barIndex = barTabs.indexWhere((item) => item.tab == tab);
       return Scaffold(
         body: SafeArea(
@@ -744,10 +686,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                       : const Icon(Icons.menu),
                 ),
                 selectedIcon: const Icon(Icons.menu),
-                label: barIndex >= 0
-                    ? 'More'
-                    : (moreTabs.firstWhere((t) => t.tab == tab).shortLabel ??
-                          moreTabs.firstWhere((t) => t.tab == tab).label),
+                label: 'More',
                 tooltip: 'More pages',
               ),
           ],
@@ -922,6 +861,8 @@ class _AppSidebar extends ConsumerWidget {
                   ),
                 ),
                 ?dot,
+                if (item.tab == AppTab.todo)
+                  const QuickTodoButton(compact: true),
               ],
             ),
           );

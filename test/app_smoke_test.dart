@@ -57,6 +57,7 @@ void main() {
     tester,
   ) async {
     const size = Size(1864, 884);
+    WeekRepository(db).createWeekFor(DateTime.now());
     await pumpApp(tester, size: size);
 
     final metricLabels = [
@@ -87,6 +88,7 @@ void main() {
   ) async {
     await pumpApp(tester);
     expect(find.textContaining('No week yet'), findsOneWidget);
+    expect(find.text('Enter today’s numbers'), findsNothing);
 
     // Simulate an external update to the local database, then use the
     // refresh in the account menu to notify providers and refresh.

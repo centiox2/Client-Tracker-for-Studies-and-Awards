@@ -136,9 +136,14 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                           // height to work with: tall enough for everyone,
                           // so the page scrolls, not a box inside it.
                           SizedBox(
-                            height: (staff.length * 49 + 96)
-                                .clamp(240.0, double.infinity)
-                                .toDouble(),
+                            height:
+                                (staff.length *
+                                            (viewport.maxWidth < 600
+                                                ? 65
+                                                : 49) +
+                                        96)
+                                    .clamp(240.0, double.infinity)
+                                    .toDouble(),
                             child: team,
                           ),
                           const SizedBox(height: 12),
@@ -245,7 +250,13 @@ class _StaffTable extends ConsumerWidget {
               textAlign: TextAlign.right,
             ),
           ),
-          SizedBox(width: readOnly ? 6 : _actionsW),
+          SizedBox(
+            width: readOnly
+                ? 6
+                : compact
+                ? 48
+                : _actionsW,
+          ),
         ],
       ),
     );
@@ -450,7 +461,7 @@ class _StaffRow extends StatelessWidget {
     );
 
     return Container(
-      height: 48,
+      height: compact ? 64 : 48,
       padding: const EdgeInsets.only(right: 8),
       decoration: BoxDecoration(
         border: last
@@ -531,6 +542,37 @@ class _StaffRow extends StatelessWidget {
           ),
           if (readOnly)
             const SizedBox(width: 6)
+          else if (compact)
+            SizedBox(
+              width: 48,
+              child: PopupMenuButton<String>(
+                tooltip: 'Actions for ${member.name}',
+                onSelected: (action) {
+                  switch (action) {
+                    case 'rename':
+                      onEdit();
+                    case 'active':
+                      onToggleActive();
+                    case 'delete':
+                      onDelete();
+                  }
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'rename', child: Text('Rename')),
+                  PopupMenuItem(
+                    value: 'active',
+                    child: Text(member.active ? 'Mark inactive' : 'Reactivate'),
+                  ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Text(
+                      'Delete permanently',
+                      style: TextStyle(color: scheme.error),
+                    ),
+                  ),
+                ],
+              ),
+            )
           else
             SizedBox(
               width: _actionsW,
@@ -772,9 +814,15 @@ class _WeekGlance extends StatelessWidget {
     final top = saw.isEmpty
         ? 0
         : saw.map((r) => r.total).reduce((a, b) => a > b ? a : b);
-    final leaders = saw.where((r) => r.total == top).map((r) => r.name);
+    final leaders = saw
+        .where((r) => r.total == top)
+        .map((r) => r.name)
+        .toList();
     final none = rows.where((r) => r.total == 0).map((r) => r.name).toList();
-    Widget line(String label, String value) => Padding(
+    String names(List<String> people) => people.length <= 3
+        ? people.join(', ')
+        : '${people.take(2).join(', ')} + ${people.length - 2} others';
+    Widget line(String label, String value, {String? full}) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -787,11 +835,14 @@ class _WeekGlance extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w600,
+            child: Tooltip(
+              message: full ?? value,
+              child: Text(
+                value,
+                textAlign: TextAlign.right,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),
@@ -808,9 +859,14 @@ class _WeekGlance extends StatelessWidget {
             line('Saw clients', '${saw.length} of ${rows.length}'),
             line(
               'Most clients',
-              saw.isEmpty ? '—' : '${leaders.join(', ')} · $top',
+              saw.isEmpty ? '—' : '${names(leaders)} · $top',
+              full: '${leaders.join(', ')} · $top',
             ),
-            line('No clients yet', none.isEmpty ? '—' : none.join(', ')),
+            line(
+              'No clients yet',
+              none.isEmpty ? '—' : names(none),
+              full: none.join(', '),
+            ),
           ],
         ),
       ),

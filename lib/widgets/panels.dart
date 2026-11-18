@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show OverflowBoxFit;
 import 'package:intl/intl.dart';
 
 import '../design/app_theme.dart';
@@ -53,64 +52,69 @@ class AppPanel extends StatelessWidget {
               decoration: BoxDecoration(
                 border: Border(bottom: BorderSide(color: c.borderSubtle)),
               ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final heading = Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(title, style: theme.textTheme.titleMedium),
+                      if (subtitle != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle!,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: c.textMuted,
+                          ),
+                        ),
+                      ],
+                    ],
+                  );
+                  final details = Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (trailing != null)
+                        Text(
+                          trailing!,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: c.textMuted,
+                          ),
+                        ),
+                      ?trailingWidget,
+                    ],
+                  );
+                  if (constraints.maxWidth < 440) {
+                    return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        if (subtitle != null) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            subtitle!,
-                            style: theme.textTheme.labelMedium?.copyWith(
-                              color: c.textMuted,
-                              fontWeight: FontWeight.w400,
-                            ),
-                          ),
+                        heading,
+                        if (trailing != null || trailingWidget != null) ...[
+                          const SizedBox(height: 8),
+                          details,
                         ],
                       ],
-                    ),
-                  ),
-                  if (trailing != null) ...[
-                    const SizedBox(width: 12),
-                    Text(
-                      trailing!,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: c.textMuted,
-                        fontWeight: FontWeight.w400,
-                      ),
-                    ),
-                  ],
-                  if (trailingWidget != null) ...[
-                    const SizedBox(width: 12),
-                    // A link or legend never makes the header taller than
-                    // its title: every card's header lines up, and a
-                    // button keeps its full tap area (it reaches into the
-                    // header's padding).
-                    SizedBox(
-                      height: 22,
-                      child: OverflowBox(
-                        maxHeight: 48,
-                        fit: OverflowBoxFit.deferToChild,
-                        child: Theme(
-                          data: theme.copyWith(
-                            materialTapTargetSize:
-                                MaterialTapTargetSize.shrinkWrap,
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(flex: 3, child: heading),
+                      if (trailing != null || trailingWidget != null) ...[
+                        const SizedBox(width: 12),
+                        Flexible(
+                          flex: 2,
+                          child: Align(
+                            alignment: Alignment.centerRight,
+                            child: details,
                           ),
-                          child: trailingWidget!,
                         ),
-                      ),
-                    ),
-                  ],
-                ],
+                      ],
+                    ],
+                  );
+                },
               ),
             ),
             child,
@@ -151,13 +155,10 @@ class NewExistingLegend extends StatelessWidget {
         ),
       ],
     );
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        item('New', c.seriesNew),
-        const SizedBox(width: 16),
-        item('Existing', c.seriesExisting),
-      ],
+    return Wrap(
+      spacing: 16,
+      runSpacing: 8,
+      children: [item('New', c.seriesNew), item('Existing', c.seriesExisting)],
     );
   }
 }

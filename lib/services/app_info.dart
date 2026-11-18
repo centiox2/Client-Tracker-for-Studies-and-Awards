@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.8.3';
+  static const version = '1.8.4';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,13 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.8.4', 'November 2026', [
+      'Cleaner page headers, aligned card actions and less toolbar clutter.',
+      'Improved phone and tablet layouts for Staff, To-do, Daily reports, '
+          'Applications and Settings, including larger text and landscape screens.',
+      'Choose and reorder up to four bottom-bar pages in Settings › You. '
+          'Other pages stay in More; your choices are saved on this device.',
+    ]),
     Release('1.8.3', 'November 2026', [
       'Passwords need at least 8 characters, and are stored with stronger '
           'protection (older ones are upgraded the next time you sign in).',

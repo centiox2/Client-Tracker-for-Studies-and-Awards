@@ -493,8 +493,7 @@ class _TaskComposerState extends ConsumerState<TaskComposer> {
         children: [
           Row(
             children: [
-              status,
-              gap,
+              if (!narrow) ...[status, gap],
               Expanded(child: title),
               if (!narrow) ...[
                 for (final w in extras) ...[gap, w],
@@ -509,7 +508,10 @@ class _TaskComposerState extends ConsumerState<TaskComposer> {
                 spacing: 8,
                 runSpacing: 8,
                 crossAxisAlignment: WrapCrossAlignment.center,
-                children: [if (narrow) ...extras, ...counts],
+                children: [
+                  if (narrow) ...[status, ...extras],
+                  ...counts,
+                ],
               ),
             ),
           if (i.error != null)
@@ -544,21 +546,21 @@ class _TaskComposerState extends ConsumerState<TaskComposer> {
         ? 'Submit $sent'
         : 'Add $listed to my list';
 
-    final input = Row(
+    final modeControl = Tooltip(
+      message: 'Status for new items',
+      child: TaskModeToggle(
+        keyPrefix: 'draft-default-mode',
+        dense: true,
+        value: mode,
+        onChanged: (m) {
+          setState(() => _mode = m);
+          ref.read(reportChoicesProvider.notifier).remember(mode: m.name);
+        },
+      ),
+    );
+    Widget input(bool narrow) => Row(
       children: [
-        Tooltip(
-          message: 'Status for new items',
-          child: TaskModeToggle(
-            keyPrefix: 'draft-default-mode',
-            dense: true,
-            value: mode,
-            onChanged: (m) {
-              setState(() => _mode = m);
-              ref.read(reportChoicesProvider.notifier).remember(mode: m.name);
-            },
-          ),
-        ),
-        const SizedBox(width: 8),
+        if (!narrow) ...[modeControl, const SizedBox(width: 8)],
         Expanded(
           child: Focus(
             canRequestFocus: false,
@@ -628,9 +630,14 @@ class _TaskComposerState extends ConsumerState<TaskComposer> {
                   padding: const EdgeInsets.only(bottom: 4, right: 4),
                   child: Row(
                     children: [
-                      Text('TODAY’S LIST', style: microLabel(theme)),
+                      Flexible(
+                        child: Text('TODAY’S LIST', style: microLabel(theme)),
+                      ),
                       const SizedBox(width: 12),
-                      if (_items.isNotEmpty)
+                      if (narrow) ...[
+                        const Spacer(),
+                        modeControl,
+                      ] else if (_items.isNotEmpty)
                         Expanded(
                           child: Text(
                             '${_items.length} item${_items.length == 1 ? '' : 's'}'
@@ -649,7 +656,7 @@ class _TaskComposerState extends ConsumerState<TaskComposer> {
                   _item(theme, i, narrow),
                   Divider(height: 1, color: c.border),
                 ],
-                input,
+                input(narrow),
                 if (_items.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 6),

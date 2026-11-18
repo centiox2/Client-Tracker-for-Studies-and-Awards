@@ -587,7 +587,7 @@ class _TodoScreenState extends ConsumerState<TodoScreen> {
       ),
     );
 
-    final syncLine = Row(
+    final syncStatus = Row(
       children: [
         Icon(
           switch (sync) {
@@ -617,6 +617,11 @@ class _TodoScreenState extends ConsumerState<TodoScreen> {
             ),
           ),
         ),
+      ],
+    );
+    final viewActions = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
         SegmentedButton<bool>(
           key: const ValueKey('todo-view'),
           showSelectedIcon: false,
@@ -647,6 +652,25 @@ class _TodoScreenState extends ConsumerState<TodoScreen> {
           ],
         ),
       ],
+    );
+
+    final syncLine = LayoutBuilder(
+      builder: (context, constraints) => constraints.maxWidth < 600
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                syncStatus,
+                const SizedBox(height: 12),
+                Align(alignment: Alignment.centerRight, child: viewActions),
+              ],
+            )
+          : Row(
+              children: [
+                Expanded(child: syncStatus),
+                const SizedBox(width: 16),
+                viewActions,
+              ],
+            ),
     );
 
     final parsed = _input.text.trim().isEmpty
@@ -832,6 +856,26 @@ class _TodoScreenState extends ConsumerState<TodoScreen> {
         ],
       ),
     );
+    final narrowInput = MediaQuery.sizeOf(context).width < 600;
+    final targetPicker = Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: SegmentedButton<bool>(
+        key: const ValueKey('todo-target'),
+        showSelectedIcon: false,
+        style: const ButtonStyle(
+          visualDensity: VisualDensity(horizontal: -3, vertical: -3),
+        ),
+        segments: const [
+          ButtonSegment(value: false, label: Text('Mine')),
+          ButtonSegment(
+            value: true,
+            label: Text('Team', key: ValueKey('todo-to-team')),
+          ),
+        ],
+        selected: {_toTeam},
+        onSelectionChanged: (v) => setState(() => _toTeam = v.first),
+      ),
+    );
     final input = Container(
       padding: const EdgeInsets.fromLTRB(10, 4, 6, 4),
       decoration: BoxDecoration(
@@ -842,33 +886,19 @@ class _TodoScreenState extends ConsumerState<TodoScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (teamName != null && narrowInput)
+            Padding(
+              padding: const EdgeInsets.only(left: 2, top: 8, bottom: 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: targetPicker,
+              ),
+            ),
           Row(
             children: [
-              if (teamName != null)
-                Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: SegmentedButton<bool>(
-                    key: const ValueKey('todo-target'),
-                    showSelectedIcon: false,
-                    style: const ButtonStyle(
-                      visualDensity: VisualDensity(
-                        horizontal: -3,
-                        vertical: -3,
-                      ),
-                    ),
-                    segments: const [
-                      ButtonSegment(value: false, label: Text('Mine')),
-                      ButtonSegment(
-                        value: true,
-                        label: Text('Team', key: ValueKey('todo-to-team')),
-                      ),
-                    ],
-                    selected: {_toTeam},
-                    onSelectionChanged: (v) =>
-                        setState(() => _toTeam = v.first),
-                  ),
-                )
-              else
+              if (teamName != null && !narrowInput)
+                targetPicker
+              else if (teamName == null)
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: Icon(Icons.add, size: 18, color: c.textMuted),
@@ -892,9 +922,7 @@ class _TodoScreenState extends ConsumerState<TodoScreen> {
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,
                     focusedBorder: InputBorder.none,
-                    hintText: _toTeam
-                        ? 'Add to the team list'
-                        : 'Add a to-do, e.g. Call the embassy tomorrow 3pm !',
+                    hintText: _toTeam ? 'Add to the team list' : 'Add a to-do…',
                     hintMaxLines: 1,
                   ),
                 ),

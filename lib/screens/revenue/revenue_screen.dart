@@ -743,7 +743,7 @@ class _AddPanel extends StatelessWidget {
             photoPasteSupported ? 'Paste message or image' : 'Paste message',
           ),
         ),
-        if (photoDropSupported && onScan != null)
+        if (!phone && photoDropSupported && onScan != null)
           Text('or drag photos onto this page, or press Ctrl+V', style: hint),
       ],
     );

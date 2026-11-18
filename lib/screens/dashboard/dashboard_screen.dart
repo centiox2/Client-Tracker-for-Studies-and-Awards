@@ -112,7 +112,7 @@ class DashboardScreen extends ConsumerWidget {
           icon: const Icon(Icons.file_download_outlined),
           label: const Text('Export'),
         ),
-      if (canEdit)
+      if (canEdit && data != null && go(AppTab.week) != null)
         FilledButton.icon(
           key: const ValueKey('enter-numbers'),
           onPressed: () => ref.read(appActionsProvider).selectTab(AppTab.week),
@@ -193,44 +193,61 @@ class _StartWeekBanner extends ConsumerWidget {
     final c = context.clarity;
     final label = DateFormat('d MMMM').format(monday);
     final staff = ref.watch(staffListProvider).where((s) => s.active).length;
+    final message = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Icons.event_available_outlined, size: 18, color: c.accent),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'The week of $label hasn’t been started',
+                style: theme.textTheme.titleSmall,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Creates Monday–Friday with your $staff active staff.',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    final start = FilledButton.icon(
+      onPressed: () {
+        final actions = ref.read(appActionsProvider);
+        final week =
+            ref.read(weekRepositoryProvider).findByDate(monday) ??
+            actions.createWeek(monday);
+        actions.selectTab(AppTab.home, weekId: week.id);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Week of $label started')));
+      },
+      icon: const Icon(Icons.play_arrow_rounded, size: 16),
+      label: const Text('Start week'),
+    );
     return ClarityCard(
-      padding: const EdgeInsets.fromLTRB(20, 14, 14, 14),
-      child: Row(
-        children: [
-          Icon(Icons.event_available_outlined, size: 18, color: c.accent),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'The week of $label hasn’t been started',
-                  style: theme.textTheme.titleSmall,
-                ),
-                Text(
-                  'Creates Monday–Friday with your $staff active staff.',
-                  style: theme.textTheme.bodySmall,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          FilledButton.icon(
-            onPressed: () {
-              final actions = ref.read(appActionsProvider);
-              // Started meanwhile (another device, a second tap): open it.
-              final week =
-                  ref.read(weekRepositoryProvider).findByDate(monday) ??
-                  actions.createWeek(monday);
-              actions.selectTab(AppTab.home, weekId: week.id);
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(SnackBar(content: Text('Week of $label started')));
-            },
-            icon: const Icon(Icons.play_arrow_rounded, size: 16),
-            label: const Text('Start week'),
-          ),
-        ],
+      padding: const EdgeInsets.all(16),
+      child: LayoutBuilder(
+        builder: (context, box) => box.maxWidth < 560
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  message,
+                  const SizedBox(height: 12),
+                  Align(alignment: Alignment.centerRight, child: start),
+                ],
+              )
+            : Row(
+                children: [
+                  Expanded(child: message),
+                  const SizedBox(width: 16),
+                  start,
+                ],
+              ),
       ),
     );
   }

@@ -614,6 +614,12 @@ void main() {
     // blocks, so the last label runs on under the share button.
     Future<void> open(String tab) async {
       final label = find.descendant(of: tabs, matching: find.text(tab));
+      final element = tester.element(label);
+      await Scrollable.of(
+        element,
+        axis: Axis.horizontal,
+      ).position.ensureVisible(element.findRenderObject()!);
+      await tester.pumpAndSettle();
       await tester.tapAt(tester.getTopLeft(label) + const Offset(6, 6));
       await tester.pumpAndSettle();
     }

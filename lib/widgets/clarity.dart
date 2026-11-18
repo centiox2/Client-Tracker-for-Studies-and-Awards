@@ -63,20 +63,35 @@ class PageHeader extends StatelessWidget {
       ],
     );
     if (actions.isEmpty) return heading;
-    return Wrap(
-      alignment: WrapAlignment.spaceBetween,
-      crossAxisAlignment: WrapCrossAlignment.end,
-      runSpacing: 16,
-      spacing: 16,
-      children: [
-        heading,
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final toolbar = Wrap(
+          spacing: 8,
+          runSpacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: actions,
-        ),
-      ],
+        );
+        // Use the space available beside the sidebar, not the window width.
+        // A deliberate second row keeps actions aligned on tablets and phones.
+        if (constraints.maxWidth < 1000) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [heading, const SizedBox(height: 16), toolbar],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(child: heading),
+            const SizedBox(width: 24),
+            Flexible(
+              flex: 2,
+              child: Align(alignment: Alignment.centerRight, child: toolbar),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -884,6 +899,7 @@ class UnderlineTabs<T> extends StatelessWidget {
     required this.selected,
     required this.onChanged,
     this.trailing,
+    this.stackTrailingOnNarrow = false,
   });
 
   /// (value, label) for each tab.
@@ -894,6 +910,9 @@ class UnderlineTabs<T> extends StatelessWidget {
   /// Something on the right of the tab row (a status line, a button).
   final Widget? trailing;
 
+  /// Long action groups use their own row when the available width is small.
+  final bool stackTrailingOnNarrow;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -903,7 +922,7 @@ class UnderlineTabs<T> extends StatelessWidget {
       child: Row(
         children: [
           for (final (i, (value, label)) in tabs.indexed) ...[
-            if (i > 0) const SizedBox(width: 28),
+            if (i > 0) const SizedBox(width: 20),
             Semantics(
               selected: value == selected,
               button: true,
@@ -912,7 +931,7 @@ class UnderlineTabs<T> extends StatelessWidget {
                 onTap: () => onChanged(value),
                 hoverColor: Colors.transparent,
                 child: Container(
-                  padding: const EdgeInsets.only(top: 8, bottom: 10),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                   decoration: BoxDecoration(
                     border: Border(
                       bottom: BorderSide(
@@ -943,17 +962,42 @@ class UnderlineTabs<T> extends StatelessWidget {
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: c.border)),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Expanded(
-            child: Align(alignment: Alignment.centerLeft, child: row),
-          ),
-          if (trailing != null) ...[
-            const SizedBox(width: 12),
-            Padding(padding: const EdgeInsets.only(bottom: 8), child: trailing),
-          ],
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (stackTrailingOnNarrow &&
+              trailing != null &&
+              constraints.maxWidth < 900) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                row,
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: trailing,
+                  ),
+                ),
+              ],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Align(alignment: Alignment.centerLeft, child: row),
+              ),
+              if (trailing != null) ...[
+                const SizedBox(width: 12),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: trailing,
+                ),
+              ],
+            ],
+          );
+        },
       ),
     );
   }

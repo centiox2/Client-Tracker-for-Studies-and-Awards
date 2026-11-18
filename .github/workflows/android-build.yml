@@ -127,3 +127,18 @@ jobs:
             --title "S&A Hub for Android $version ($short)" \
             --notes "Android app built from $GITHUB_REF_NAME at $short. Download SAHub.apk on the phone and open it to install or update (allow installing from this source if asked)." \
             --latest=false
+
+      # Keep branch APKs downloadable without replacing android-latest.
+      - name: Publish branch preview APK
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(grep -E '^version:' pubspec.yaml | sed -E 's/version:[[:space:]]*([0-9.]+).*/\1/')
+          short=${GITHUB_SHA::7}
+          cp build/app/outputs/flutter-apk/app-release.apk SAHub.apk
+          gh release create "android-preview-${{ github.run_id }}-${{ github.run_attempt }}" SAHub.apk \
+            --target "$GITHUB_SHA" \
+            --title "S&A Hub Android preview $version ($short)" \
+            --notes "Preview APK from $GITHUB_REF_NAME at $short. Built separately from the production release." \
+            --prerelease --latest=false

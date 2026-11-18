@@ -90,13 +90,31 @@ Future<void> showWhatsNew(BuildContext context) => showDialog<void>(
 
 // ------------------------------------------------------------- text size --
 
-/// Smaller to Larger. Chips, so all five fit (on two lines on a phone).
+/// Text sizes use a labelled selector on phones and chips on wider screens.
 class TextSizePicker extends ConsumerWidget {
   const TextSizePicker({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scale = ref.watch(textScaleProvider);
+    if (MediaQuery.sizeOf(context).width < 600) {
+      return SizedBox(
+        width: 240,
+        child: DropdownButtonFormField<double>(
+          key: const ValueKey('text-size'),
+          initialValue: scale,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'Text size'),
+          items: [
+            for (final (value, label) in TextScaleNotifier.sizes)
+              DropdownMenuItem(value: value, child: Text(label)),
+          ],
+          onChanged: (value) {
+            if (value != null) ref.read(textScaleProvider.notifier).set(value);
+          },
+        ),
+      );
+    }
     return Wrap(
       key: const ValueKey('text-size'),
       spacing: 8,

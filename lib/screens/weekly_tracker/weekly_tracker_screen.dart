@@ -1422,17 +1422,15 @@ class _AnalyticsRail extends ConsumerWidget {
     return LayoutBuilder(
       builder: (context, c) {
         if (c.maxWidth < 900) return column;
-        return IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(child: facts),
-              const SizedBox(width: Dt.gap),
-              Expanded(child: chart),
-              const SizedBox(width: Dt.gap),
-              Expanded(child: leaderPanel),
-            ],
-          ),
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: facts),
+            const SizedBox(width: Dt.gap),
+            Expanded(child: chart),
+            const SizedBox(width: Dt.gap),
+            Expanded(child: leaderPanel),
+          ],
         );
       },
     );

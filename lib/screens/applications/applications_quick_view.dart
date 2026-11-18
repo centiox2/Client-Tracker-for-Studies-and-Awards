@@ -1176,7 +1176,9 @@ class MonthlyByAssignee extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SizedBox(
-              height: 150,
+              // Keep the bars fixed while allowing both labels to grow with
+              // the device's text size.
+              height: 120 + MediaQuery.textScalerOf(context).scale(40),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [

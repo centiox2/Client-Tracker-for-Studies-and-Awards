@@ -177,6 +177,22 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
         final phone = viewport.maxWidth < 600;
         final pad = clarityHPad(context);
         if (apps.isNotEmpty && _view == _View.table) {
+          final table = ApplicationsTable(
+            apps: apps,
+            onOpen: (a) => showApplicationDetails(context, ref, a),
+          );
+          // In landscape or above a keyboard, scroll the controls away so
+          // they cannot consume the table's entire viewport.
+          if (viewport.maxHeight < 420) {
+            return ListView(
+              padding: EdgeInsets.fromLTRB(pad, 16, pad, 28),
+              children: [
+                _header(context, imports, phone),
+                const SizedBox(height: 14),
+                SizedBox(height: 420, child: table),
+              ],
+            );
+          }
           // The table scrolls by itself, both ways. Same width and place as
           // the other views, so the tabs don't jump when switching.
           return Padding(
@@ -189,12 +205,7 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
                   children: [
                     _header(context, imports, phone),
                     const SizedBox(height: 14),
-                    Expanded(
-                      child: ApplicationsTable(
-                        apps: apps,
-                        onOpen: (a) => showApplicationDetails(context, ref, a),
-                      ),
-                    ),
+                    Expanded(child: table),
                   ],
                 ),
               ),
@@ -544,6 +555,7 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
       selected: _view,
       onChanged: (v) => setState(() => _view = v),
       trailing: actions,
+      stackTrailingOnNarrow: true,
     );
   }
 
@@ -1328,23 +1340,44 @@ Future<void> showApplicationDetails(
       String d(DateTime? t) =>
           t == null ? '—' : DateFormat('d MMM y').format(t);
       Widget field(String label, Widget value) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 5),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 150,
-              child: Text(
-                label,
-                style: theme.textTheme.bodySmall?.copyWith(color: muted),
-              ),
-            ),
-            Expanded(child: value),
-          ],
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        child: LayoutBuilder(
+          builder: (context, box) {
+            final caption = Text(
+              label,
+              style: theme.textTheme.bodySmall?.copyWith(color: muted),
+            );
+            if (box.maxWidth < 400) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [caption, const SizedBox(height: 4), value],
+              );
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(width: 150, child: caption),
+                Expanded(child: value),
+              ],
+            );
+          },
         ),
       );
       Widget text(String s) =>
           Text(s.isEmpty ? '—' : s, style: theme.textTheme.bodyMedium);
+      final phone = MediaQuery.sizeOf(context).width < 600;
+      void addTodo() => showQuickTodo(
+        context,
+        title: 'Follow up ${a.student} ',
+        clientKey: a.key,
+        clientName: a.student,
+      );
+      void printApplication() => savePrintable(
+        context,
+        fileName:
+            'application_${a.student.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_')}',
+        build: (r, b) => applicationToPdf(a, history, regular: r, bold: b),
+      );
       return AlertDialog(
         title: Text(a.student),
         content: SizedBox(
@@ -1438,29 +1471,33 @@ Future<void> showApplicationDetails(
           ),
         ),
         actions: [
-          TextButton.icon(
-            key: const ValueKey('application-todo'),
-            onPressed: () => showQuickTodo(
-              context,
-              title: 'Follow up ${a.student} ',
-              clientKey: a.key,
-              clientName: a.student,
+          if (phone) ...[
+            IconButton(
+              key: const ValueKey('application-todo'),
+              tooltip: 'Add to my to-do',
+              onPressed: addTodo,
+              icon: const Icon(Icons.add_task),
             ),
-            icon: const Icon(Icons.add_task, size: 16),
-            label: const Text('Add to my to-do'),
-          ),
-          TextButton.icon(
-            key: const ValueKey('application-print'),
-            onPressed: () => savePrintable(
-              context,
-              fileName:
-                  'application_${a.student.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_')}',
-              build: (r, b) =>
-                  applicationToPdf(a, history, regular: r, bold: b),
+            IconButton(
+              key: const ValueKey('application-print'),
+              tooltip: 'Print application',
+              onPressed: printApplication,
+              icon: const Icon(Icons.print_outlined),
             ),
-            icon: const Icon(Icons.print_outlined, size: 16),
-            label: const Text('Print'),
-          ),
+          ] else ...[
+            TextButton.icon(
+              key: const ValueKey('application-todo'),
+              onPressed: addTodo,
+              icon: const Icon(Icons.add_task, size: 16),
+              label: const Text('Add to my to-do'),
+            ),
+            TextButton.icon(
+              key: const ValueKey('application-print'),
+              onPressed: printApplication,
+              icon: const Icon(Icons.print_outlined, size: 16),
+              label: const Text('Print'),
+            ),
+          ],
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Close'),

@@ -28,6 +28,7 @@ import 'airtable_section.dart';
 import 'import_dialog.dart';
 import 'departments_section.dart';
 import 'users_section.dart';
+import 'navigation_section.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -501,6 +502,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _Category('you', 'You', Icons.person_outline, [
         if (user != null) const _YouSection(),
         appearance,
+        const NavigationSection(),
       ]),
       if (admin) ...[
         _Category('workspace', 'Workspace', Icons.tune, workspace),
