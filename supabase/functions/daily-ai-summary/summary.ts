@@ -24,8 +24,10 @@ export const schema = {
           page: { type: "string", enum: pages },
           title: { type: "string" },
           body: { type: "string" },
+          findings: { type: "array", items: { type: "string" } },
+          next_steps: { type: "array", items: { type: "string" } },
         },
-        required: ["page", "title", "body"],
+        required: ["page", "title", "body", "findings", "next_steps"],
       },
     },
   },
@@ -53,6 +55,14 @@ export function validateSummary(value: unknown) {
       !section || !pages.includes(section.page) || seen.has(section.page) ||
       !text(section.title, 100) || !text(section.body, 3000)
     ) throw new Error("invalid_summary");
+    for (const field of ["findings", "next_steps"]) {
+      const list = section[field];
+      if (
+        list !== undefined &&
+        (!Array.isArray(list) || list.length > 6 ||
+          !list.every((x: unknown) => text(x, 800)))
+      ) throw new Error("invalid_summary");
+    }
     seen.add(section.page);
   }
   // Project onto expected fields only; don't persist arbitrary model fields.
@@ -65,6 +75,8 @@ export function validateSummary(value: unknown) {
       page: s.page,
       title: s.title,
       body: s.body,
+      findings: s.findings ?? [],
+      next_steps: s.next_steps ?? [],
     })),
   };
 }

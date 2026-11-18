@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.9.2';
+  static const version = '1.9.3';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,13 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.9.3', 'November 2026', [
+      'AI reports have Summary and Detailed report views in one readable panel, '
+          'with key figures, findings and follow-up actions.',
+      'Report money values match the Revenue page’s currency and units.',
+      'AI reports use a verified available Gemini model and retry temporary service failures.',
+      'Failed reports explain whether Gemini is busy, a request timed out, or API access needs attention.',
+    ]),
     Release('1.9.2', 'November 2026', [
       'Admin can generate a fresh AI report at any time from Overview or AI summary, '
           'including before 5 pm or with the daily schedule off.',

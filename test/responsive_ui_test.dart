@@ -146,6 +146,7 @@ void main() {
     (AppTab.settings, 'settings-data', ['Data']),
     (AppTab.settings, 'settings-team', ['Team']),
     (AppTab.settings, 'settings-ai', ['Team']),
+    (AppTab.aiSummary, 'ai-detailed-report', ['Detailed report']),
     (AppTab.settings, 'settings-about', ['About']),
     (AppTab.dailyReports, 'daily-submissions', ['My submissions']),
     (AppTab.todo, 'todo-history', ['History']),

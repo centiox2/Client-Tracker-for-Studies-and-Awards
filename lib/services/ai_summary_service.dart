@@ -78,7 +78,10 @@ String summaryStatus(Map<String, dynamic> data) {
     return 'A new report is being prepared. The last successful report remains available.';
   }
   if (data['status'] == 'failed') {
-    return 'The latest report could not be generated. Earlier reports remain available.';
+    final reason = data['error_message'] as String?;
+    return reason == null || reason.isEmpty
+        ? 'The latest report could not be generated. Earlier reports remain available.'
+        : '$reason Earlier successful reports remain available.';
   }
   if (data['status'] == 'ready') {
     return data['enabled'] == true

@@ -55,3 +55,31 @@ Deno.test("rejects malformed and unbounded output", () => {
     assert(rejected);
   }
 });
+
+Deno.test("detailed findings are retained and legacy reports remain valid", () => {
+  const detailed = sample();
+  const result = validateSummary({
+    ...detailed,
+    sections: detailed.sections.map((s) => ({
+      ...s,
+      findings: ["Recorded evidence"],
+      next_steps: ["Review evidence"],
+    })),
+  });
+  assert(result.sections[0].findings[0] === "Recorded evidence");
+  assert(validateSummary(sample()).sections[0].findings.length === 0);
+});
+Deno.test("unbounded or malformed detailed findings are rejected", () => {
+  for (const findings of ["invalid", Array(7).fill("x"), ["x".repeat(801)]]) {
+    let rejected = false;
+    try {
+      validateSummary({
+        ...sample(),
+        sections: sample().sections.map((s) => ({ ...s, findings })),
+      });
+    } catch {
+      rejected = true;
+    }
+    assert(rejected);
+  }
+});

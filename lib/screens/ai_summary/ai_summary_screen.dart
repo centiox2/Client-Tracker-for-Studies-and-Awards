@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -7,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../services/ai_summary_service.dart';
 import '../../state/app_state.dart';
 import '../../widgets/panels.dart';
+import 'report_document.dart';
 
 String _stamp(Object? raw) {
   final date = DateTime.tryParse('$raw');
@@ -85,6 +84,7 @@ class AiSummaryScreen extends ConsumerStatefulWidget {
 
 class _AiSummaryScreenState extends ConsumerState<AiSummaryScreen> {
   String? selected;
+  bool detailed = false;
   @override
   Widget build(BuildContext context) {
     final access = ref.watch(aiSummaryAccessProvider);
@@ -124,90 +124,46 @@ class _AiSummaryScreenState extends ConsumerState<AiSummaryScreen> {
               children: [
                 Center(
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 960),
+                    constraints: const BoxConstraints(maxWidth: 1040),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(summaryStatus(data)),
-                        if (data['can_generate'] == true) ...[
-                          const SizedBox(height: 12),
-                          AiGenerateReportButton(
-                            data: data,
-                            onRequested: () => setState(() => selected = null),
-                          ),
-                        ],
-                        const SizedBox(height: 16),
-                        if (rows.isNotEmpty)
-                          DropdownButtonFormField<String>(
-                            key: ValueKey(row!['summary_date']),
-                            initialValue: '${row['summary_date']}',
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Summary date',
-                            ),
-                            items: [
-                              for (final r in rows)
-                                DropdownMenuItem(
-                                  value: '${r['summary_date']}',
-                                  child: Text('${r['summary_date']}'),
-                                ),
-                            ],
-                            onChanged: (v) => setState(() => selected = v),
-                          ),
+                        const SizedBox(height: 12),
+                        _ReportToolbar(
+                          data: data,
+                          rows: rows,
+                          date: row?['summary_date']?.toString(),
+                          onDate: (value) => setState(() => selected = value),
+                          onRequested: () => setState(() => selected = null),
+                        ),
                         if (content != null) ...[
                           const SizedBox(height: 20),
-                          Text(
-                            '${content['brief']}',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'AI generated · Review against recorded data.\nData as of ${_stamp(row!['cutoff_at'])}\nModel: ${row['model']}',
-                          ),
-                          for (final pair in [
-                            ('Highlights', 'highlights'),
-                            ('Needs attention', 'risks'),
-                            ('Suggested next steps', 'actions'),
-                          ]) ...[
-                            const SizedBox(height: 24),
-                            Text(
-                              pair.$1,
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            const SizedBox(height: 8),
-                            for (final item
-                                in (content[pair.$2] as List? ?? []))
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: Text('• $item'),
-                              ),
-                          ],
-                          for (final section
-                              in (content['sections'] as List? ?? []))
-                            Padding(
-                              padding: const EdgeInsets.only(top: 20),
-                              child: AppPanel(
-                                title: '${section['title']}',
-                                child: Padding(
-                                  padding: const EdgeInsets.all(20),
-                                  child: Text('${section['body']}'),
-                                ),
-                              ),
-                            ),
-                          const SizedBox(height: 24),
-                          ExpansionTile(
-                            title: const Text(
-                              'Recorded facts used in this summary',
-                            ),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
                             children: [
-                              Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: SelectableText(
-                                  const JsonEncoder.withIndent('  ')
-                                      .convert(row['input_snapshot']),
-                                ),
+                              ChoiceChip(
+                                key: const ValueKey('report-summary-view'),
+                                label: const Text('Summary'),
+                                selected: !detailed,
+                                onSelected: (_) =>
+                                    setState(() => detailed = false),
+                              ),
+                              ChoiceChip(
+                                key: const ValueKey('report-detailed-view'),
+                                label: const Text('Detailed report'),
+                                selected: detailed,
+                                onSelected: (_) =>
+                                    setState(() => detailed = true),
                               ),
                             ],
+                          ),
+                          const SizedBox(height: 16),
+                          ReportDocument(
+                            row: row!,
+                            detailed: detailed,
+                            cutoffLabel: _stamp(row['cutoff_at']),
                           ),
                         ] else
                           const Padding(
@@ -225,6 +181,51 @@ class _AiSummaryScreenState extends ConsumerState<AiSummaryScreen> {
           },
         );
   }
+}
+
+class _ReportToolbar extends StatelessWidget {
+  const _ReportToolbar({
+    required this.data,
+    required this.rows,
+    required this.date,
+    required this.onDate,
+    required this.onRequested,
+  });
+  final Map<String, dynamic> data;
+  final List<Map> rows;
+  final String? date;
+  final ValueChanged<String?> onDate;
+  final VoidCallback onRequested;
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) => Wrap(
+      spacing: 16,
+      runSpacing: 12,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (rows.isNotEmpty)
+          SizedBox(
+            width: box.maxWidth < 600 ? box.maxWidth : 320,
+            child: DropdownButtonFormField<String>(
+              key: ValueKey(date),
+              initialValue: date,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Report date'),
+              items: [
+                for (final row in rows)
+                  DropdownMenuItem(
+                    value: '${row['summary_date']}',
+                    child: Text('${row['summary_date']}'),
+                  ),
+              ],
+              onChanged: onDate,
+            ),
+          ),
+        if (data['can_generate'] == true)
+          AiGenerateReportButton(data: data, onRequested: onRequested),
+      ],
+    ),
+  );
 }
 
 /// Requests a server-side refresh; the key never leaves the server.

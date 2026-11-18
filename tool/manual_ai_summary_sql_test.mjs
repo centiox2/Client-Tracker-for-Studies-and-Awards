@@ -34,6 +34,8 @@ for (
     "20261118080640_daily_ai_summary.sql",
     "20261118082030_ai_summary_job_auth_guard.sql",
     "20261118110032_manual_ai_summary.sql",
+    "20261118113801_ai_report_failure_messages.sql",
+    "20261118114826_report_readable_details.sql",
   ]
 ) {
   if (file.endsWith("manual_ai_summary.sql")) {
@@ -51,6 +53,19 @@ for (
 }
 const scalar = async (sql, args = []) =>
   Object.values((await db.query(sql, args)).rows[0])[0];
+assert.equal(
+  await scalar("select model from private.ai_summary_config"),
+  "gemini-3.5-flash-lite",
+);
+const context = await scalar("select private.ai_summary_context()");
+assert.equal(context.revenue.today_amount, 90);
+assert.equal(context.revenue.currency, "KES");
+assert.equal(context.weekly_tracker.month_total, 5);
+await db.exec("delete from public.app_settings where key='currency'");
+assert.equal(
+  (await scalar("select private.ai_summary_context()")).revenue.currency,
+  "KSh",
+);
 const tick = async (time) => db.query("update private.clock set at=$1", [time]);
 const request = () => scalar("select public.ai_summary_generate('admin')");
 const read = () => scalar("select public.ai_summary_read('admin')");
@@ -128,6 +143,7 @@ assert(await claim(job.job_id, run2));
 await finish(run2, null, "gemini_http_429");
 data = await read();
 assert.equal(data.status, "failed");
+assert.match(data.error_message, /quota|rate limit/i);
 assert.equal(
   data.summaries[0].content.brief,
   "Morning report",

@@ -1,5 +1,12 @@
 import 'dart:async';
 
+import 'package:client_tracker/app.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'test_helpers.dart';
+
+import 'package:client_tracker/widgets/clarity.dart';
+
 import 'package:client_tracker/services/ai_summary_service.dart';
 import 'package:client_tracker/screens/ai_summary/ai_summary_screen.dart';
 import 'package:client_tracker/screens/settings/ai_summary_settings.dart';
@@ -41,13 +48,48 @@ Map<String, dynamic> summaryFixture() => {
               'Settings',
             ])
               {
+                'page': switch (name) {
+                  'Weekly tracker' => 'weekly_tracker',
+                  'Daily reports' => 'daily_reports',
+                  'Team to-do' => 'team_todo',
+                  _ => name.toLowerCase(),
+                },
                 'title': name,
                 'body': 'A concise summary of recorded $name activity.',
+                'findings': [
+                  'Recorded $name figures are available for review.',
+                ],
+                'next_steps': ['Review the recorded $name figures.'],
               },
           ],
         },
         'input_snapshot': {
-          'staff': {'active': 5},
+          'weekly_tracker': {
+            'today': 12,
+            'month_new': 40,
+            'month_existing': 60,
+            'month_total': 100,
+          },
+          'revenue': {
+            'currency': 'KSh',
+            'today_cents': 1250000,
+            'month_net_cents': 2500000,
+          },
+          'applications': {
+            'total': 526,
+            'with_offer': 334,
+            'with_coe': 248,
+            'by_status': {'Awaiting offer': 50},
+          },
+          'daily_reports': {
+            'submitted_today': 4,
+            'open': 8,
+            'blocked': 1,
+            'overdue': 2,
+          },
+          'team_todo': {'open': 3, 'done': 7},
+          'history': {'recorded_weeks': 8},
+          'staff': {'active': 5, 'total': 6},
         },
       },
   ],
@@ -61,6 +103,21 @@ class _Person extends CurrentUserNotifier {
 }
 
 void main() {
+  test('report failures show safe actionable server messages', () {
+    expect(
+      summaryStatus({
+        'status': 'failed',
+        'error_message':
+            'Gemini is temporarily busy. Please try again shortly.',
+      }),
+      contains('temporarily busy'),
+    );
+    expect(
+      summaryStatus({'status': 'failed', 'error_message': null}),
+      contains('could not be generated'),
+    );
+  });
+
   for (final role in UserRole.values) {
     for (final granted in [false, true]) {
       test('${role.name}: AI summary requires explicit grant', () async {
@@ -387,6 +444,76 @@ void main() {
       await tester.pumpAndSettle();
       expect(reads, 2);
       expect(find.text('Automatically updated report.'), findsOneWidget);
+    },
+  );
+  testWidgets(
+    'Summary and detailed report use one panel with readable figures and complete findings',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            aiSummaryAccessProvider.overrideWith((ref) async => true),
+            aiSummariesProvider.overrideWith((ref) async => summaryFixture()),
+          ],
+          child: const MaterialApp(home: Scaffold(body: AiSummaryScreen())),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(ClarityCard), findsOneWidget);
+      expect(find.text('Executive summary'), findsOneWidget);
+      expect(find.text('KSh 12,500'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('report-detailed-view')));
+      await tester.pumpAndSettle();
+      expect(find.byType(ClarityCard), findsOneWidget);
+      expect(find.text('1. Weekly tracker'), findsOneWidget);
+      expect(find.text('9. Settings'), findsOneWidget);
+      expect(find.text('Month-to-date net revenue'), findsOneWidget);
+      expect(
+        find.text('Recorded Revenue figures are available for review.'),
+        findsOneWidget,
+      );
+      expect(find.text('KSh 25,000'), findsOneWidget);
+      expect(find.text('Recorded facts used in this summary'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'Desktop navigation updates when AI access arrives asynchronously',
+    (tester) async {
+      final db = openInMemoryDatabase();
+      addTearDown(db.close);
+      SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize = const Size(1440, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final grant = Completer<bool>();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            databaseProvider.overrideWithValue(db),
+            adminSessionProvider.overrideWith(SignedInSession.new),
+            accountsEnabledProvider.overrideWithValue(true),
+            aiSummaryAccessProvider.overrideWith((ref) => grant.future),
+            aiSummariesProvider.overrideWith((ref) async => summaryFixture()),
+          ],
+          child: const ClientTrackerApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('AI summary'), findsNothing);
+      grant.complete(true);
+      await tester.pumpAndSettle();
+      expect(find.text('AI summary'), findsOneWidget);
+      await tester.tap(find.text('AI summary'));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('report-detailed-view')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
     },
   );
 }

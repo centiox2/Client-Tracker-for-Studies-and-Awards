@@ -589,7 +589,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final isViewer = !ref.watch(canEditProvider);
-    // A new page list from the admin takes effect at once.
+    // Async AI access and Admin page assignments update desktop navigation too.
+    ref.watch(availableAppTabsProvider);
     ref.watch(currentUserProvider);
     final requested = ref.watch(navTabProvider);
     final allowed = _tabs;
