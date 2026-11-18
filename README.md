@@ -112,6 +112,15 @@ Since added: assigning tasks, a review step (submitted work is approved or retur
 
 ## Signed builds
 
+### Error-log database update
+
+For an existing online database, apply
+`supabase/migrations/20261118073655_error_clear_filter.sql` in the Supabase SQL
+Editor. It fixes **Settings › About › Problems reported › Clear** failing with
+“DELETE requires a WHERE clause”. Applying it only replaces the function and
+does not clear any reports. The server fix also works for existing app versions;
+installing a new app alone does not update the online function.
+
 Both apps are signed by GitHub Actions as they're built; the keys live only in the repository's secrets (Settings › Secrets and variables › Actions), never in the code.
 
 Manual Windows and Android builds on a working branch publish separate GitHub

@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../design/app_theme.dart';
 import '../../services/account_services.dart';
 import '../../services/app_info.dart';
+import '../../services/cloud/cloud_api.dart' show CloudException;
 import '../../state/app_state.dart';
 import '../../widgets/clarity.dart';
 import '../../widgets/motion.dart';
@@ -507,6 +508,8 @@ class AboutSection extends ConsumerStatefulWidget {
 
 class _AboutSectionState extends ConsumerState<AboutSection> {
   List<ErrorReport>? _errors;
+  bool _clearing = false;
+  String? _clearError;
 
   /// The problem whose details are open (one at a time).
   int? _open;
@@ -544,6 +547,30 @@ class _AboutSectionState extends ConsumerState<AboutSection> {
       if (mounted) setState(() => (_errors = list, _error = null));
     } catch (e) {
       if (mounted) setState(() => _error = describeAccountError(e));
+    }
+  }
+
+  Future<void> _clear() async {
+    if (_clearing) return;
+    setState(() => (_clearing = true, _clearError = null));
+    try {
+      await ref.read(errorsServiceProvider).clear();
+      if (!mounted) return;
+      setState(() => _open = null);
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      final needsFilter =
+          e is CloudException &&
+          (e.detail?.contains('DELETE requires a WHERE clause') ?? false);
+      setState(
+        () => _clearError = needsFilter
+            ? 'Couldn’t clear the problems. The online database needs the '
+                  'error-log update. Existing reports have been kept.'
+            : 'Couldn’t clear the problems. ${describeAccountError(e)}',
+      );
+    } finally {
+      if (mounted) setState(() => _clearing = false);
     }
   }
 
@@ -589,31 +616,46 @@ class _AboutSectionState extends ConsumerState<AboutSection> {
             ),
             if (widget.online && widget.admin) ...[
               const SizedBox(height: 18),
-              Row(
+              Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 12,
+                runSpacing: 8,
                 children: [
                   Text('PROBLEMS REPORTED', style: microLabel(theme)),
-                  const Spacer(),
-                  if (errors != null && errors.isNotEmpty) ...[
-                    TextButton.icon(
-                      key: const ValueKey('copy-all-problems'),
-                      onPressed: () => _copy(
-                        errors.take(10).map(_asText).join('\n\n'),
-                        errors.length == 1 ? 'Problem' : 'Problems',
-                      ),
-                      icon: const Icon(Icons.copy, size: 14),
-                      label: const Text('Copy all'),
+                  if (errors != null && errors.isNotEmpty)
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        TextButton.icon(
+                          key: const ValueKey('copy-all-problems'),
+                          onPressed: () => _copy(
+                            errors.take(10).map(_asText).join('\n\n'),
+                            errors.length == 1 ? 'Problem' : 'Problems',
+                          ),
+                          icon: const Icon(Icons.copy, size: 14),
+                          label: const Text('Copy all'),
+                        ),
+                        TextButton(
+                          key: const ValueKey('clear-problems'),
+                          onPressed: _clearing ? null : _clear,
+                          child: Text(_clearing ? 'Clearing…' : 'Clear'),
+                        ),
+                      ],
                     ),
-                    TextButton(
-                      onPressed: () async {
-                        await ref.read(errorsServiceProvider).clear();
-                        await _load();
-                      },
-                      child: const Text('Clear'),
-                    ),
-                  ],
                 ],
               ),
               const SizedBox(height: 6),
+              if (_clearError != null) ...[
+                Text(
+                  _clearError!,
+                  key: const ValueKey('clear-problems-error'),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: c.negativeFg,
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
               if (_error != null)
                 Text(_error!, style: theme.textTheme.bodySmall)
               else if (errors == null)

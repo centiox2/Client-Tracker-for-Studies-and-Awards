@@ -3212,10 +3212,10 @@ end $$;
 create or replace function public.error_clear(p_token text)
 returns void language plpgsql security definer set search_path = '' as $$
 begin
-  if private.token_role(p_token) <> 'admin' then
+  if private.token_role(p_token) is distinct from 'admin' then
     raise exception 'not_allowed' using errcode = '42501';
   end if;
-  delete from private.error_reports;
+  delete from private.error_reports where id is not null;
 end $$;
 
 revoke all on all functions in schema private from public, anon, authenticated;

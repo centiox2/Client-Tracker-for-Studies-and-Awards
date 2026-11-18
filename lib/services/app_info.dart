@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.8.4';
+  static const version = '1.8.5';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,11 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.8.5', 'November 2026', [
+      'Clearing reported problems handles connection or database errors '
+          'without losing the displayed reports. Repeated clicks are disabled '
+          'while clearing.',
+    ]),
     Release('1.8.4', 'November 2026', [
       'Cleaner page headers, aligned card actions and less toolbar clutter.',
       'Improved phone and tablet layouts for Staff, To-do, Daily reports, '
