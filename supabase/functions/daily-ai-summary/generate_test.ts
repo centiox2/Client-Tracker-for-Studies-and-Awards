@@ -106,16 +106,65 @@ Deno.test("incomplete and malformed reports are never published", async () => {
     }]
   ) {
     let rejected = false;
+    let calls = 0;
     try {
       await generateReport(
         job,
-        async () => Response.json(value),
+        async () => {
+          calls++;
+          return Response.json(value);
+        },
         async () => {},
       );
     } catch (e) {
       rejected = e instanceof ReportGenerationError;
     }
     assert(rejected);
+    assert(calls === 3);
+  }
+});
+
+Deno.test("recovers from an invalid report and token cutoff with a compact retry", async () => {
+  const requests: string[] = [];
+  const result = await generateReport(job, async (_, options) => {
+    requests.push(String(options?.body));
+    switch (requests.length) {
+      case 1:
+        return Response.json({
+          candidates: [{
+            finishReason: "STOP",
+            content: {
+              parts: [{ text: JSON.stringify({ ...report, sections: [] }) }],
+            },
+          }],
+        });
+      case 2:
+        return Response.json({ candidates: [{ finishReason: "MAX_TOKENS" }] });
+      default:
+        return success();
+    }
+  }, async () => {});
+  assert(result.sections.length === pages.length);
+  assert(requests.length === 3);
+  assert(JSON.parse(requests[0]).generationConfig.maxOutputTokens === 6000);
+  assert(JSON.parse(requests[1]).generationConfig.maxOutputTokens === 12000);
+  assert(requests[1].includes("at most one item per list"));
+});
+
+Deno.test("provider safety blocks are not retried", async () => {
+  let calls = 0;
+  try {
+    await generateReport(job, async () => {
+      calls++;
+      return Response.json({ promptFeedback: { blockReason: "SAFETY" } });
+    });
+    throw new Error("expected a blocked report to fail");
+  } catch (error) {
+    assert(
+      error instanceof ReportGenerationError &&
+        error.code === "gemini_incomplete",
+    );
+    assert(calls === 1);
   }
 });
 
