@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../services/ai_summary_service.dart';
+import '../../services/cloud/cloud_api.dart';
 import '../../state/app_state.dart';
+import '../../widgets/clarity.dart';
 import '../../widgets/panels.dart';
 import 'report_document.dart';
 
@@ -120,7 +122,12 @@ class _AiSummaryScreenState extends ConsumerState<AiSummaryScreen> {
                 rows.firstOrNull;
             final content = row?['content'] as Map?;
             return ListView(
-              padding: const EdgeInsets.all(20),
+              padding: EdgeInsets.fromLTRB(
+                clarityHPad(context),
+                16,
+                clarityHPad(context),
+                24,
+              ),
               children: [
                 Center(
                   child: ConstrainedBox(
@@ -168,9 +175,7 @@ class _AiSummaryScreenState extends ConsumerState<AiSummaryScreen> {
                         ] else
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 32),
-                            child: Text(
-                              'No report yet. Admin can generate one now after adding a Gemini key, or enable the daily schedule.',
-                            ),
+                            child: Text('No reports yet.'),
                           ),
                       ],
                     ),
@@ -255,14 +260,18 @@ class _AiGenerateReportButtonState
       widget.onRequested?.call();
       ref.invalidate(aiSummariesProvider);
       await ref.read(aiSummariesProvider.future);
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
+        final needsKey =
+            error is CloudException && error.code == 'gemini_key_required';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               requested
                   ? 'Report requested. Refresh the page to check its progress.'
-                  : 'Could not request the report. Check the Gemini key in Settings and your connection, then retry.',
+                  : needsKey
+                  ? 'Add your Gemini API key in Settings → Team → AI daily summary.'
+                  : 'Could not request the report. Try again shortly.',
             ),
           ),
         );

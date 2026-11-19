@@ -132,7 +132,11 @@ class DashboardScreen extends ConsumerWidget {
                 ],
               ),
               const SizedBox(height: Dt.gap),
-              CardBoard(boardKey: 'overview', cards: cards),
+              CardBoard(
+                boardKey: 'overview',
+                minColumnWidth: 350,
+                cards: cards,
+              ),
             ],
           ),
         ),
@@ -224,123 +228,140 @@ class _ThisWeek extends ConsumerWidget {
           ? 'This week'
           : 'Week of ${DateFormat('d MMM').format(start)}',
       subtitle: '$range · $entered of ${days.length} days entered',
-      trailingWidget: Wrap(
-        crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: 12,
-        children: [if (!phone) const NewExistingLegend(), open],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (phone)
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 12, 20, 0),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: NewExistingLegend(),
+      compactHeader: true,
+      trailingWidget: open,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final narrow = constraints.maxWidth < 380;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: NewExistingLegend(),
+                ),
               ),
-            ),
-          StackedDayChart(
-            height: phone ? 140 : 180,
-            days: [
+              StackedDayChart(
+                height: phone ? 140 : 180,
+                days: [
+                  for (final d in days)
+                    ChartDay(
+                      date: d.day.date,
+                      newClients: d.workingRows.fold(
+                        0,
+                        (a, r) => a + r.newClients,
+                      ),
+                      existingClients: d.workingRows.fold(
+                        0,
+                        (a, r) => a + r.existingClients,
+                      ),
+                      isHoliday: d.isHoliday,
+                    ),
+                ],
+              ),
+              Container(
+                padding: pad.add(const EdgeInsets.symmetric(vertical: 12)),
+                decoration: BoxDecoration(
+                  border: Border(top: BorderSide(color: c.borderSubtle)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(flex: 5, child: Text('Day', style: head)),
+                    if (!narrow)
+                      Expanded(flex: 4, child: Text('Status', style: head)),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        'New',
+                        textAlign: TextAlign.right,
+                        style: head,
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        narrow ? 'Exist.' : 'Existing',
+                        textAlign: TextAlign.right,
+                        style: head,
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        'Total',
+                        textAlign: TextAlign.right,
+                        style: head,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               for (final d in days)
-                ChartDay(
-                  date: d.day.date,
-                  newClients: d.workingRows.fold(0, (a, r) => a + r.newClients),
-                  existingClients: d.workingRows.fold(
-                    0,
-                    (a, r) => a + r.existingClients,
-                  ),
-                  isHoliday: d.isHoliday,
-                ),
-            ],
-          ),
-          Container(
-            padding: pad.add(const EdgeInsets.symmetric(vertical: 12)),
-            decoration: BoxDecoration(
-              border: Border(top: BorderSide(color: c.borderSubtle)),
-            ),
-            child: Row(
-              children: [
-                Expanded(flex: 5, child: Text('Day', style: head)),
-                if (!phone)
-                  Expanded(flex: 4, child: Text('Status', style: head)),
-                Expanded(
-                  flex: 2,
-                  child: Text('New', textAlign: TextAlign.right, style: head),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    phone ? 'Exist.' : 'Existing',
-                    textAlign: TextAlign.right,
-                    style: head,
-                  ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Text('Total', textAlign: TextAlign.right, style: head),
-                ),
-              ],
-            ),
-          ),
-          for (final d in days)
-            Builder(
-              builder: (context) {
-                final has = d.workingRows.any((r) => r.total > 0);
-                final n = d.workingRows.fold(0, (a, r) => a + r.newClients);
-                final e = d.workingRows.fold(
-                  0,
-                  (a, r) => a + r.existingClients,
-                );
-                return Container(
-                  key: ValueKey('overview-day-${d.day.id}'),
-                  padding: pad.add(const EdgeInsets.symmetric(vertical: 12)),
-                  decoration: BoxDecoration(
-                    border: Border(top: BorderSide(color: c.borderSubtle)),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        flex: 5,
-                        child: phone
-                            ? Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    DateFormat('EEE d MMM').format(d.day.date),
+                Builder(
+                  builder: (context) {
+                    final has = d.workingRows.any((r) => r.total > 0);
+                    final n = d.workingRows.fold(0, (a, r) => a + r.newClients);
+                    final e = d.workingRows.fold(
+                      0,
+                      (a, r) => a + r.existingClients,
+                    );
+                    return Container(
+                      key: ValueKey('overview-day-${d.day.id}'),
+                      padding: pad.add(
+                        const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      decoration: BoxDecoration(
+                        border: Border(top: BorderSide(color: c.borderSubtle)),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            flex: 5,
+                            child: narrow
+                                ? Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        DateFormat('EEE d MMM')
+                                            .format(d.day.date),
+                                        style: cell.copyWith(
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      status(d, has),
+                                    ],
+                                  )
+                                : Text(
+                                    DateFormat('EEEE, d MMM')
+                                        .format(d.day.date),
                                     style: cell.copyWith(
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
-                                  const SizedBox(height: 4),
-                                  status(d, has),
-                                ],
-                              )
-                            : Text(
-                                DateFormat('EEEE, d MMM').format(d.day.date),
-                                style: cell.copyWith(
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                      ),
-                      if (!phone)
-                        Expanded(
-                          flex: 4,
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: status(d, has),
                           ),
-                        ),
-                      num(has ? n : null),
-                      num(has ? e : null),
-                      num(has ? n + e : null, bold: true),
-                    ],
-                  ),
-                );
-              },
-            ),
-        ],
+                          if (!narrow)
+                            Expanded(
+                              flex: 4,
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: status(d, has),
+                              ),
+                            ),
+                          num(has ? n : null),
+                          num(has ? e : null),
+                          num(has ? n + e : null, bold: true),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -526,6 +547,7 @@ class _RevenuePanel extends ConsumerWidget {
     final monthCents = month.fold(0, (a, d) => a + d.totalCents);
     final lastCents = last.fold(0, (a, d) => a + d.totalCents);
     final todayCents = entries.fold(0, (a, e) => a + e.amountCents);
+    final payments = entries.where((e) => e.amountCents > 0).length;
     final (delta, tone) = lastCents == 0
         ? (null, DeltaTone.neutral)
         : deltaVsLast(monthCents, lastCents, vs: 'same days last month');
@@ -533,14 +555,12 @@ class _RevenuePanel extends ConsumerWidget {
     return AppPanel(
       key: const ValueKey('overview-revenue'),
       title: 'Money in',
-      trailingWidget: TextButton(
-        style: TextButton.styleFrom(
-          padding: EdgeInsets.zero,
-          minimumSize: const Size(0, 28),
-        ),
+      compactHeader: true,
+      trailingWidget: IconButton(
         key: const ValueKey('overview-open-revenue'),
+        tooltip: 'Open Revenue',
         onPressed: open,
-        child: const Text('Open'),
+        icon: const Icon(Icons.arrow_forward, size: 18),
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
@@ -555,8 +575,7 @@ class _RevenuePanel extends ConsumerWidget {
                     label: 'Today',
                     value: formatMoney(todayCents, currency),
                     caption:
-                        '${entries.where((e) => e.amountCents > 0).length} '
-                        'payments',
+                        '$payments ${payments == 1 ? 'payment' : 'payments'}',
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -722,14 +741,12 @@ class _ApplicationsPanel extends ConsumerWidget {
     return AppPanel(
       key: const ValueKey('overview-applications'),
       title: 'Application pipeline',
-      trailingWidget: TextButton(
-        style: TextButton.styleFrom(
-          padding: EdgeInsets.zero,
-          minimumSize: const Size(0, 28),
-        ),
+      compactHeader: true,
+      trailingWidget: IconButton(
         key: const ValueKey('overview-open-applications'),
+        tooltip: 'Open Applications',
         onPressed: open,
-        child: const Text('Open'),
+        icon: const Icon(Icons.arrow_forward, size: 18),
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
@@ -871,6 +888,7 @@ class _ApplicationActivityPanel extends ConsumerWidget {
     return AppPanel(
       key: const ValueKey('overview-application-activity'),
       title: 'Application updates',
+      compactHeader: true,
       subtitle:
           'Today · ${updates.length} ${updates.length == 1 ? 'record' : 'records'}',
       trailingWidget: IconButton(

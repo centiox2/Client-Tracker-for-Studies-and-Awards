@@ -59,6 +59,14 @@ class _CardBoardState extends ConsumerState<CardBoard> {
     final ids = [for (final c in widget.cards) c.id];
     final columns = List.generate(cols, (_) => <String>[]);
     final raw = ref.read(uiPrefProvider).get(_pref(cols));
+    if (cols < widget.maxColumns && (raw == null || raw.isEmpty)) {
+      // Read across the full layout to keep the default order balanced as
+      // the number of visible columns changes.
+      for (final (index, id) in _rowOrder().indexed) {
+        columns[index % cols].add(id);
+      }
+      return columns;
+    }
     final placed = <String>{};
     if (raw != null && raw.isNotEmpty) {
       for (final (i, col) in raw.split('\u0002').indexed) {
@@ -73,12 +81,6 @@ class _CardBoardState extends ConsumerState<CardBoard> {
       if (placed.contains(card.id)) continue;
       final col = cols == 1 ? 0 : card.column.clamp(0, cols - 1);
       columns[col].add(card.id);
-    }
-    if (cols == 1 && (raw == null || raw.isEmpty)) {
-      // One column with nothing saved: read the default layout row by row.
-      columns[0]
-        ..clear()
-        ..addAll(_rowOrder());
     }
     return columns;
   }

@@ -335,12 +335,15 @@ class _KpiGridState extends ConsumerState<KpiGrid> {
         final n = order.length;
         // A fixed column count is kept even with fewer cards, so grids
         // stacked on one page give every card the same width.
-        final cols = widget.columns != null
+        final capacity = widget.columns != null
             ? widget.columns!.clamp(1, 12)
             : ((box.maxWidth + gap) / (widget.minWidth + gap)).floor().clamp(
                 1,
                 n == 0 ? 1 : n,
               );
+        final cols = widget.columns == null && n == 4 && capacity == 3
+            ? 2
+            : capacity;
         final w = (box.maxWidth - gap * (cols - 1)) / cols;
 
         Widget cell(String id, double width) {

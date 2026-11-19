@@ -65,6 +65,9 @@ class SupabaseCloudApi implements CloudApi {
     'airtable_budget',
     'airtable_empty',
     'airtable_too_many_pages',
+    'gemini_key_required',
+    'invalid_key',
+    'invalid_model',
   };
 
   /// How long one call may take before it counts as no connection. The

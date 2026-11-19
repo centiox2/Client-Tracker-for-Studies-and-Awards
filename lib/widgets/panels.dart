@@ -89,6 +89,17 @@ class AppPanel extends StatelessWidget {
                       ?trailingWidget,
                     ],
                   );
+                  if (compactHeader && trailing == null) {
+                    return Row(
+                      children: [
+                        Expanded(child: heading),
+                        if (trailingWidget != null) ...[
+                          const SizedBox(width: 12),
+                          trailingWidget!,
+                        ],
+                      ],
+                    );
+                  }
                   if (constraints.maxWidth < 440 && !compactHeader) {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,

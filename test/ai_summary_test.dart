@@ -183,13 +183,17 @@ void main() {
         params = args;
         return null;
       });
-      await service.save(enabled: false, model: 'gemini-3.8-flash', users: [2]);
+      await service.save(
+        enabled: false,
+        model: 'gemini-3.8-flash',
+        users: [2],
+        key: '  ',
+      );
       expect(called, 'ai_summary_configure');
       expect(params, {
         'p_enabled': false,
         'p_model': 'gemini-3.8-flash',
         'p_user_ids': [2],
-        'p_key': null,
       });
     },
   );
@@ -247,33 +251,39 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
-  testWidgets('admin saves access assignments and clears key input', (
+  testWidgets('saved Gemini key is confirmed after saving and reopening', (
     tester,
   ) async {
     Map<String, Object?>? saved;
-    await tester.pumpWidget(
+    var configured = false;
+    final service = AiSummaryService((name, [args]) async {
+      if (name == 'ai_summary_configure') {
+        saved = args;
+        if (args!.containsKey('p_key')) configured = true;
+        return null;
+      }
+      return {
+        'enabled': false,
+        'configured': configured,
+        'model': 'gemini-3.8-flash',
+        'users': [
+          {'id': 2, 'name': 'Team member', 'role': 'team', 'assigned': false},
+        ],
+      };
+    });
+    Future<void> open() => tester.pumpWidget(
       ProviderScope(
         overrides: [
-          aiSummarySettingsProvider.overrideWith(
-            (ref) async => {
-              'enabled': false,
-              'configured': false,
-              'model': 'gemini-3.8-flash',
-              'users': [
-                {
-                  'id': 2,
-                  'name': 'Team member',
-                  'role': 'team',
-                  'assigned': false,
-                },
-              ],
-            },
-          ),
-          aiSummaryServiceProvider.overrideWithValue(
-            AiSummaryService((name, [args]) async {
-              saved = args;
-              return null;
-            }),
+          aiSummaryServiceProvider.overrideWithValue(service),
+          currentUserProvider.overrideWith(
+            () => _Person(
+              AppUser(
+                id: 1,
+                username: 'admin',
+                fullName: 'Admin',
+                role: UserRole.admin,
+              ),
+            ),
           ),
           aiSummaryAccessProvider.overrideWith((ref) async => false),
         ],
@@ -284,6 +294,7 @@ void main() {
         ),
       ),
     );
+    await open();
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byType(TextField).first,
@@ -295,10 +306,25 @@ void main() {
     await tester.pumpAndSettle();
     expect(saved?['p_user_ids'], [2]);
     expect(saved?['p_key'], 'test-key-12345678901234567890');
-    expect(
-      tester.widget<TextField>(find.byType(TextField).first).controller!.text,
-      isEmpty,
-    );
+    expect(find.text('Key saved'), findsOneWidget);
+    expect(find.byKey(const ValueKey('gemini-api-key')), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    await open();
+    await tester.pumpAndSettle();
+    expect(find.text('Key saved'), findsOneWidget);
+    await tester.tap(find.text('Replace key'));
+    await tester.pumpAndSettle();
+    final replacement = find.byKey(const ValueKey('gemini-api-key'));
+    expect(tester.widget<TextField>(replacement).controller!.text, isEmpty);
+    await tester.enterText(replacement, 'discarded-replacement');
+    await tester.tap(find.text('Cancel replacement'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Save AI settings'));
+    await tester.tap(find.text('Save AI settings'));
+    await tester.pumpAndSettle();
+    expect(saved!.containsKey('p_key'), isFalse);
+    expect(find.text('Key saved'), findsOneWidget);
   });
   testWidgets(
     'Admin can generate with schedule off; repeated clicks are disabled and the previous report stays visible',

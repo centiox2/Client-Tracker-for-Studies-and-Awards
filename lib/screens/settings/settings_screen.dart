@@ -555,23 +555,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                 ],
               )
-            : SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    for (final cat in categories) ...[
-                      ChoiceChip(
-                        key: ValueKey('settings-cat-${cat.id}'),
-                        avatar: Icon(cat.icon, size: 16),
-                        label: Text(cat.label),
-                        selected: cat.id == current.id,
-                        showCheckmark: false,
-                        onSelected: (_) => pick(cat),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                  ],
-                ),
+            : Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  for (final cat in categories)
+                    ChoiceChip(
+                      key: ValueKey('settings-cat-${cat.id}'),
+                      avatar: Icon(cat.icon, size: 16),
+                      label: Text(cat.label),
+                      selected: cat.id == current.id,
+                      showCheckmark: false,
+                      onSelected: (_) => pick(cat),
+                    ),
+                ],
               );
 
         return Scrollbar(

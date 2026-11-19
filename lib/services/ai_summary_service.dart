@@ -25,11 +25,12 @@ class AiSummaryService {
     required List<int> users,
     String? key,
   }) async {
+    final replacement = key?.trim();
     await call('ai_summary_configure', {
       'p_enabled': enabled,
       'p_model': model,
       'p_user_ids': users,
-      'p_key': key,
+      if (replacement != null && replacement.isNotEmpty) 'p_key': replacement,
     });
   }
 }
