@@ -242,7 +242,7 @@ void main() {
       );
       await tester.tap(find.byType(DropdownButtonFormField<String>));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('2026-11-17').last);
+      await tester.tap(find.text('17 Nov 2026').last);
       await tester.pumpAndSettle();
       expect(
         find.text('Daily company overview for 2026-11-17.'),

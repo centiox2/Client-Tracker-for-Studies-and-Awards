@@ -9,6 +9,12 @@ import '../../widgets/clarity.dart';
 import '../../widgets/panels.dart';
 import 'report_document.dart';
 
+String _reportDate(Object? raw) {
+  final value = raw?.toString() ?? '';
+  final date = DateTime.tryParse(value);
+  return date == null ? value : DateFormat('d MMM y').format(date);
+}
+
 String _stamp(Object? raw) {
   final date = DateTime.tryParse('$raw');
   return date == null
@@ -57,7 +63,7 @@ class AiSummaryPreview extends ConsumerWidget {
                   if (latest != null) ...[
                     const SizedBox(height: 12),
                     Text(
-                      'Latest · ${latest['summary_date']}',
+                      'Latest · ${_reportDate(latest['summary_date'])}',
                       style: Theme.of(context).textTheme.labelMedium,
                     ),
                     const SizedBox(height: 8),
@@ -220,7 +226,7 @@ class _ReportToolbar extends StatelessWidget {
                 for (final row in rows)
                   DropdownMenuItem(
                     value: '${row['summary_date']}',
-                    child: Text('${row['summary_date']}'),
+                    child: Text(_reportDate(row['summary_date'])),
                   ),
               ],
               onChanged: onDate,

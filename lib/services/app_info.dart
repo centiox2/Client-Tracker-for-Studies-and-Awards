@@ -43,6 +43,7 @@ abstract final class AppInfo {
       'Fixes overflowing controls, clipped application statuses and crowded '
           'tracker, staff and revenue rows on small screens with larger text.',
       'Daily reports tabs wrap on phones so all sections stay reachable.',
+      'Report dates, action labels and navigation icons are easier to scan.',
     ]),
     Release('1.9.7', 'November 2026', [
       'AI settings confirm when the server has a saved Gemini key and offer a separate replacement action.',

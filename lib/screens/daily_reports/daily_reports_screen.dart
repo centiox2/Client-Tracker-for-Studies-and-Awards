@@ -596,7 +596,7 @@ class _MyTasksState extends ConsumerState<_MyTasks> {
       OutlinedButton(
         key: ValueKey('unblock-${t.id}'),
         onPressed: () => _setStatus(t, ReportStatus.inProgress),
-        child: const Text('Unblocked'),
+        child: const Text('Unblock'),
       ),
     if (t.review == ReviewState.returned)
       // What was sent is filled in already; change what was asked for.

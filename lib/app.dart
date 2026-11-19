@@ -1096,12 +1096,15 @@ class _Brand extends StatelessWidget {
                   Dt.appName,
                   style: theme.textTheme.titleSmall?.copyWith(fontSize: 15),
                 ),
-                Text(
-                  Dt.companyShort,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: c.textMuted,
+                Tooltip(
+                  message: Dt.companyName,
+                  child: Text(
+                    Dt.companyShort,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: c.textMuted,
+                    ),
                   ),
                 ),
               ],

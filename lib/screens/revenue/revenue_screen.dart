@@ -510,6 +510,8 @@ class _DayNavigator extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  const Icon(Icons.calendar_today_outlined, size: 14),
+                  const SizedBox(width: 6),
                   Flexible(
                     child: Text(
                       DateFormat(
@@ -524,8 +526,6 @@ class _DayNavigator extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 4),
-                  const Icon(Icons.calendar_today_outlined, size: 14),
                 ],
               ),
             ),

@@ -65,26 +65,6 @@ class ApplicationsQuickView extends ConsumerWidget {
       for (final (a, _) in notesToday) a.key,
     }.length;
 
-    final header = Wrap(
-      spacing: 10,
-      runSpacing: 4,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        // "As of the upload" repeats the line above it on a phone.
-        if (latest != null &&
-            (todaysUploads.isEmpty || MediaQuery.sizeOf(context).width >= 600))
-          Text(
-            todaysUploads.isEmpty
-                ? 'No upload yet today · last upload '
-                      '${DateFormat('d MMM, h:mm a').format(latest.at)}'
-                : 'As of the upload at ${DateFormat('h:mm a').format(latest.at)}',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: todaysUploads.isEmpty ? theme.colorScheme.error : muted,
-            ),
-          ),
-      ],
-    );
-
     String weekCaption(DateTime? Function(Application) f) {
       final n = apps.where((a) {
         final d = f(a);
@@ -784,8 +764,15 @@ class ApplicationsQuickView extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        header,
-        const SizedBox(height: 12),
+        if (latest != null && todaysUploads.isEmpty) ...[
+          Text(
+            'No application upload today',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: context.clarity.warningFg,
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
         KpiGrid(
           orderKey: 'applications.quick',
           minWidth: phone ? 150 : 190,

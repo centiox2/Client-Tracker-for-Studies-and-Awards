@@ -33,7 +33,7 @@ class NavigationSection extends ConsumerWidget {
                 context: context,
                 builder: (_) => const _NavigationEditor(),
               ),
-              icon: const Icon(Icons.view_carousel_outlined),
+              icon: const Icon(Icons.dock_outlined),
               label: const Text('Customize bottom bar'),
             ),
           ],

@@ -48,7 +48,7 @@ abstract final class Dt {
   static const String companyName = 'Studies and Awards Limited';
 
   /// The short form in the sidebar.
-  static const String companyShort = 'Studies and Awards Ltd';
+  static const String companyShort = 'Studies & Awards';
 
   /// The app's name, everywhere people see it.
   static const String appName = 'S&A Hub';
