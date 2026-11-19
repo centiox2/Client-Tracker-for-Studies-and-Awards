@@ -134,3 +134,20 @@ Deno.test("model input uses currency units and excludes storage fields without m
   assert(!("today_cents" in revenue) && !("amount_note" in revenue));
   assert(snapshot.revenue.today_cents === 1500000);
 });
+
+Deno.test("keeps names and output labels out of Gemini input", () => {
+  const input = prepareReportInput({
+    staff: {
+      active: 6,
+      activity: [{
+        name: "Private Person",
+        outputs: [{ label: "Private label", count: 1 }],
+      }],
+    },
+  });
+  assert(!JSON.stringify(input).includes("Private"));
+  assert(
+    (input.staff as Record<string, unknown>).people_with_recorded_activity ===
+      1,
+  );
+});

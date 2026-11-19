@@ -189,13 +189,19 @@ class ReportDocument extends StatelessWidget {
                 for (final (index, section) in sections.indexed) ...[
                   if (index > 0) divider(),
                   Text(
-                    '${index + 1}. ${section['title']}',
+                    '${index + 1}. ${_sectionPage(section) == 'staff' ? 'Staff' : section['title']}',
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: c.accent,
                     ),
                   ),
                   const SizedBox(height: 12),
+                  if (_sectionPage(section) == 'staff' &&
+                      _map(snapshot['staff']).containsKey('activity')) ...[
+                    heading('Staff activity that day'),
+                    _StaffActivity(_map(snapshot['staff'])['activity']),
+                    const SizedBox(height: 16),
+                  ],
                   if (_sectionPage(section) == 'applications' &&
                       updates.isNotEmpty) ...[
                     heading('Updates logged that day'),
@@ -348,6 +354,49 @@ class _Bullets extends StatelessWidget {
                         ?.copyWith(height: 1.6),
                   ),
                 ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _StaffActivity extends StatelessWidget {
+  const _StaffActivity(this.activity);
+
+  final Object? activity;
+
+  @override
+  Widget build(BuildContext context) {
+    final people = (activity as List? ?? []).whereType<Map>().toList();
+    if (people.isEmpty) {
+      return const Text('No individual staff activity was recorded that day.');
+    }
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final person in people)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('${person['name']}', style: theme.textTheme.titleSmall),
+                _FactRows([
+                  for (final (key, label) in const [
+                    ('new_clients', 'New clients'),
+                    ('existing_clients', 'Existing clients'),
+                    ('work_items_updated', 'Work items updated'),
+                    ('reports_submitted', 'Reports submitted'),
+                  ])
+                    if (person[key] is num && (person[key] as num) > 0)
+                      (label, _count(person[key])),
+                  for (final output
+                      in (person['outputs'] as List? ?? []).whereType<Map>())
+                    ('${output['label']}', _count(output['count'])),
+                ]),
               ],
             ),
           ),

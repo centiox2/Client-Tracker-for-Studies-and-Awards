@@ -233,7 +233,8 @@ readers can view reports; only Admin can request generation.
 For an existing database, apply `supabase/migrations/20261118080640_daily_ai_summary.sql`
 and the follow-ups `20261118082030_ai_summary_job_auth_guard.sql`,
 `20261118110032_manual_ai_summary.sql`, `20261118113801_ai_report_failure_messages.sql`, `20261118114826_report_readable_details.sql`, and
-`20261119053941_ai_summary_application_updates.sql`, then deploy `supabase/functions/daily-ai-summary` with JWT verification disabled:
+`20261119053941_ai_summary_application_updates.sql` and
+`20261119054824_ai_summary_staff_activity.sql`, then deploy `supabase/functions/daily-ai-summary` with JWT verification disabled:
 the function authenticates its private job token itself, with the claim/finish RPCs
 restricted to `service_role`. The migration creates pg_net and uses existing
 pg_cron/Vault. It starts **disabled**, with no Gemini key or non-admin assignments.
@@ -270,5 +271,7 @@ request RPC validates the signed-in Admin token before queuing any work.
 Overview retains its client KPIs, daily chart/table and client-mix graph, plus revenue, applications, AI summary, one staff count and one card with the current user’s open personal and shared team to-do items. It omits separate History, Reports, Settings and staff-performance summaries.
 
 AI reports now default to `gemini-3.5-flash-lite`, verified with this project’s key. Temporary provider overload/network failures receive at most three attempts with bounded backoff within an 85-second generation budget. Authentication, model-access and quota failures fail promptly with safe, actionable messages. Raw provider bodies and credentials are never included in app errors.
+
+The Staff section lists people with recorded client counts, work-item activity, or report submissions that day, including configured output totals. Named activity is shown to authorized report readers and excluded from Gemini input.
 
 The AI report page uses one document panel with **Summary** and **Detailed report** views. Summary includes a short executive brief, recorded key figures, highlights, attention points and suggested actions. Detailed report adds human-readable figures and status breakdowns, with findings and suggested follow-up for each business area. Money is passed to Gemini in currency units while the recorded snapshot retains cents for exact display. Older reports without detailed findings still open normally.

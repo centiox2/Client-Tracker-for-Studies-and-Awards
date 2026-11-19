@@ -94,7 +94,19 @@ Map<String, dynamic> summaryFixture() => {
           },
           'team_todo': {'open': 3, 'done': 7},
           'history': {'recorded_weeks': 8},
-          'staff': {'active': 5, 'total': 6},
+          'staff': {
+            'active': 5,
+            'total': 6,
+            'activity': [
+              {
+                'name': 'Taylor Example',
+                'reports_submitted': 1,
+                'outputs': [
+                  {'label': 'Applications submitted', 'count': 2},
+                ],
+              },
+            ],
+          },
         },
       },
   ],
@@ -475,6 +487,8 @@ void main() {
       expect(find.byType(ClarityCard), findsOneWidget);
       expect(find.text('1. Weekly tracker'), findsOneWidget);
       expect(find.text('6. Staff'), findsOneWidget);
+      expect(find.text('Taylor Example'), findsOneWidget);
+      expect(find.text('Applications submitted'), findsOneWidget);
       expect(find.text('9. Settings'), findsNothing);
       expect(find.text('Updates logged that day'), findsOneWidget);
       expect(find.text('Offer date first recorded'), findsOneWidget);

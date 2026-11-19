@@ -556,7 +556,10 @@ class _AboutSectionState extends ConsumerState<AboutSection> {
     try {
       await ref.read(errorsServiceProvider).clear();
       if (!mounted) return;
-      setState(() => _open = null);
+      setState(() {
+        _open = null;
+        _errors = [];
+      });
       await _load();
     } catch (e) {
       if (!mounted) return;

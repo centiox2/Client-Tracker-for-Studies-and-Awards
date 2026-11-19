@@ -28,6 +28,14 @@ export function prepareReportInput(snapshot: unknown) {
     delete revenue.month_net_cents;
     delete revenue.amount_note;
   }
+  if (input.staff && typeof input.staff === "object") {
+    const staff = input.staff as Record<string, unknown>;
+    if (Array.isArray(staff.activity)) {
+      staff.people_with_recorded_activity = staff.activity.length;
+    }
+    // The app displays named entries from the database, outside model output.
+    delete staff.activity;
+  }
   return input;
 }
 const transient = new Set([408, 500, 502, 503, 504]);

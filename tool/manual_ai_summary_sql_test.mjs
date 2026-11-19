@@ -15,8 +15,8 @@ create function vault.create_secret(text,text,text default null) returns uuid la
 create function vault.update_secret(uuid,text) returns void language sql as $$update vault.decrypted_secrets set decrypted_secret=$2 where id=$1$$;
 create function net.http_post(url text,headers jsonb,body jsonb,timeout_milliseconds integer) returns bigint language sql as $$select 1::bigint$$;
 create function cron.schedule(text,text,text) returns bigint language sql as $$select 1::bigint$$;
-create table private.app_users(id bigint primary key,username text,full_name text,role text,active boolean);
-insert into private.app_users values(1,'owner','Owner','admin',true),(2,'team','Team member','team',true),(3,'director','Director','director',true);
+create table private.app_users(id bigint primary key,username text,full_name text,role text,active boolean,staff_id bigint);
+insert into private.app_users(id,username,full_name,role,active) values(1,'owner','Owner','admin',true),(2,'team','Team member','team',true),(3,'director','Director','director',true);
 create function private.token_role(text) returns text language plpgsql as $$begin if $1='admin' then return 'admin';elsif $1 in ('team','director') then return $1;else raise exception 'not_signed_in' using errcode='28000';end if;end$$;
 create function private.token_user(text) returns bigint language sql as $$select case $1 when 'admin' then 1 when 'team' then 2 when 'director' then 3 end::bigint$$;
 create table public.client_counts(day_id bigint,staff_id bigint,new_clients int,existing_clients int);
@@ -32,8 +32,14 @@ insert into public.application_changes values
  ('second','follow_up','','private note','2026-11-18T16:58:59'),
  ('excluded-future','added','','','2026-11-18T17:01:00'),
  ('excluded-malformed','added','','','invalid');
-create table public.activity_reports(status text,review text,report_date date,submitted_at timestamptz,due_date date);
-create table public.todo_team_items(done boolean,deleted boolean);create table public.staff(active int);create table public.weeks(id bigint);
+create table public.activity_reports(status text,review text,report_date date,submitted_at timestamptz,due_date date,user_id bigint,department_id bigint,outputs jsonb);
+create table public.activity_changes(report_id bigint,changed_by bigint,action text,changed_at timestamptz);
+create table public.departments(id bigint,outputs jsonb);
+insert into public.departments values (1,'[{"key":"applications_submitted","label":"Applications submitted"}]');
+insert into public.activity_reports values ('done','submitted','2026-11-18','2026-11-17T21:00:00Z',null,1,1,'{"applications_submitted":3}');
+insert into public.activity_changes values (1,2,'edited','2026-11-18 13:00:00+00'), (1,2,'edited','2026-11-18 13:01:00+00'), (7,3,'edited','2026-11-17 20:59:59+00');
+update private.app_users set staff_id=1 where id=1;
+create table public.todo_team_items(done boolean,deleted boolean);create table public.staff(id bigint,name text,active int);insert into public.staff values (1,'Linked Staff',1),(2,'Off Today',1);create table public.weeks(id bigint);
 insert into public.work_days values(1,'2026-11-18');insert into public.client_counts values(1,1,3,2),(1,2,100,0);insert into public.staff_day_off values(1,2);
 insert into public.revenue_entries values('2026-11-18',10000),('2026-11-18',-1000);insert into public.app_settings values('currency','KES');
 `);
@@ -46,6 +52,7 @@ for (
     "20261118113801_ai_report_failure_messages.sql",
     "20261118114826_report_readable_details.sql",
     "20261119053941_ai_summary_application_updates.sql",
+    "20261119054824_ai_summary_staff_activity.sql",
   ]
 ) {
   if (file.endsWith("manual_ai_summary.sql")) {
@@ -78,6 +85,18 @@ assert.equal(context.applications.updates_today.added, 0);
 assert.equal(context.applications.updates_today.follow_ups_updated, 1);
 assert(!JSON.stringify(context).includes("private note"));
 assert(!("settings" in context));
+assert.equal(context.staff.activity.length, 2);
+assert.deepEqual(context.staff.activity[0], {
+  name: "Linked Staff",
+  new_clients: 3,
+  existing_clients: 2,
+  work_items_updated: 0,
+  reports_submitted: 1,
+  outputs: [{ label: "Applications submitted", count: 3 }],
+});
+assert.equal(context.staff.activity[1].name, "Team member");
+assert.equal(context.staff.activity[1].work_items_updated, 1);
+assert(!JSON.stringify(context.staff.activity).includes("Off Today"));
 await db.exec("delete from public.app_settings where key='currency'");
 assert.equal(
   (await scalar("select private.ai_summary_context()")).revenue.currency,
@@ -126,8 +145,11 @@ await assert.rejects(
     job.job_id,
   ]),
 );
+const firstClaim = await claim(job.job_id);
+assert(!("activity" in firstClaim.snapshot.staff));
+assert.equal(firstClaim.snapshot.staff.people_with_recorded_activity, 2);
 assert(
-  await claim(job.job_id),
+  firstClaim,
   "manual report must work before 5 pm with schedule off",
 );
 assert.equal(
