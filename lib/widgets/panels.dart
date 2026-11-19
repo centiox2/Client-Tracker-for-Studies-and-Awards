@@ -193,12 +193,18 @@ class ChartDay {
 /// y-axis with gridlines every quarter. A day with nothing entered shows no
 /// bar (not a zero bar). A tooltip carries the exact split.
 class StackedDayChart extends StatelessWidget {
-  const StackedDayChart({super.key, required this.days, this.height = 180});
+  const StackedDayChart({
+    super.key,
+    required this.days,
+    this.height = 180,
+    this.byWeek = false,
+  });
 
   final List<ChartDay> days;
 
   /// Height of the plot area (bars), without the labels.
   final double height;
+  final bool byWeek;
 
   /// A round axis top for [max] with four equal steps of 1, 2 or 5 × 10ⁿ
   /// (17 → 20, 43 → 80, 120 → 200).
@@ -225,6 +231,7 @@ class StackedDayChart extends StatelessWidget {
     final dense = days.length > 7;
     const totalH = 20.0;
     final plotH = height;
+    final dateFormat = DateFormat(byWeek ? 'd MMM' : 'EEE d');
 
     bool sameDay(DateTime a, DateTime b) =>
         a.year == b.year && a.month == b.month && a.day == b.day;
@@ -239,9 +246,12 @@ class StackedDayChart extends StatelessWidget {
       final h = top == 0 ? 0.0 : plotH * d.total / top;
       final newH = d.total == 0 ? 0.0 : h * d.newClients / d.total;
       final exH = h - newH;
+      final date = byWeek
+          ? 'Week of ${dateFormat.format(d.date)}'
+          : DateFormat('EEE d MMM').format(d.date);
       final tip = d.isHoliday
-          ? '${DateFormat('EEE d MMM').format(d.date)}\nHoliday'
-          : '${DateFormat('EEE d MMM').format(d.date)}\n'
+          ? '$date\nHoliday'
+          : '$date\n'
                 '${d.newClients} new · ${d.existingClients} existing'
                 '${d.offCount > 0 ? '\n${d.offCount} staff off' : ''}';
       return Expanded(
@@ -297,9 +307,9 @@ class StackedDayChart extends StatelessWidget {
     final axisW = dense ? 24.0 : 28.0;
     return Semantics(
       label:
-          'Clients per day: '
+          'Clients per ${byWeek ? 'week' : 'day'}: '
           '${[for (final d in days)
-            if (d.total > 0) '${DateFormat('EEE d').format(d.date)} ${d.newClients} new and ${d.existingClients} existing'].join(', ')}',
+            if (d.total > 0) '${dateFormat.format(d.date)} ${d.newClients} new and ${d.existingClients} existing'].join(', ')}',
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
         child: Column(
@@ -360,9 +370,7 @@ class StackedDayChart extends StatelessWidget {
                   Expanded(
                     child: Center(
                       child: Text(
-                        dense
-                            ? '${d.date.day}'
-                            : DateFormat('EEE d').format(d.date),
+                        dense ? '${d.date.day}' : dateFormat.format(d.date),
                         maxLines: 1,
                         style: small.copyWith(
                           fontWeight: sameDay(d.date, now)

@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
 /// pubspec.yaml (a test checks), so Settings, the "What's new" window and
 /// the installers all say the same.
 abstract final class AppInfo {
-  static const version = '1.9.5';
+  static const version = '1.9.6';
 
   /// Show "What's new" after an update (the real app only; tests leave it
   /// off so it never covers the screen under test).
@@ -39,6 +39,10 @@ abstract final class AppInfo {
 
   /// Newest first.
   static const releases = <Release>[
+    Release('1.9.6', 'November 2026', [
+      'Overview adds four weeks of client trends, seven days of revenue '
+          'after refunds, and today’s application updates.',
+    ]),
     Release('1.9.5', 'November 2026', [
       'Detailed reports show individual staff activity for the report day, '
           'including client counts, work items and submitted outputs.',

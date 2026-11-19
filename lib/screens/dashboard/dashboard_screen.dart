@@ -3,9 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../design/app_theme.dart';
+import '../../repositories/application_repository.dart';
 import '../../repositories/client_count_repository.dart';
 import '../../design/airtable_tags.dart';
 import '../../repositories/revenue_repository.dart' show formatMoney;
+import '../../repositories/week_repository.dart';
 import '../../services/todo_service.dart';
 import '../../services/ai_summary_service.dart';
 import '../../state/app_state.dart';
@@ -67,6 +69,15 @@ class DashboardScreen extends ConsumerWidget {
       if (tracker) BoardCard('mix', _MixPanel(data: data, unit: unit)),
       if (summaryAccessGranted(ref.watch(aiSummaryAccessProvider)))
         const BoardCard('ai', AiSummaryPreview(bottomPadding: 0), column: 2),
+      if (tracker) const BoardCard('client-trend', _ClientTrendPanel()),
+      if (allowed.contains(AppTab.revenue))
+        const BoardCard('revenue-trend', _RevenueTrendPanel(), column: 1),
+      if (allowed.contains(AppTab.applications))
+        const BoardCard(
+          'application-activity',
+          _ApplicationActivityPanel(),
+          column: 2,
+        ),
     ];
     return SingleChildScrollView(
       key: const ValueKey('overview-page'),
@@ -428,7 +439,69 @@ class _MixPanel extends StatelessWidget {
   }
 }
 
-/// The signed-in person's own numbers (their account is linked to a staff
+class _ClientTrendPanel extends ConsumerWidget {
+  const _ClientTrendPanel();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(dataVersionProvider);
+    final today = DateUtils.dateOnly(DateTime.now());
+    final monday = WeekRepository.mondayOf(today);
+    final weeks = ref.read(weekRepositoryProvider);
+    final stats = ref.read(statisticsServiceProvider);
+    final points = <ChartDay>[];
+    for (var offset = 3; offset >= 0; offset--) {
+      final start = DateTime(
+        monday.year,
+        monday.month,
+        monday.day - offset * 7,
+      );
+      final week = weeks.findByStartDate(start);
+      var newClients = 0;
+      var existingClients = 0;
+      if (week != null) {
+        final totals = stats.weekTotals(week).perDay;
+        for (final day in weeks.getDays(week.id)) {
+          if (day.date.isAfter(today)) continue;
+          newClients += totals[day.id]?.newClients ?? 0;
+          existingClients += totals[day.id]?.existingClients ?? 0;
+        }
+      }
+      points.add(
+        ChartDay(
+          date: start,
+          newClients: newClients,
+          existingClients: existingClients,
+        ),
+      );
+    }
+    return AppPanel(
+      key: const ValueKey('overview-client-trend'),
+      title: 'Client trend',
+      subtitle: 'Last 4 weeks through today',
+      trailingWidget: const NewExistingLegend(),
+      child: points.every((point) => point.total == 0)
+          ? const _OverviewEmpty('No clients recorded in this period.')
+          : StackedDayChart(days: points, height: 120, byWeek: true),
+    );
+  }
+}
+
+class _OverviewEmpty extends StatelessWidget {
+  const _OverviewEmpty(this.message);
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.all(20),
+    child: Text(
+      message,
+      style: Theme.of(context).textTheme.bodyMedium
+          ?.copyWith(color: context.clarity.textMuted),
+    ),
+  );
+}
 
 class _RevenuePanel extends ConsumerWidget {
   const _RevenuePanel();
@@ -535,7 +608,94 @@ class _RevenuePanel extends ConsumerWidget {
   }
 }
 
-/// Where applications stand (from the latest Airtable upload), with the
+class _RevenueTrendPanel extends ConsumerWidget {
+  const _RevenueTrendPanel();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final now = DateTime.now();
+    final today = DateUtils.dateOnly(now);
+    final start = DateTime(now.year, now.month, now.day - 6);
+    final days = ref.watch(revenueDaysProvider((start, today)));
+    final currency = ref.watch(currencyProvider);
+    final theme = Theme.of(context);
+    final c = context.clarity;
+    final net = days.fold(0, (sum, day) => sum + day.totalCents);
+    final payments = days.fold(0, (sum, day) => sum + day.count);
+    final scale = days.fold(
+      0,
+      (max, day) => day.totalCents.abs() > max ? day.totalCents.abs() : max,
+    );
+    final format = DateFormat('EEE d MMM');
+    return AppPanel(
+      key: const ValueKey('overview-revenue-trend'),
+      title: 'Revenue by day',
+      subtitle: 'Last 7 days · net of refunds',
+      child: days.every((day) => day.entries == 0)
+          ? const _OverviewEmpty('No transactions in this period.')
+          : Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  FigureStat(
+                    label: '7-day net',
+                    value: formatMoney(net, currency),
+                    caption:
+                        '$payments ${payments == 1 ? 'payment' : 'payments'}',
+                  ),
+                  const SizedBox(height: 8),
+                  for (final day in days.reversed)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  format.format(day.date),
+                                  style: theme.textTheme.bodySmall,
+                                ),
+                              ),
+                              Flexible(
+                                child: Text(
+                                  day.entries == 0
+                                      ? '—'
+                                      : formatMoney(day.totalCents, currency),
+                                  textAlign: TextAlign.end,
+                                  style: Dt.tab(theme.textTheme.bodySmall!)
+                                      .copyWith(
+                                        color: day.totalCents < 0
+                                            ? c.negativeFg
+                                            : c.text,
+                                      ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          ExcludeSemantics(
+                            child: LinearProgressIndicator(
+                              value: scale == 0
+                                  ? 0
+                                  : day.totalCents.abs() / scale,
+                              backgroundColor: c.track,
+                              color: day.totalCents < 0
+                                  ? c.negativeFg
+                                  : Dt.money(theme.brightness),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+    );
+  }
+}
 
 class _ApplicationsPanel extends ConsumerWidget {
   const _ApplicationsPanel();
@@ -654,6 +814,119 @@ class _ApplicationsPanel extends ConsumerWidget {
                 ],
               ),
       ),
+    );
+  }
+}
+
+class _ApplicationActivityPanel extends ConsumerWidget {
+  const _ApplicationActivityPanel();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(dataVersionProvider);
+    final repo = ref.read(applicationRepositoryProvider);
+    final today = DateUtils.dateOnly(DateTime.now());
+    final apps = {for (final app in repo.all()) app.key: app};
+    final uploads = repo.imports();
+    final updates = <String, Set<String>>{};
+    final names = <String, String>{};
+    void add(String key, String student, String detail) {
+      names.putIfAbsent(key, () => student);
+      updates.putIfAbsent(key, () => {}).add(detail);
+    }
+
+    for (final upload in uploads) {
+      if (!DateUtils.isSameDay(upload.at.toLocal(), today)) continue;
+      for (final change in repo.changesFor(upload.id).reversed) {
+        if (change.field.endsWith('_date') &&
+            apps.containsKey(change.key) &&
+            DateUtils.isSameDay(DateTime.tryParse(change.newValue), today)) {
+          continue;
+        }
+        add(
+          change.key,
+          change.student,
+          change.field == 'removed'
+              ? 'Removed from Airtable'
+              : ApplicationActivity.describe(change),
+        );
+      }
+    }
+    for (final app in apps.values) {
+      final milestones = [
+        (app.appDate, 'Application submitted'),
+        (app.offerDate, 'Offer received'),
+        (app.coeDate, 'COE issued'),
+        (app.docDate, 'Documents submitted'),
+      ];
+      for (final (date, label) in milestones) {
+        if (DateUtils.isSameDay(date, today)) add(app.key, app.student, label);
+      }
+      if (app.datedNotes.any((note) => DateUtils.isSameDay(note.$1, today))) {
+        add(app.key, app.student, 'Dated note');
+      }
+    }
+    void open() => ref.read(appActionsProvider).selectTab(AppTab.applications);
+    final theme = Theme.of(context);
+    return AppPanel(
+      key: const ValueKey('overview-application-activity'),
+      title: 'Application updates',
+      subtitle:
+          'Today · ${updates.length} ${updates.length == 1 ? 'record' : 'records'}',
+      trailingWidget: IconButton(
+        tooltip: 'Open Applications',
+        onPressed: open,
+        icon: const Icon(Icons.arrow_forward, size: 18),
+      ),
+      child: updates.isEmpty
+          ? const _OverviewEmpty('No application updates recorded today.')
+          : Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final entry in updates.entries.take(5))
+                    InkWell(
+                      onTap: () {
+                        final app = apps[entry.key];
+                        if (app == null) {
+                          open();
+                        } else {
+                          showApplicationDetails(context, ref, app);
+                        }
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 9),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              apps[entry.key]?.student ?? names[entry.key]!,
+                              style: theme.textTheme.labelLarge,
+                            ),
+                            Text(
+                              entry.value.join(' · '),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: context.clarity.textMuted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (updates.length > 5)
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: TextButton(
+                        onPressed: open,
+                        child: const Text('View all updates'),
+                      ),
+                    ),
+                ],
+              ),
+            ),
     );
   }
 }

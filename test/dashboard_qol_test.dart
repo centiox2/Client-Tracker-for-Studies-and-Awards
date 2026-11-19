@@ -5,7 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:client_tracker/app.dart';
 import 'package:client_tracker/database/app_database_io.dart';
 import 'package:client_tracker/database/database.dart';
+import 'package:client_tracker/repositories/application_repository.dart';
 import 'package:client_tracker/repositories/client_count_repository.dart';
+import 'package:client_tracker/repositories/revenue_repository.dart';
 import 'package:client_tracker/repositories/staff_repository.dart';
 import 'package:client_tracker/repositories/time_off_repository.dart';
 import 'package:client_tracker/repositories/week_repository.dart';
@@ -201,9 +203,67 @@ void main() {
       );
       expect(find.byKey(const ValueKey('overview-open-todo')), findsOneWidget);
       expect(find.byKey(const ValueKey('client-mix')), findsOneWidget);
-      expect(find.byType(StackedDayChart), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('overview-week')),
+          matching: find.byType(StackedDayChart),
+        ),
+        findsOneWidget,
+      );
     },
   );
+
+  testWidgets('overview shows client history, refunds and daily app changes', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    final yesterday = DateTime(now.year, now.month, now.day - 1);
+    final weeks = WeekRepository(db);
+    final lastWeek = weeks.createWeekFor(now.subtract(const Duration(days: 7)));
+    saveMonday(lastWeek.id, newClients: 9);
+    final revenue = RevenueRepository(db);
+    revenue.add(yesterday, 7500, note: 'Payment');
+    revenue.add(now, -2500, note: 'Refund');
+    final applications = ApplicationRepository(db);
+    const header = 'Student name,RTO name,Country,Status\n';
+    applications.importCsv(
+      '${header}Amina Test,WAIFS,Australia,Statement building',
+    );
+    applications.importCsv('${header}Amina Test,WAIFS,Australia,Visa lodged');
+
+    await pumpApp(tester);
+    Finder inPanel(String id, Finder matching) => find.descendant(
+      of: find.byKey(ValueKey('overview-$id')),
+      matching: matching,
+    );
+    final chart = tester.widget<StackedDayChart>(
+      inPanel('client-trend', find.byType(StackedDayChart)),
+    );
+    expect(chart.byWeek, isTrue);
+    expect(chart.days.map((day) => day.total), [0, 0, 9, 0]);
+    final currency = ProviderScope.containerOf(
+      tester.element(find.byType(ClientTrackerApp)),
+    ).read(currencyProvider);
+    expect(
+      inPanel('revenue-trend', find.text(formatMoney(5000, currency))),
+      findsOneWidget,
+    );
+    expect(
+      inPanel('revenue-trend', find.text(formatMoney(-2500, currency))),
+      findsOneWidget,
+    );
+    expect(
+      inPanel('application-activity', find.text('Amina Test')),
+      findsOneWidget,
+    );
+    expect(
+      inPanel(
+        'application-activity',
+        find.text('Status changed to Visa lodged'),
+      ),
+      findsOneWidget,
+    );
+  });
 
   testWidgets('total clients card shows the selected-week daily average', (
     tester,
