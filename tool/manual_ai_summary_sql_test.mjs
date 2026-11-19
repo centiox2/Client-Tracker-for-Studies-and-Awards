@@ -21,8 +21,9 @@ create function private.token_role(text) returns text language plpgsql as $$begi
 create function private.token_user(text) returns bigint language sql as $$select case $1 when 'admin' then 1 when 'team' then 2 when 'director' then 3 end::bigint$$;
 create table public.client_counts(day_id bigint,staff_id bigint,new_clients int,existing_clients int);
 create table public.work_days(id bigint,date text);create table public.staff_day_off(day_id bigint,staff_id bigint);
-create table public.revenue_entries(date text,amount_cents bigint);create table public.app_settings(key text,value text);
-create table public.applications(status text,offer_date text,coe_date text);
+create table public.revenue_entries(date text,amount_cents bigint,purpose text default '');create table public.app_settings(key text,value text);
+create table public.applications(status text,offer_date text,coe_date text,app_key text,assignee text,doc_date text,app_date text);
+insert into public.applications values ('Offered','2026-11-17',null,'first','Handler',null,'2026-11-18');
 create table public.application_changes(app_key text, field text, old_value text, new_value text, changed_at text);
 insert into public.application_changes values
  ('excluded-prior-day','added','','','2026-11-18T00:00:00+04:00'),
@@ -39,7 +40,7 @@ insert into public.departments values (1,'[{"key":"applications_submitted","labe
 insert into public.activity_reports values ('done','submitted','2026-11-18','2026-11-17T21:00:00Z',null,1,1,'{"applications_submitted":3}');
 insert into public.activity_changes values (1,2,'edited','2026-11-18 13:00:00+00'), (1,2,'edited','2026-11-18 13:01:00+00'), (7,3,'edited','2026-11-17 20:59:59+00');
 update private.app_users set staff_id=1 where id=1;
-create table public.todo_team_items(done boolean,deleted boolean);create table public.staff(id bigint,name text,active int);insert into public.staff values (1,'Linked Staff',1),(2,'Off Today',1);create table public.weeks(id bigint);
+create table public.todo_team_items(done boolean,deleted boolean,done_at timestamptz);create table public.staff(id bigint,name text,active int);insert into public.staff values (1,'Linked Staff',1),(2,'Off Today',1);create table public.weeks(id bigint);
 insert into public.work_days values(1,'2026-11-18');insert into public.client_counts values(1,1,3,2),(1,2,100,0);insert into public.staff_day_off values(1,2);
 insert into public.revenue_entries values('2026-11-18',10000),('2026-11-18',-1000);insert into public.app_settings values('currency','KES');
 `);
@@ -53,6 +54,7 @@ for (
     "20261118114826_report_readable_details.sql",
     "20261119053941_ai_summary_application_updates.sql",
     "20261119054824_ai_summary_staff_activity.sql",
+    "20261119102913_ai_summary_report_templates.sql",
   ]
 ) {
   if (file.endsWith("manual_ai_summary.sql")) {
@@ -83,6 +85,20 @@ assert.equal(context.applications.updates_today.statuses_changed, 1);
 assert.equal(context.applications.updates_today.offers_logged, 1);
 assert.equal(context.applications.updates_today.added, 0);
 assert.equal(context.applications.updates_today.follow_ups_updated, 1);
+assert.deepEqual(context.template_facts.week, {
+  start: "2026-11-16",
+  days: 1,
+  new: 3,
+  existing: 2,
+});
+assert.equal(context.template_facts.purposes[0].net_cents, 9000);
+assert.equal(context.template_facts.purposes[0].refunded_cents, 1000);
+assert.equal(
+  context.template_facts.assignees.find((row) => row.label === "Handler")
+    .statuses,
+  1,
+);
+assert.equal(context.template_facts.milestones.applications_submitted, 1);
 assert(!JSON.stringify(context).includes("private note"));
 assert(!("settings" in context));
 assert.equal(context.staff.activity.length, 2);
@@ -146,8 +162,8 @@ await assert.rejects(
   ]),
 );
 const firstClaim = await claim(job.job_id);
-assert(!("activity" in firstClaim.snapshot.staff));
-assert.equal(firstClaim.snapshot.staff.people_with_recorded_activity, 2);
+assert.equal(firstClaim.snapshot.staff.activity.length, 2);
+assert(firstClaim.snapshot.template_facts);
 assert(
   firstClaim,
   "manual report must work before 5 pm with schedule off",

@@ -529,6 +529,65 @@ void main() {
     },
   );
   testWidgets(
+    'templated reports show Quick View and the assignee table at large text',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 720);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      final data = summaryFixture();
+      final report = (data['summaries'] as List).first as Map;
+      (report['content'] as Map)['template'] = {
+        'version': 1,
+        'meta': 'Thursday, 19 November 2026 · Data as of 1:08 PM EAT',
+        'quick': [
+          {'kind': 'heading', 'text': 'Today at a Glance'},
+          {
+            'kind': 'table',
+            'columns': ['Clients', 'Net Revenue', 'Applications Updated'],
+            'rows': [
+              ['5', 'KSh 1,200.50', '3'],
+            ],
+          },
+        ],
+        'detailed': [
+          {'kind': 'heading', 'text': '6. Who Is Handling Applications'},
+          {
+            'kind': 'table',
+            'columns': [
+              'Assignee',
+              'Total records',
+              'Updated today',
+              'Status changes',
+              'New COE dates',
+            ],
+            'rows': [
+              ['Taylor Example', '4', '2', '1', '1'],
+            ],
+          },
+        ],
+      };
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            aiSummaryAccessProvider.overrideWith((ref) async => true),
+            aiSummariesProvider.overrideWith((ref) async => data),
+          ],
+          child: const MaterialApp(home: Scaffold(body: AiSummaryScreen())),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Quick View'), findsOneWidget);
+      expect(find.text('KSh 1,200.50'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('report-detailed-view')));
+      await tester.pumpAndSettle();
+      expect(find.text('6. Who Is Handling Applications'), findsOneWidget);
+      expect(find.text('Taylor Example'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
     'Desktop navigation updates when AI access arrives asynchronously',
     (tester) async {
       final db = openInMemoryDatabase();

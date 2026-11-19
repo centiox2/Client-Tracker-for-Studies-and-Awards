@@ -8,6 +8,7 @@ import '../../state/app_state.dart';
 import '../../widgets/clarity.dart';
 import '../../widgets/panels.dart';
 import 'report_document.dart';
+import 'template_report_document.dart';
 
 String _reportDate(Object? raw) {
   final value = raw?.toString() ?? '';
@@ -127,6 +128,8 @@ class _AiSummaryScreenState extends ConsumerState<AiSummaryScreen> {
                 rows.where((r) => r['summary_date'] == selected).firstOrNull ??
                 rows.firstOrNull;
             final content = row?['content'] as Map?;
+            final template = content?['template'];
+            final hasTemplate = template is Map && template['version'] == 1;
             return ListView(
               padding: EdgeInsets.fromLTRB(
                 clarityHPad(context),
@@ -158,7 +161,9 @@ class _AiSummaryScreenState extends ConsumerState<AiSummaryScreen> {
                             children: [
                               ChoiceChip(
                                 key: const ValueKey('report-summary-view'),
-                                label: const Text('Summary'),
+                                label: Text(
+                                  hasTemplate ? 'Quick View' : 'Summary',
+                                ),
                                 selected: !detailed,
                                 onSelected: (_) =>
                                     setState(() => detailed = false),
@@ -173,11 +178,17 @@ class _AiSummaryScreenState extends ConsumerState<AiSummaryScreen> {
                             ],
                           ),
                           const SizedBox(height: 16),
-                          ReportDocument(
-                            row: row!,
-                            detailed: detailed,
-                            cutoffLabel: _stamp(row['cutoff_at']),
-                          ),
+                          if (hasTemplate)
+                            TemplateReportDocument(
+                              template: template,
+                              detailed: detailed,
+                            )
+                          else
+                            ReportDocument(
+                              row: row!,
+                              detailed: detailed,
+                              cutoffLabel: _stamp(row['cutoff_at']),
+                            ),
                         ] else
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 32),
