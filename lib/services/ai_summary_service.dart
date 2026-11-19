@@ -57,12 +57,12 @@ final aiSummaryAccessProvider = FutureProvider.autoDispose<bool>((ref) async {
     }
   });
   try {
-    return await ref.watch(aiSummaryServiceProvider).access();
+    final granted = await ref.watch(aiSummaryServiceProvider).access();
+    if (ref.mounted) _refresh(ref);
+    return granted;
   } catch (_) {
     failed = true;
     rethrow;
-  } finally {
-    if (ref.mounted) _refresh(ref);
   }
 });
 final aiSummariesProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
