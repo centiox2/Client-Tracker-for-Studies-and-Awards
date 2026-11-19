@@ -40,9 +40,8 @@ void _refresh(Ref ref, [Duration interval = const Duration(minutes: 1)]) {
 }
 
 final aiSummaryAccessProvider = FutureProvider.autoDispose<bool>((ref) async {
-  ref.watch(currentUserProvider);
   if (!ref.watch(accountsEnabledProvider) ||
-      ref.watch(currentUserProvider) == null) {
+      ref.watch(currentUserProvider.select((user) => user?.id)) == null) {
     return false;
   }
   final result = await ref.watch(aiSummaryServiceProvider).access();
@@ -52,11 +51,13 @@ final aiSummaryAccessProvider = FutureProvider.autoDispose<bool>((ref) async {
 final aiSummariesProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
   ref,
 ) async {
-  ref.watch(currentUserProvider);
+  ref.watch(currentUserProvider.select((user) => user?.id));
+  final service = ref.watch(aiSummaryServiceProvider);
   if (!await ref.watch(aiSummaryAccessProvider.future)) {
     throw StateError('Access has not been assigned.');
   }
-  final result = await ref.watch(aiSummaryServiceProvider).read();
+  if (!ref.mounted) throw StateError('The report request was cancelled.');
+  final result = await service.read();
   if (ref.mounted) {
     _refresh(
       ref,
@@ -98,4 +99,4 @@ String summaryStatus(Map<String, dynamic> data) {
 }
 
 bool summaryAccessGranted(AsyncValue<bool> access) =>
-    !access.isReloading && access.value == true;
+    !access.hasError && !access.isReloading && access.value == true;

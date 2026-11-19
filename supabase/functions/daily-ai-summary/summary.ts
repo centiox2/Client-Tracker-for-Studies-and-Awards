@@ -5,9 +5,6 @@ export const pages = [
   "daily_reports",
   "team_todo",
   "staff",
-  "history",
-  "reports",
-  "settings",
 ];
 export const schema = {
   type: "object",

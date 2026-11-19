@@ -160,6 +160,7 @@ class _QuickSearchDialogState extends ConsumerState<_QuickSearchDialog> {
     }
 
     if ((role?.canEdit ?? false) &&
+        may(AppTab.week) &&
         (query.isEmpty || 'new week'.contains(query))) {
       results.add(
         _Result(

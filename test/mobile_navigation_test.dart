@@ -3,6 +3,7 @@ import 'package:client_tracker/database/app_database_io.dart';
 import 'package:client_tracker/state/app_state.dart';
 import 'package:client_tracker/state/mobile_navigation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -99,6 +100,57 @@ void main() {
     expect(container.read(mobileNavigationProvider), isNull);
     container.invalidate(mobileNavigationProvider);
     expect(container.read(mobileNavigationProvider), isNull);
+  });
+
+  testWidgets('an empty page assignment stays restricted even via shortcuts', (
+    tester,
+  ) async {
+    container
+        .read(currentUserProvider.notifier)
+        .update(
+          const AppUser(
+            id: 1,
+            username: 'amina',
+            fullName: 'Amina',
+            role: UserRole.admin,
+            pages: {},
+          ),
+        );
+    expect(container.read(availableAppTabsProvider), [
+      AppTab.todo,
+      AppTab.settings,
+    ]);
+    expect(container.read(mobileBarTabsProvider), [
+      AppTab.todo,
+      AppTab.settings,
+    ]);
+
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const ClientTrackerApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    container.read(navTabProvider.notifier).set(AppTab.week);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(find.text('New week…'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
   });
 
   testWidgets(

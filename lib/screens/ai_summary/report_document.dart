@@ -24,11 +24,25 @@ class ReportDocument extends StatelessWidget {
     final theme = Theme.of(context);
     final c = context.clarity;
     final reportDate = DateTime.tryParse('${row['summary_date']}');
-    final sections = (content['sections'] as List? ?? []).cast<Map>();
+    final sections = (content['sections'] as List? ?? [])
+        .whereType<Map>()
+        .where(
+          (section) => !const {
+            'history',
+            'reports',
+            'settings',
+          }.contains(_sectionPage(section)),
+        )
+        .toList();
+    final applications = _map(snapshot['applications']);
+    final updates = _map(applications['updates_today']);
     final metrics = [
       ('Clients today', _count(_map(snapshot['weekly_tracker'])['today'])),
       ('Revenue today', _money(_map(snapshot['revenue']), 'today_cents')),
-      ('Applications', _count(_map(snapshot['applications'])['total'])),
+      if (updates.containsKey('applications_touched'))
+        ('Applications updated today', _count(updates['applications_touched']))
+      else
+        ('Applications', _count(applications['total'])),
       ('Active staff', _count(_map(snapshot['staff'])['active'])),
     ];
     Widget heading(String title, {String? caption}) => Padding(
@@ -103,10 +117,7 @@ class ReportDocument extends StatelessWidget {
                 style: theme.textTheme.bodySmall?.copyWith(color: c.textMuted),
               ),
               divider(),
-              heading(
-                'Key figures',
-                caption: 'Client and revenue figures are for the report day; applications and staff are current totals.',
-              ),
+              heading('Key figures'),
               LayoutBuilder(
                 builder: (context, box) {
                   final cols = box.maxWidth >= 720 ? 4 : 2;
@@ -185,6 +196,34 @@ class ReportDocument extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 12),
+                  if (_sectionPage(section) == 'applications' &&
+                      updates.isNotEmpty) ...[
+                    heading('Updates logged that day'),
+                    _FactRows([
+                      (
+                        'Applications with logged changes',
+                        _count(updates['applications_touched']),
+                      ),
+                      for (final (key, label) in const [
+                        ('added', 'Added'),
+                        ('removed', 'Removed'),
+                        ('statuses_changed', 'Status changed'),
+                        ('documents_updated', 'Document date updated'),
+                        ('submission_dates_updated', 'Submission date updated'),
+                        ('offers_logged', 'Offer date first recorded'),
+                        ('coes_logged', 'COE date first recorded'),
+                        (
+                          'offer_or_coe_dates_corrected',
+                          'Offer or COE date revised',
+                        ),
+                        ('follow_ups_updated', 'Follow-up notes updated'),
+                      ])
+                        if (updates[key] is num && (updates[key] as num) > 0)
+                          (label, _count(updates[key])),
+                    ]),
+                    const SizedBox(height: 16),
+                    heading('Pipeline totals'),
+                  ],
                   if (_facts(_sectionPage(section), snapshot).isNotEmpty) ...[
                     _FactRows(_facts(_sectionPage(section), snapshot)),
                     const SizedBox(height: 16),
@@ -233,11 +272,6 @@ class ReportDocument extends StatelessWidget {
                   color: c.textMuted,
                   height: 1.5,
                 ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Model: ${row['model']}',
-                style: theme.textTheme.labelSmall?.copyWith(color: c.textMuted),
               ),
             ],
           ),
@@ -418,7 +452,6 @@ List<(String, String)> _facts(String page, Map snapshot) {
     },
     'team_todo' => {'open': 'Open team items', 'done': 'Completed team items'},
     'staff' => {'active': 'Active staff', 'total': 'Total staff'},
-    'history' => {'recorded_weeks': 'Recorded weeks'},
     _ => <String, String>{},
   };
   if (page == 'revenue') {

@@ -16,7 +16,7 @@ const sample = () => ({
 Deno.test("accepts complete summary and strips unrecognized fields", () => {
   const v = validateSummary({ ...sample(), key: "must not persist" });
   assert(!("key" in v));
-  assert(v.sections.length === 9);
+  assert(v.sections.length === pages.length);
 });
 Deno.test("rejects missing, duplicate and excessive sections", () => {
   for (

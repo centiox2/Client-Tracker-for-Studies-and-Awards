@@ -41,6 +41,8 @@ void main() {
     expect(RevenueRepository.parseAmount('10.999'), isNull);
     expect(formatMoney(4530000, 'KSh'), 'KSh 45,300');
     expect(formatMoney(150050, 'KSh'), 'KSh 1,500.50');
+    expect(formatMoney(-125, 'KSh'), 'KSh -1.25');
+    expect(formatMoney(-1, 'KSh'), 'KSh -0.01');
     expect(formatMoney(0, 'USD'), 'USD 0');
   });
 

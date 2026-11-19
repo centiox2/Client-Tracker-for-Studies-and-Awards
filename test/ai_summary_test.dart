@@ -79,6 +79,11 @@ Map<String, dynamic> summaryFixture() => {
             'total': 526,
             'with_offer': 334,
             'with_coe': 248,
+            'updates_today': {
+              'applications_touched': 3,
+              'statuses_changed': 1,
+              'offers_logged': 1,
+            },
             'by_status': {'Awaiting offer': 50},
           },
           'daily_reports': {
@@ -469,7 +474,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(ClarityCard), findsOneWidget);
       expect(find.text('1. Weekly tracker'), findsOneWidget);
-      expect(find.text('9. Settings'), findsOneWidget);
+      expect(find.text('6. Staff'), findsOneWidget);
+      expect(find.text('9. Settings'), findsNothing);
+      expect(find.text('Updates logged that day'), findsOneWidget);
+      expect(find.text('Offer date first recorded'), findsOneWidget);
       expect(find.text('Month-to-date net revenue'), findsOneWidget);
       expect(
         find.text('Recorded Revenue figures are available for review.'),

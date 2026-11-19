@@ -37,11 +37,12 @@ class _AiSummarySettingsState extends ConsumerState<AiSummarySettings> {
             users: assigned.toList(),
             key: keyInput.text.trim().isEmpty ? null : keyInput.text.trim(),
           );
+      if (!mounted) return;
       keyInput.clear();
       ref.invalidate(aiSummarySettingsProvider);
       ref.invalidate(aiSummaryAccessProvider);
       ref.invalidate(aiSummariesProvider);
-      if (mounted) setState(() => message = 'AI summary settings saved.');
+      setState(() => message = 'AI summary settings saved.');
     } catch (_) {
       if (mounted) {
         setState(
@@ -107,6 +108,7 @@ class _AiSummarySettingsState extends ConsumerState<AiSummarySettings> {
                     ),
                     TextField(
                       controller: keyInput,
+                      enabled: !busy,
                       obscureText: true,
                       enableSuggestions: false,
                       autocorrect: false,
@@ -121,6 +123,7 @@ class _AiSummarySettingsState extends ConsumerState<AiSummarySettings> {
                     const SizedBox(height: 16),
                     TextField(
                       controller: modelInput,
+                      enabled: !busy,
                       decoration: const InputDecoration(
                         labelText: 'Gemini model',
                       ),

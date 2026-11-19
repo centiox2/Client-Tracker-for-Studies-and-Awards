@@ -94,7 +94,7 @@ Deno.test("retries a network timeout and accepts the successful retry", async ()
     return success();
   }, async () => {});
   assert(calls === 2);
-  assert(result.sections.length === 9);
+  assert(result.sections.length === pages.length);
 });
 Deno.test("incomplete and malformed reports are never published", async () => {
   for (

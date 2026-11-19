@@ -32,7 +32,7 @@ final availableAppTabsProvider = Provider<List<AppTab>>((ref) {
           (tab != AppTab.aiSummary || aiAccess))
         tab,
   ];
-  final limited = [
+  return [
     for (final tab in byRole)
       if (tab == AppTab.aiSummary ||
           tab == AppTab.settings ||
@@ -40,9 +40,6 @@ final availableAppTabsProvider = Provider<List<AppTab>>((ref) {
           (user?.mayOpen(tab.name) ?? true))
         tab,
   ];
-  return limited.any((t) => t != AppTab.settings && t != AppTab.todo)
-      ? limited
-      : byRole;
 });
 
 /// Saved locally for this person, so a shared phone keeps separate choices.

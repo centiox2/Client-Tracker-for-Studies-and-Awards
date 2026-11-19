@@ -231,8 +231,9 @@ visible. Manual generation does not cancel the evening scheduled run. Assigned
 readers can view reports; only Admin can request generation.
 
 For an existing database, apply `supabase/migrations/20261118080640_daily_ai_summary.sql`
-and the follow-ups `20261118082030_ai_summary_job_auth_guard.sql` and
-`20261118110032_manual_ai_summary.sql` and `20261118113801_ai_report_failure_messages.sql` and `20261118114826_report_readable_details.sql`, then deploy `supabase/functions/daily-ai-summary` with JWT verification disabled:
+and the follow-ups `20261118082030_ai_summary_job_auth_guard.sql`,
+`20261118110032_manual_ai_summary.sql`, `20261118113801_ai_report_failure_messages.sql`, `20261118114826_report_readable_details.sql`, and
+`20261119053941_ai_summary_application_updates.sql`, then deploy `supabase/functions/daily-ai-summary` with JWT verification disabled:
 the function authenticates its private job token itself, with the claim/finish RPCs
 restricted to `service_role`. The migration creates pg_net and uses existing
 pg_cron/Vault. It starts **disabled**, with no Gemini key or non-admin assignments.

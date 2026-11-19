@@ -23,6 +23,15 @@ create table public.client_counts(day_id bigint,staff_id bigint,new_clients int,
 create table public.work_days(id bigint,date text);create table public.staff_day_off(day_id bigint,staff_id bigint);
 create table public.revenue_entries(date text,amount_cents bigint);create table public.app_settings(key text,value text);
 create table public.applications(status text,offer_date text,coe_date text);
+create table public.application_changes(app_key text, field text, old_value text, new_value text, changed_at text);
+insert into public.application_changes values
+ ('excluded-prior-day','added','','','2026-11-18T00:00:00+04:00'),
+ ('first','status','New','Submitted','2026-11-18T00:00:00'),
+ ('first','status','Submitted','Offered','2026-11-17T21:05:00Z'),
+ ('first','offer_date','','2026-11-17','2026-11-18T00:05:00'),
+ ('second','follow_up','','private note','2026-11-18T16:58:59'),
+ ('excluded-future','added','','','2026-11-18T17:01:00'),
+ ('excluded-malformed','added','','','invalid');
 create table public.activity_reports(status text,review text,report_date date,submitted_at timestamptz,due_date date);
 create table public.todo_team_items(done boolean,deleted boolean);create table public.staff(active int);create table public.weeks(id bigint);
 insert into public.work_days values(1,'2026-11-18');insert into public.client_counts values(1,1,3,2),(1,2,100,0);insert into public.staff_day_off values(1,2);
@@ -36,6 +45,7 @@ for (
     "20261118110032_manual_ai_summary.sql",
     "20261118113801_ai_report_failure_messages.sql",
     "20261118114826_report_readable_details.sql",
+    "20261119053941_ai_summary_application_updates.sql",
   ]
 ) {
   if (file.endsWith("manual_ai_summary.sql")) {
@@ -61,6 +71,13 @@ const context = await scalar("select private.ai_summary_context()");
 assert.equal(context.revenue.today_amount, 90);
 assert.equal(context.revenue.currency, "KES");
 assert.equal(context.weekly_tracker.month_total, 5);
+assert.equal(context.applications.updates_today.applications_touched, 2);
+assert.equal(context.applications.updates_today.statuses_changed, 1);
+assert.equal(context.applications.updates_today.offers_logged, 1);
+assert.equal(context.applications.updates_today.added, 0);
+assert.equal(context.applications.updates_today.follow_ups_updated, 1);
+assert(!JSON.stringify(context).includes("private note"));
+assert(!("settings" in context));
 await db.exec("delete from public.app_settings where key='currency'");
 assert.equal(
   (await scalar("select private.ai_summary_context()")).revenue.currency,

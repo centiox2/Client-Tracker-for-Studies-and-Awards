@@ -451,7 +451,7 @@ class RevenueRepository {
 /// "KSh 45,300" — or "KSh 45,300.50" when there are cents.
 String formatMoney(int cents, String currency) {
   final whole = cents ~/ 100;
-  final frac = (cents % 100).abs();
+  final frac = cents.remainder(100).abs();
   final digits = whole.abs().toString();
   final grouped = StringBuffer();
   for (var i = 0; i < digits.length; i++) {

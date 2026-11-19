@@ -157,6 +157,21 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     ];
   }
 
+  AppTab _visibleTab(
+    AppTab requested,
+    List<_AppTabInfo> allowed,
+    bool isViewer,
+  ) {
+    if (allowed.any((item) => item.tab == requested)) return requested;
+    if (isViewer && allowed.any((item) => item.tab == AppTab.reports)) {
+      return AppTab.reports;
+    }
+    return allowed.first.tab;
+  }
+
+  AppTab get _activeTab =>
+      _visibleTab(ref.read(navTabProvider), _tabs, _isViewer);
+
   /// Notices when the date changes so "today" (Quick view, the tracker's
   /// today column, the start-week banner) moves on even if the app is left
   /// open overnight. A refresh is cheap; once a minute is plenty.
@@ -288,13 +303,27 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         return;
       }
     }
+    if (!ref.read(seesRevenueProvider)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Revenue access is required to import payments.'),
+        ),
+      );
+      await deleteSharedCopies(items.photos);
+      return;
+    }
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     ref.read(navTabProvider.notifier).set(AppTab.revenue);
     ref.read(revenueDateProvider.notifier).set(today);
     // Let the Revenue page come up behind the review.
     await Future<void>.delayed(const Duration(milliseconds: 300));
-    if (!mounted) return;
+    if (!mounted ||
+        !ref.read(isAdminProvider) ||
+        !ref.read(seesRevenueProvider)) {
+      await deleteSharedCopies(items.photos);
+      return;
+    }
     if (items.photos.isNotEmpty) {
       await importPaymentPhotos(
         context,
@@ -344,7 +373,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     }
     final key = event.logicalKey;
     final char = event.character;
-    final onReports = ref.read(navTabProvider) == AppTab.dailyReports;
+    final onReports = _activeTab == AppTab.dailyReports;
     if (key == LogicalKeyboardKey.slash && char != '?') {
       if (onReports) {
         // Daily reports: its own search box.
@@ -374,7 +403,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     if (key == LogicalKeyboardKey.keyN &&
         !_isViewer &&
         !HardwareKeyboard.instance.isAltPressed) {
-      final tab = ref.read(navTabProvider);
+      final tab = _activeTab;
       if (tab == AppTab.revenue && ref.read(isAdminProvider)) {
         ref.read(newPaymentRequestProvider.notifier).bump();
         return KeyEventResult.handled;
@@ -405,13 +434,15 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // of a payment message is read; text opens the paste box.
     if (event.logicalKey == LogicalKeyboardKey.keyV &&
         !_typingInTextField &&
-        ref.read(navTabProvider) == AppTab.revenue &&
+        _activeTab == AppTab.revenue &&
         ref.read(isAdminProvider) &&
         ModalRoute.of(context)?.isCurrent != false) {
       pastePaymentMessage(context, ref, ref.read(revenueDateProvider));
       return KeyEventResult.handled;
     }
-    if (event.logicalKey == LogicalKeyboardKey.keyN) {
+    final allowed = ref.read(availableAppTabsProvider);
+    if (event.logicalKey == LogicalKeyboardKey.keyN &&
+        (allowed.contains(AppTab.week) || allowed.contains(AppTab.history))) {
       // Instead of the browser's "new window".
       showNewWeekDialog(context, ref);
       return KeyEventResult.handled;
@@ -419,7 +450,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // In a text box, Ctrl+Z undoes the typing and Ctrl+1–6 must not throw
     // away what was typed by jumping to another page.
     if (_typingInTextField) return KeyEventResult.ignored;
-    if (event.logicalKey == LogicalKeyboardKey.keyZ) {
+    if (event.logicalKey == LogicalKeyboardKey.keyZ &&
+        allowed.contains(AppTab.week)) {
       final undone = ref.read(appActionsProvider).undoLastEdit();
       if (undone != null && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -616,11 +648,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       if (after.unread > before.unread) _announceNotification();
     });
     // Never render a page this profile may not see, whatever the nav state.
-    final tab = allowed.any((t) => t.tab == requested)
-        ? requested
-        : (allowed.any((t) => t.tab == AppTab.reports) && isViewer
-              ? AppTab.reports
-              : allowed.first.tab);
+    final tab = _visibleTab(requested, allowed, isViewer);
     final width = MediaQuery.sizeOf(context).width;
     final desktop = width >= 1050;
 
