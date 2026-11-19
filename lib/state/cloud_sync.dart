@@ -647,6 +647,21 @@ class CloudSyncController extends Notifier<CloudSyncState> {
   Future<Object?> callAsUser(String name, [Map<String, Object?>? params]) =>
       _needApi().callFunction(name, {'p_token': _needToken(), ...?params});
 
+  /// Used by features that load as soon as the signed-in shell is built.
+  Future<Object?> callAsUserWhenReady(
+    String name, [
+    Map<String, Object?>? params,
+  ]) async {
+    final userId = ref.read(currentUserProvider)?.id;
+    if (userId == null) throw CloudException('not_signed_in');
+    if (!enabled) unawaited(start());
+    await ready;
+    if (!ref.mounted || ref.read(currentUserProvider)?.id != userId) {
+      throw CloudException('not_signed_in');
+    }
+    return callAsUser(name, params);
+  }
+
   /// Calls an online function with what this device reads the data with
   /// (any signed-in person or open profile).
   Future<Object?> callAsReader(String name, [Map<String, Object?>? params]) {

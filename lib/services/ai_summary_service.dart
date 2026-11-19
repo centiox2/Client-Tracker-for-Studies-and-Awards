@@ -6,7 +6,9 @@ import '../state/app_state.dart';
 import '../state/cloud_sync.dart';
 
 final aiSummaryServiceProvider = Provider(
-  (ref) => AiSummaryService(ref.read(cloudSyncProvider.notifier).callAsUser),
+  (ref) => AiSummaryService(
+    ref.read(cloudSyncProvider.notifier).callAsUserWhenReady,
+  ),
 );
 
 class AiSummaryService {
@@ -45,9 +47,23 @@ final aiSummaryAccessProvider = FutureProvider.autoDispose<bool>((ref) async {
       ref.watch(currentUserProvider.select((user) => user?.id)) == null) {
     return false;
   }
-  final result = await ref.watch(aiSummaryServiceProvider).access();
-  if (ref.mounted) _refresh(ref);
-  return result;
+  var failed = false;
+  ref.listen(cloudSyncProvider.select((state) => state.phase), (
+    previous,
+    next,
+  ) {
+    if (previous != next && next == SyncPhase.live && failed) {
+      ref.invalidateSelf();
+    }
+  });
+  try {
+    return await ref.watch(aiSummaryServiceProvider).access();
+  } catch (_) {
+    failed = true;
+    rethrow;
+  } finally {
+    if (ref.mounted) _refresh(ref);
+  }
 });
 final aiSummariesProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
   ref,

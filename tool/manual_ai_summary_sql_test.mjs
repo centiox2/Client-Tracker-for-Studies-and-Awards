@@ -33,6 +33,9 @@ insert into public.application_changes values
  ('second','follow_up','','private note','2026-11-18T16:58:59'),
  ('excluded-future','added','','','2026-11-18T17:01:00'),
  ('excluded-malformed','added','','','invalid');
+alter table public.application_changes add column id bigint generated always as identity primary key,
+ add column student text default 'Example Client';
+create table private.airtable_config(id integer primary key,base_id text,table_id text,fields jsonb);
 create table public.activity_reports(status text,review text,report_date date,submitted_at timestamptz,due_date date,user_id bigint,department_id bigint,outputs jsonb);
 create table public.activity_changes(report_id bigint,changed_by bigint,action text,changed_at timestamptz);
 create table public.departments(id bigint,outputs jsonb);
@@ -55,6 +58,7 @@ for (
     "20261119053941_ai_summary_application_updates.sql",
     "20261119054824_ai_summary_staff_activity.sql",
     "20261119102913_ai_summary_report_templates.sql",
+    "20261119105738_ai_summary_status_audit.sql",
   ]
 ) {
   if (file.endsWith("manual_ai_summary.sql")) {
@@ -99,6 +103,20 @@ assert.equal(
   1,
 );
 assert.equal(context.template_facts.milestones.applications_submitted, 1);
+assert.equal(context.template_facts.status_events.length, 2);
+assert.equal(context.template_facts.status_events[0].client, "Example Client");
+assert.equal(context.template_facts.status_events[0].changed_by, null);
+await db.exec(
+  `insert into private.application_status_audit(change_id,editor_name,edited_at)
+  select id,'Example Editor','2026-11-18 00:03:00+03'::timestamptz from public.application_changes where field='status' and new_value='Offered';`,
+);
+const audited = await scalar(
+  "select private.ai_summary_template_facts()->'status_events'",
+);
+assert.equal(audited.length, 2);
+assert.equal(audited[1].changed_by, "Example Editor");
+assert.equal(audited[1].exact_time, true);
+assert.equal(audited[1].at, "2026-11-18T00:03:00+03:00");
 assert(!JSON.stringify(context).includes("private note"));
 assert(!("settings" in context));
 assert.equal(context.staff.activity.length, 2);

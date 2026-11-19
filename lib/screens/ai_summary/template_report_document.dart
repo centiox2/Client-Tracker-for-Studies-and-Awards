@@ -122,7 +122,7 @@ class _ReportTable extends StatelessWidget {
     final colors = context.clarity;
     final lastIsTotal = block['total'] == true;
     final quickFigures = compact && headers.first == 'Clients';
-    final statusChanges = headers.first == 'From';
+    final statusChanges = const {'From', 'Time (EAT)'}.contains(headers.first);
     final scale = MediaQuery.textScalerOf(context);
 
     TableRow row(

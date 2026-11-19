@@ -143,10 +143,37 @@ Deno.test("Gemini selects a recorded movement and receives no staff or payment d
   const output = await generateReport({
     model: "gemini-test",
     key: "unit-test",
-    snapshot,
+    snapshot: {
+      ...snapshot,
+      template_facts: {
+        ...snapshot.template_facts,
+        status_events: [
+          {
+            client: "Example Client",
+            changed_by: "Example Editor",
+            from: "New",
+            to: "Awaiting CAS",
+            at: "2026-11-19T09:03:00+03:00",
+            exact_time: true,
+          },
+          {
+            client: "Example Client",
+            changed_by: null,
+            from: "Awaiting CAS",
+            to: "Visa Granted",
+            at: "2026-11-19T12:03:00+03:00",
+            exact_time: false,
+          },
+        ],
+      },
+    },
   }, async (_, request) => {
     const body = String(request?.body);
-    assert(!/Winne|Winnie|Unspecified|120050/.test(body));
+    assert(
+      !/Winne|Winnie|Unspecified|120050|Example Client|Example Editor/.test(
+        body,
+      ),
+    );
     assert.match(body, /Visa Granted/);
     const movement = ++calls === 1 ? 999 : 1;
     return Response.json({
@@ -158,4 +185,20 @@ Deno.test("Gemini selects a recorded movement and receives no staff or payment d
   }, async () => {});
   assert.equal(calls, 2);
   assert.match(String(output.brief), /1 application changed status/);
+  assert("template" in output);
+  const table = (output as ReturnType<typeof buildTemplateReport>).template
+    .detailed.find((block) =>
+      block.kind === "table" && block.columns[0] === "Time (EAT)"
+    );
+  assert(table?.kind === "table");
+  assert.deepEqual(table.rows, [
+    ["9:03 AM", "Example Client", "Example Editor", "New", "Awaiting CAS"],
+    [
+      "12:03 PM",
+      "Example Client",
+      "Not recorded",
+      "Awaiting CAS",
+      "Visa Granted",
+    ],
+  ]);
 });

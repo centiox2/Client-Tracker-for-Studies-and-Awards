@@ -10,6 +10,7 @@ import 'package:excel/excel.dart';
 import 'package:client_tracker/app.dart';
 import 'package:client_tracker/services/daily_report_export.dart';
 import 'package:client_tracker/services/daily_reports_service.dart';
+import 'package:client_tracker/services/ai_summary_service.dart';
 import 'package:client_tracker/services/todo_service.dart';
 import 'package:client_tracker/screens/daily_reports/report_editor.dart'
     show TaskMode, TaskModeToggle, UrgencyPill;
@@ -632,6 +633,8 @@ class FakeCloud implements CloudApi {
     }
 
     switch (name) {
+      case 'ai_summary_access':
+        return me.role == UserRole.admin;
       case 'todo_sync':
         final mine = todos.putIfAbsent(uid, () => {});
         final shared = teamId == null
@@ -1970,6 +1973,36 @@ void main() {
     expect(find.byKey(const ValueKey('login-username')), findsOneWidget);
     container.dispose();
   });
+
+  test(
+    'AI summary checks a remembered account before the shell starts sync',
+    () async {
+      cloud.addUser('summary-admin', 'test-password', role: UserRole.admin);
+      final signIn = await cloud.userLogin(
+        'summary-admin',
+        'test-password',
+        true,
+      );
+      AuthRepository(boss).saveSignIn(
+        signIn.user,
+        'test-password',
+        token: signIn.token,
+        remember: true,
+      );
+      final reopened = ProviderContainer(
+        overrides: [
+          databaseProvider.overrideWithValue(boss),
+          accountsEnabledProvider.overrideWithValue(true),
+          cloudApiFactoryProvider.overrideWithValue(() => cloud),
+        ],
+      );
+      addTearDown(reopened.dispose);
+      final access = reopened.listen(aiSummaryAccessProvider, (_, _) {});
+      expect(await reopened.read(aiSummaryAccessProvider.future), isTrue);
+      expect(access.read().value, isTrue);
+      expect(cloud.calls, contains('ai_summary_access'));
+    },
+  );
 
   testWidgets('accounts: a temporary password must be replaced first', (
     tester,

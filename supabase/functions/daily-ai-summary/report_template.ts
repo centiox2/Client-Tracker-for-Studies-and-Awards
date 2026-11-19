@@ -234,6 +234,8 @@ export function buildTemplateReport(
   const week = map(facts.week);
   const purposes = list(facts.purposes);
   const milestones = map(facts.milestones);
+  const hasStatusEvents = Array.isArray(facts.status_events);
+  const statusEvents = list(facts.status_events);
   const handling = assignees(facts, people);
   const reassignments = list(facts.reassignments);
   const nameFor = (x: unknown) =>
@@ -459,19 +461,44 @@ export function buildTemplateReport(
       ) => [text(p.purpose), count(p.entries), money(p.net_cents)]),
     ),
     heading("5. Application Activity Today"),
-    label(`Status changes (${count(updates.statuses_changed)})`),
-    pairTable(
-      "From",
-      "To",
-      list(facts.status_moves).map((
-        row,
-      ) => [
-        displayStatus(text(row.from)),
-        `${displayStatus(text(row.to))}${
-          value(row.count) > 1 ? ` (${count(row.count)})` : ""
-        }`,
-      ]),
+    label(
+      `Status changes (${
+        count(hasStatusEvents ? statusEvents.length : updates.statuses_changed)
+      })`,
     ),
+    hasStatusEvents
+      ? table(
+        ["Time (EAT)", "Client", "Changed by", "From", "To"],
+        statusEvents.map((event) => {
+          const at = dateAt(event.at);
+          return [
+            at ? clock.format(at).toUpperCase() : "—",
+            text(event.client),
+            event.changed_by ? text(event.changed_by) : "Not recorded",
+            displayStatus(text(event.from)),
+            displayStatus(text(event.to)),
+          ];
+        }),
+      )
+      : pairTable(
+        "From",
+        "To",
+        list(facts.status_moves).map((
+          row,
+        ) => [
+          displayStatus(text(row.from)),
+          `${displayStatus(text(row.to))}${
+            value(row.count) > 1 ? ` (${count(row.count)})` : ""
+          }`,
+        ]),
+      ),
+    ...(statusEvents.some((event) => event.exact_time !== true)
+      ? [
+        line(
+          "When Airtable lacks an edit time, the table shows when S&A Hub detected the change.",
+        ),
+      ]
+      : []),
     label("Milestones and dates"),
     pairTable("Item", "Applications", [
       ["COE dates newly logged", count(updates.coes_logged)],
@@ -610,6 +637,9 @@ export function buildTemplateReport(
       if (block.kind === "heading") break;
       if (block.kind === "text") body.push(block.text);
       if (block.kind === "table") {
+        // This legacy summary remains compact. The full event table is shown
+        // in the template view, including repeated changes for one client.
+        if (block.columns[0] === "Time (EAT)") continue;
         body.push(...block.rows.slice(0, 6).map((row) => row.join(" · ")));
       }
     }
