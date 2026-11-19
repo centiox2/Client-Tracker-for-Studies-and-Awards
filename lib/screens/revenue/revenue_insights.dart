@@ -278,10 +278,13 @@ class _RevenueInsightsState extends ConsumerState<RevenueInsights> {
                 label: Text(periodLabel),
               )
             else
-              Text(
-                periodLabel,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
+              Flexible(
+                child: Text(
+                  periodLabel,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             if (_period != InsightsPeriod.custom)

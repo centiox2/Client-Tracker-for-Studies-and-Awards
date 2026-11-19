@@ -1235,15 +1235,18 @@ class MonthlyByAssignee extends StatelessWidget {
                                 ),
                               ),
                               const SizedBox(height: 4),
-                              Text(
-                                DateFormat('MMM').format(months[i]),
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: i == months.length - 1
-                                      ? null
-                                      : c.textMuted,
-                                  fontWeight: i == months.length - 1
-                                      ? FontWeight.w700
-                                      : null,
+                              FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  DateFormat('MMM').format(months[i]),
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: i == months.length - 1
+                                        ? null
+                                        : c.textMuted,
+                                    fontWeight: i == months.length - 1
+                                        ? FontWeight.w700
+                                        : null,
+                                  ),
                                 ),
                               ),
                             ],

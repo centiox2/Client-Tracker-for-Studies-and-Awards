@@ -254,11 +254,18 @@ class AirtableTags {
 
 /// A rounded tag, as in Airtable.
 class TagChip extends StatelessWidget {
-  const TagChip(this.label, this.colors, {super.key, this.dense = false});
+  const TagChip(
+    this.label,
+    this.colors, {
+    super.key,
+    this.dense = false,
+    this.wrap = false,
+  });
 
   final String label;
   final (Color, Color) colors;
   final bool dense;
+  final bool wrap;
 
   @override
   Widget build(BuildContext context) {
@@ -268,12 +275,12 @@ class TagChip extends StatelessWidget {
       padding: EdgeInsets.symmetric(horizontal: dense ? 7 : 9, vertical: 2),
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(99),
+        borderRadius: BorderRadius.circular(wrap ? 10 : 99),
       ),
       child: Text(
         label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+        maxLines: wrap ? null : 1,
+        overflow: wrap ? null : TextOverflow.ellipsis,
         style: TextStyle(
           color: fg,
           fontFamily: 'Inter',

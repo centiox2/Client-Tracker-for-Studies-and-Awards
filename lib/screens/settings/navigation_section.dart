@@ -65,6 +65,9 @@ class _NavigationEditorState extends ConsumerState<_NavigationEditor> {
     final remaining = allowed.where((t) => !_pinned.contains(t)).toList();
     return AlertDialog(
       title: const Text('Customize bottom bar'),
+      insetPadding: MediaQuery.sizeOf(context).width < 600
+          ? const EdgeInsets.symmetric(horizontal: 16, vertical: 24)
+          : null,
       scrollable: true,
       content: SizedBox(
         width: 440,
@@ -91,7 +94,8 @@ class _NavigationEditorState extends ConsumerState<_NavigationEditor> {
                       '${index + 1}. ${pageTitle(tab)}',
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
-                    Row(
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         IconButton(
                           key: ValueKey('nav-up-${tab.name}'),
@@ -109,7 +113,6 @@ class _NavigationEditorState extends ConsumerState<_NavigationEditor> {
                               : () => _move(index, index + 1),
                           icon: const Icon(Icons.arrow_downward, size: 18),
                         ),
-                        const Spacer(),
                         TextButton.icon(
                           key: ValueKey('nav-remove-${tab.name}'),
                           onPressed: _pinned.length == 1

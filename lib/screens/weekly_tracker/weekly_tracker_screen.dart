@@ -1726,66 +1726,91 @@ class _MobileWeekViewState extends State<_MobileWeekView> {
     final index = days.indexWhere((d) => d.day.id == selectedId);
     final day = days[index];
     final pad = clarityHPad(context);
+    final narrowTextLayout =
+        MediaQuery.sizeOf(context).width - 2 * pad <
+        MediaQuery.textScalerOf(context).scale(180);
+    void selectDay(int next) {
+      final id = days[next].day.id;
+      setState(() => _resolvedDayId = id);
+      widget.onSelectDay(id);
+    }
+
+    final date = Text(
+      MediaQuery.sizeOf(context).width < 600
+          ? DateFormat('EEEE d MMM').format(day.day.date)
+          : '${DateFormat('EEEE').format(day.day.date)} · ${DateFormat('d MMMM y').format(day.day.date)}',
+      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+    );
+    final timeOff = TextButton.icon(
+      onPressed: () => showDayOffDialog(context, dayId: day.day.id),
+      icon: const Icon(Icons.event_busy_outlined, size: 15),
+      label: Text(
+        day.isHoliday
+            ? 'Holiday'
+            : day.offStaffIds.isNotEmpty
+            ? '${day.rows.where((r) => day.isOff(r.staffId)).length} off'
+            : 'Who’s off?',
+      ),
+    );
 
     return Column(
       children: [
         Padding(
           padding: EdgeInsets.fromLTRB(pad, Dt.s12, pad, Dt.s4),
-          // Full width with equal segments so all five days always fit.
-          child: SegmentedButton<int>(
-            expandedInsets: EdgeInsets.zero,
-            showSelectedIcon: false,
-            style: MediaQuery.sizeOf(context).width < 600
-                ? Dt.phoneSegments
-                : null,
-            segments: [
-              for (var i = 0; i < days.length; i++)
-                ButtonSegment(
-                  value: i,
-                  label: Text(
-                    DateFormat('EEE').format(days[i].day.date),
-                    maxLines: 1,
-                  ),
+          child: narrowTextLayout
+              ? DropdownButtonFormField<int>(
+                  key: ValueKey(day.day.id),
+                  initialValue: index,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Day'),
+                  items: [
+                    for (final (i, entry) in days.indexed)
+                      DropdownMenuItem(
+                        value: i,
+                        child: Text(DateFormat('EEEE').format(entry.day.date)),
+                      ),
+                  ],
+                  onChanged: (next) {
+                    if (next != null) selectDay(next);
+                  },
+                )
+              : SegmentedButton<int>(
+                  expandedInsets: EdgeInsets.zero,
+                  showSelectedIcon: false,
+                  style: MediaQuery.sizeOf(context).width < 600
+                      ? Dt.phoneSegments
+                      : null,
+                  segments: [
+                    for (var i = 0; i < days.length; i++)
+                      ButtonSegment(
+                        value: i,
+                        label: Text(
+                          DateFormat('EEE').format(days[i].day.date),
+                          maxLines: 1,
+                        ),
+                      ),
+                  ],
+                  selected: {index},
+                  onSelectionChanged: (selection) => selectDay(selection.first),
                 ),
-            ],
-            selected: {index},
-            onSelectionChanged: (selection) {
-              setState(() {
-                _resolvedDayId = days[selection.first].day.id;
-              });
-              widget.onSelectDay(days[selection.first].day.id);
-            },
-          ),
         ),
         Expanded(
           child: ListView(
             padding: EdgeInsets.fromLTRB(pad, Dt.s12, pad, Dt.s32),
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      MediaQuery.sizeOf(context).width < 600
-                          ? DateFormat('EEEE d MMM').format(day.day.date)
-                          : '${DateFormat('EEEE').format(day.day.date)} · ${DateFormat('d MMMM y').format(day.day.date)}',
-                      style: Theme.of(context).textTheme.titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  TextButton.icon(
-                    onPressed: () =>
-                        showDayOffDialog(context, dayId: day.day.id),
-                    icon: const Icon(Icons.event_busy_outlined, size: 15),
-                    label: Text(
-                      day.isHoliday
-                          ? 'Holiday'
-                          : day.offStaffIds.isNotEmpty
-                          ? '${day.rows.where((r) => day.isOff(r.staffId)).length} off'
-                          : 'Who’s off?',
-                    ),
-                  ),
-                ],
-              ),
+              if (narrowTextLayout)
+                Wrap(
+                  spacing: 12,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [date, timeOff],
+                )
+              else
+                Row(
+                  children: [
+                    Expanded(child: date),
+                    timeOff,
+                  ],
+                ),
               if (widget.data.notes[day.day.id] case final note?) ...[
                 const SizedBox(height: Dt.s4),
                 Row(
@@ -1819,7 +1844,7 @@ class _MobileWeekViewState extends State<_MobileWeekView> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const _MobileHeadings(),
+                    _MobileHeadings(stacked: narrowTextLayout),
                     for (final (i, row) in day.rows.indexed) ...[
                       if (i > 0)
                         Divider(height: 1, color: context.clarity.border),
@@ -1827,6 +1852,7 @@ class _MobileWeekViewState extends State<_MobileWeekView> {
                         key: ValueKey('mobile-${day.day.id}-${row.staffId}'),
                         day: day,
                         row: row,
+                        stacked: narrowTextLayout,
                         showZero: true,
                       ),
                     ],
@@ -1862,16 +1888,25 @@ class _MobileWeekViewState extends State<_MobileWeekView> {
         border: Border.all(color: context.clarity.border),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _sum(context, 'New total', '$n', Dt.newGreen(theme.brightness)),
-          _sum(
-            context,
-            'Existing total',
-            '$e',
-            Dt.existingBlue(theme.brightness),
+          Expanded(
+            child: _sum(
+              context,
+              'New total',
+              '$n',
+              Dt.newGreen(theme.brightness),
+            ),
           ),
-          _sum(context, 'Day total', '${n + e}', null),
+          Expanded(
+            child: _sum(
+              context,
+              'Existing total',
+              '$e',
+              Dt.existingBlue(theme.brightness),
+            ),
+          ),
+          Expanded(child: _sum(context, 'Day total', '${n + e}', null)),
         ],
       ),
     );
@@ -1881,7 +1916,7 @@ class _MobileWeekViewState extends State<_MobileWeekView> {
     final theme = Theme.of(context);
     return Column(
       children: [
-        Text(label, style: microLabel(theme)),
+        Text(label, textAlign: TextAlign.center, style: microLabel(theme)),
         const SizedBox(height: Dt.s4),
         Text(
           value,
@@ -1968,7 +2003,9 @@ const _mobileTotalWidth = 40.0;
 
 /// "Staff · New · Existing · Total" over the phone list.
 class _MobileHeadings extends StatelessWidget {
-  const _MobileHeadings();
+  const _MobileHeadings({required this.stacked});
+
+  final bool stacked;
 
   @override
   Widget build(BuildContext context) {
@@ -1991,7 +2028,10 @@ class _MobileHeadings extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(Dt.s16, 10, Dt.s12, 10),
       child: Row(
         children: [
-          Expanded(child: Text('STAFF', style: microLabel(theme))),
+          if (stacked)
+            const Spacer()
+          else
+            Expanded(child: Text('STAFF', style: microLabel(theme))),
           head('NEW', _mobileFieldWidth, dot: Dt.newGreen(theme.brightness)),
           const SizedBox(width: Dt.s8),
           head(
@@ -2022,11 +2062,13 @@ class _MobileStaffRow extends ConsumerWidget {
     required this.day,
     required this.row,
     required this.showZero,
+    required this.stacked,
   });
 
   final DayWithCounts day;
   final NamedClientCount row;
   final bool showZero;
+  final bool stacked;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -2044,106 +2086,116 @@ class _MobileStaffRow extends ConsumerWidget {
           )
         : null;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(Dt.s16, 8, Dt.s12, 8),
+    final name = InkWell(
+      onTap: () => showTimeOffDialog(
+        context,
+        ref,
+        staffId: row.staffId,
+        staffName: row.staffName,
+      ),
       child: Row(
         children: [
-          Expanded(
-            flex: 3,
-            child: InkWell(
-              onTap: () => showTimeOffDialog(
-                context,
-                ref,
-                staffId: row.staffId,
-                staffName: row.staffName,
-              ),
-              child: Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      row.staffName,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        fontWeight: FontWeight.w500,
-                        color: isOff
-                            ? Dt.textMuted(theme)
-                            : theme.colorScheme.onSurface,
-                      ),
-                    ),
-                  ),
-                  if (ref.watch(linkedStaffProvider)?.id == row.staffId) ...[
-                    const SizedBox(width: 6),
-                    const YouTag(),
-                  ],
-                ],
+          Flexible(
+            child: Text(
+              row.staffName,
+              maxLines: stacked ? null : 2,
+              overflow: stacked ? null : TextOverflow.ellipsis,
+              style: theme.textTheme.bodyLarge?.copyWith(
+                fontWeight: FontWeight.w500,
+                color: isOff
+                    ? Dt.textMuted(theme)
+                    : theme.colorScheme.onSurface,
               ),
             ),
           ),
-          const SizedBox(width: Dt.s8),
-          if (isOff)
-            SizedBox(
-              width: _mobileFieldWidth * 2 + Dt.s16 + _mobileTotalWidth,
-              height: 38,
-              child: Center(
-                child: Text(
-                  'Off this day',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    fontStyle: FontStyle.italic,
-                    color: Dt.textMuted(theme),
-                  ),
-                ),
-              ),
-            )
-          else ...[
-            InlineCountPair(
-              isNew: true,
-              newClients: row.newClients,
-              existingClients: row.existingClients,
-              showZero: showZero,
-              actions: actions,
-              day: day,
-              row: row,
-              newColor: Dt.newGreen(theme.brightness),
-              newColorBright: Dt.newGreenBright(theme.brightness),
-              existingColor: Dt.existingBlue(theme.brightness),
-              existingColorBright: Dt.existingBlueBright(theme.brightness),
-              context: context,
-              theme: theme,
-              confirmEdit: confirmEdit,
-            ),
-            const SizedBox(width: Dt.s8),
-            InlineCountPair(
-              isNew: false,
-              newClients: row.newClients,
-              existingClients: row.existingClients,
-              showZero: showZero,
-              actions: actions,
-              day: day,
-              row: row,
-              newColor: Dt.newGreen(theme.brightness),
-              newColorBright: Dt.newGreenBright(theme.brightness),
-              existingColor: Dt.existingBlue(theme.brightness),
-              existingColorBright: Dt.existingBlueBright(theme.brightness),
-              context: context,
-              theme: theme,
-              confirmEdit: confirmEdit,
-            ),
-            const SizedBox(width: Dt.s8),
-            SizedBox(
-              width: _mobileTotalWidth,
-              child: Text(
-                row.total == 0 ? '–' : '${row.total}',
-                textAlign: TextAlign.right,
-                style: Dt.tab(theme.textTheme.bodyMedium!).copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: row.total == 0 ? Dt.textFaint(theme) : null,
-                ),
-              ),
-            ),
+          if (ref.watch(linkedStaffProvider)?.id == row.staffId) ...[
+            const SizedBox(width: 6),
+            const YouTag(),
           ],
         ],
       ),
+    );
+    final counts = <Widget>[
+      if (isOff)
+        SizedBox(
+          width: _mobileFieldWidth * 2 + Dt.s16 + _mobileTotalWidth,
+          height: 38,
+          child: Center(
+            child: Text(
+              'Off this day',
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontStyle: FontStyle.italic,
+                color: Dt.textMuted(theme),
+              ),
+            ),
+          ),
+        )
+      else ...[
+        InlineCountPair(
+          isNew: true,
+          newClients: row.newClients,
+          existingClients: row.existingClients,
+          showZero: showZero,
+          actions: actions,
+          day: day,
+          row: row,
+          newColor: Dt.newGreen(theme.brightness),
+          newColorBright: Dt.newGreenBright(theme.brightness),
+          existingColor: Dt.existingBlue(theme.brightness),
+          existingColorBright: Dt.existingBlueBright(theme.brightness),
+          context: context,
+          theme: theme,
+          confirmEdit: confirmEdit,
+        ),
+        const SizedBox(width: Dt.s8),
+        InlineCountPair(
+          isNew: false,
+          newClients: row.newClients,
+          existingClients: row.existingClients,
+          showZero: showZero,
+          actions: actions,
+          day: day,
+          row: row,
+          newColor: Dt.newGreen(theme.brightness),
+          newColorBright: Dt.newGreenBright(theme.brightness),
+          existingColor: Dt.existingBlue(theme.brightness),
+          existingColorBright: Dt.existingBlueBright(theme.brightness),
+          context: context,
+          theme: theme,
+          confirmEdit: confirmEdit,
+        ),
+        const SizedBox(width: Dt.s8),
+        SizedBox(
+          width: _mobileTotalWidth,
+          child: Text(
+            row.total == 0 ? '–' : '${row.total}',
+            textAlign: TextAlign.right,
+            style: Dt.tab(theme.textTheme.bodyMedium!).copyWith(
+              fontWeight: FontWeight.w600,
+              color: row.total == 0 ? Dt.textFaint(theme) : null,
+            ),
+          ),
+        ),
+      ],
+    ];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Dt.s16, 8, Dt.s12, 8),
+      child: stacked
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                name,
+                const SizedBox(height: Dt.s4),
+                Row(mainAxisAlignment: MainAxisAlignment.end, children: counts),
+              ],
+            )
+          : Row(
+              children: [
+                Expanded(child: name),
+                const SizedBox(width: Dt.s8),
+                ...counts,
+              ],
+            ),
     );
   }
 }

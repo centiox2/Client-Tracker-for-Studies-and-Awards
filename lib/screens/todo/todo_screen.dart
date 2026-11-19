@@ -619,8 +619,9 @@ class _TodoScreenState extends ConsumerState<TodoScreen> {
         ),
       ],
     );
-    final viewActions = Row(
-      mainAxisSize: MainAxisSize.min,
+    final viewActions = Wrap(
+      alignment: WrapAlignment.end,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         SegmentedButton<bool>(
           key: const ValueKey('todo-view'),

@@ -261,6 +261,7 @@ class _DailyReportsScreenState extends ConsumerState<DailyReportsScreen> {
                     const SizedBox(height: 6),
                     UnderlineTabs<_Tab>(
                       key: const ValueKey('reports-tab'),
+                      wrapTabs: phone,
                       tabs: tabs,
                       selected: tab,
                       onChanged: (v) => setState(() => _tab = v),

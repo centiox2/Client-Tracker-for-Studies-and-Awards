@@ -153,7 +153,7 @@ class WeekRangeButton extends ConsumerWidget {
         label: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(label),
+            Flexible(child: Text(label)),
             const SizedBox(width: 4),
             const Icon(Icons.expand_more, size: 16),
           ],

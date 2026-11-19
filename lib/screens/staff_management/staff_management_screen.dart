@@ -461,7 +461,7 @@ class _StaffRow extends StatelessWidget {
     );
 
     return Container(
-      height: compact ? 64 : 48,
+      constraints: BoxConstraints(minHeight: compact ? 64 : 48),
       padding: const EdgeInsets.only(right: 8),
       decoration: BoxDecoration(
         border: last

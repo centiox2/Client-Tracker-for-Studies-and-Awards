@@ -497,8 +497,8 @@ class _WhoToday extends StatelessWidget {
               cells: [
                 Row(
                   children: [
-                    SizedBox(
-                      width: 110,
+                    Flexible(
+                      flex: 2,
                       child: Text(
                         seen[i].name,
                         overflow: TextOverflow.ellipsis,
@@ -712,16 +712,16 @@ class _Activity extends StatelessWidget {
                     ),
                   ),
                 ),
-                // Never cut short: the name gives way instead.
-                Text(
-                  '${entries[i].newClients} new · '
-                  '${entries[i].existingClients} existing'
-                  '${_sameDay(entries[i].date, now) ? '' : ' · ${DateFormat('EEE').format(entries[i].date)}'}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.right,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                Flexible(
+                  flex: 2,
+                  child: Text(
+                    '${entries[i].newClients} new · '
+                    '${entries[i].existingClients} existing'
+                    '${_sameDay(entries[i].date, now) ? '' : ' · ${DateFormat('EEE').format(entries[i].date)}'}',
+                    textAlign: TextAlign.right,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
               ],

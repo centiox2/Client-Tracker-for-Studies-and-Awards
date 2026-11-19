@@ -160,6 +160,7 @@ void main() {
     ('phone', const Size(390, 844), 1.0),
     ('small', const Size(360, 740), 1.0),
     ('large-text', const Size(390, 844), 1.3),
+    ('max-text', const Size(320, 680), 2.0),
     ('dark', const Size(1440, 1000), 1.0),
     ('phone-dark', const Size(390, 844), 1.0),
     ('landscape', const Size(740, 390), 1.0),
@@ -274,6 +275,12 @@ void main() {
         if (name == 'settings-ai') {
           await tester.ensureVisible(find.text('AI daily summary'));
           await tester.pumpAndSettle();
+        }
+        if (name == 'dailyReports' && mode == 'max-text') {
+          expect(
+            find.byKey(const ValueKey('tab-Team')).hitTestable(),
+            findsOneWidget,
+          );
         }
         expect(tester.takeException(), isNull);
         if (name == 'application-details') {

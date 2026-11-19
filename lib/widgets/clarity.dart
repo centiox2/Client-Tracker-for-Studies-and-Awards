@@ -903,6 +903,7 @@ class UnderlineTabs<T> extends StatelessWidget {
     required this.onChanged,
     this.trailing,
     this.stackTrailingOnNarrow = false,
+    this.wrapTabs = false,
   });
 
   /// (value, label) for each tab.
@@ -915,52 +916,50 @@ class UnderlineTabs<T> extends StatelessWidget {
 
   /// Long action groups use their own row when the available width is small.
   final bool stackTrailingOnNarrow;
+  final bool wrapTabs;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final c = context.clarity;
-    final row = SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          for (final (i, (value, label)) in tabs.indexed) ...[
-            if (i > 0) const SizedBox(width: 20),
-            Semantics(
-              selected: value == selected,
-              button: true,
-              child: InkWell(
-                key: ValueKey('tab-$label'),
-                onTap: () => onChanged(value),
-                hoverColor: Colors.transparent,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  decoration: BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(
-                        color: value == selected
-                            ? c.accent
-                            : Colors.transparent,
-                        width: 2,
-                      ),
-                    ),
-                  ),
-                  child: Text(
-                    label,
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      fontWeight: value == selected
-                          ? FontWeight.w600
-                          : FontWeight.w500,
-                      color: value == selected ? c.accent : c.textMuted,
-                    ),
+    final buttons = [
+      for (final (value, label) in tabs)
+        Semantics(
+          selected: value == selected,
+          button: true,
+          child: InkWell(
+            key: ValueKey('tab-$label'),
+            onTap: () => onChanged(value),
+            hoverColor: Colors.transparent,
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
+                    color: value == selected ? c.accent : Colors.transparent,
+                    width: 2,
                   ),
                 ),
               ),
+              child: Text(
+                label,
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  fontWeight: value == selected
+                      ? FontWeight.w600
+                      : FontWeight.w500,
+                  color: value == selected ? c.accent : c.textMuted,
+                ),
+              ),
             ),
-          ],
-        ],
-      ),
-    );
+          ),
+        ),
+    ];
+    final row = wrapTabs
+        ? Wrap(spacing: 20, children: buttons)
+        : SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(spacing: 20, children: buttons),
+          );
     return DecoratedBox(
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: c.border)),

@@ -1380,6 +1380,9 @@ Future<void> showApplicationDetails(
       );
       return AlertDialog(
         title: Text(a.student),
+        insetPadding: phone
+            ? const EdgeInsets.symmetric(horizontal: 16, vertical: 24)
+            : null,
         content: SizedBox(
           width: 520,
           child: SingleChildScrollView(
@@ -1397,7 +1400,11 @@ Future<void> showApplicationDetails(
                     alignment: Alignment.centerLeft,
                     child: a.status.isEmpty
                         ? text('')
-                        : TagChip(a.status, AirtableTags.status(a.status)),
+                        : TagChip(
+                            a.status,
+                            AirtableTags.status(a.status),
+                            wrap: true,
+                          ),
                   ),
                 ),
                 field(
@@ -1406,7 +1413,7 @@ Future<void> showApplicationDetails(
                     alignment: Alignment.centerLeft,
                     child: a.rto.isEmpty
                         ? text('')
-                        : TagChip(a.rto, AirtableTags.rto(a.rto)),
+                        : TagChip(a.rto, AirtableTags.rto(a.rto), wrap: true),
                   ),
                 ),
                 field(
@@ -1415,7 +1422,11 @@ Future<void> showApplicationDetails(
                     alignment: Alignment.centerLeft,
                     child: a.country.isEmpty
                         ? text('')
-                        : TagChip(a.country, AirtableTags.country(a.country)),
+                        : TagChip(
+                            a.country,
+                            AirtableTags.country(a.country),
+                            wrap: true,
+                          ),
                   ),
                 ),
                 field(
@@ -1471,20 +1482,25 @@ Future<void> showApplicationDetails(
           ),
         ),
         actions: [
-          if (phone) ...[
-            IconButton(
-              key: const ValueKey('application-todo'),
-              tooltip: 'Add to my to-do',
-              onPressed: addTodo,
-              icon: const Icon(Icons.add_task),
-            ),
-            IconButton(
-              key: const ValueKey('application-print'),
-              tooltip: 'Print application',
-              onPressed: printApplication,
-              icon: const Icon(Icons.print_outlined),
-            ),
-          ] else ...[
+          if (phone)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  key: const ValueKey('application-todo'),
+                  tooltip: 'Add to my to-do',
+                  onPressed: addTodo,
+                  icon: const Icon(Icons.add_task),
+                ),
+                IconButton(
+                  key: const ValueKey('application-print'),
+                  tooltip: 'Print application',
+                  onPressed: printApplication,
+                  icon: const Icon(Icons.print_outlined),
+                ),
+              ],
+            )
+          else ...[
             TextButton.icon(
               key: const ValueKey('application-todo'),
               onPressed: addTodo,

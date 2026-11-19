@@ -959,6 +959,13 @@ class RevenueEntryRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final muted = Dt.textMuted(theme);
+    final amount = Text(
+      formatMoney(entry.amountCents, currency),
+      style: Dt.tab(theme.textTheme.bodyMedium!).copyWith(
+        fontWeight: FontWeight.w600,
+        color: entry.isRefund ? theme.colorScheme.error : null,
+      ),
+    );
     return InkWell(
       onTap: onEdit,
       child: Container(
@@ -970,70 +977,75 @@ class RevenueEntryRow extends StatelessWidget {
                 : BorderSide(color: theme.colorScheme.outline),
           ),
         ),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 28,
-              child: Text(
-                '$index',
-                style: Dt.tab(theme.textTheme.labelSmall!)
-                    .copyWith(color: muted),
-              ),
-            ),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    entry.note.isEmpty ? 'Transaction' : entry.note,
-                    // Phones and tablets: two lines, so the name and code
-                    // aren't cut off.
-                    maxLines: MediaQuery.sizeOf(context).width < 1100 ? 2 : 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: entry.note.isEmpty ? muted : null,
-                    ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final stackAmount =
+                constraints.maxWidth <
+                MediaQuery.textScalerOf(context).scale(220);
+            return Row(
+              children: [
+                SizedBox(
+                  width: 28,
+                  child: Text(
+                    '$index',
+                    style: Dt.tab(theme.textTheme.labelSmall!)
+                        .copyWith(color: muted),
                   ),
-                  Text(
-                    [
-                      DateFormat('HH:mm').format(entry.createdAt),
-                      if (entry.isRefund) 'Refund',
-                      if (entry.purpose.isNotEmpty) entry.purpose,
-                    ].join(' · '),
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: entry.isRefund ? theme.colorScheme.error : muted,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              formatMoney(entry.amountCents, currency),
-              style: Dt.tab(theme.textTheme.bodyMedium!).copyWith(
-                fontWeight: FontWeight.w600,
-                color: entry.isRefund ? theme.colorScheme.error : null,
-              ),
-            ),
-            if (onPayer != null)
-              IconButton(
-                tooltip: 'All payments from this payer',
-                visualDensity: VisualDensity.compact,
-                onPressed: onPayer,
-                icon: const Icon(Icons.person_search_outlined, size: 18),
-              ),
-            if (onDelete != null)
-              IconButton(
-                tooltip: 'Remove',
-                visualDensity: VisualDensity.compact,
-                onPressed: onDelete,
-                icon: Icon(
-                  Icons.delete_outline,
-                  size: 18,
-                  color: theme.colorScheme.error,
                 ),
-              ),
-          ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        entry.note.isEmpty ? 'Transaction' : entry.note,
+                        // Phones and tablets: two lines, so the name and code
+                        // aren't cut off.
+                        maxLines: MediaQuery.sizeOf(context).width < 1100
+                            ? 2
+                            : 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: entry.note.isEmpty ? muted : null,
+                        ),
+                      ),
+                      Text(
+                        [
+                          DateFormat('HH:mm').format(entry.createdAt),
+                          if (entry.isRefund) 'Refund',
+                          if (entry.purpose.isNotEmpty) entry.purpose,
+                        ].join(' · '),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: entry.isRefund
+                              ? theme.colorScheme.error
+                              : muted,
+                        ),
+                      ),
+                      if (stackAmount) ...[const SizedBox(height: 4), amount],
+                    ],
+                  ),
+                ),
+                if (!stackAmount) ...[const SizedBox(width: 8), amount],
+                if (onPayer != null)
+                  IconButton(
+                    tooltip: 'All payments from this payer',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: onPayer,
+                    icon: const Icon(Icons.person_search_outlined, size: 18),
+                  ),
+                if (onDelete != null)
+                  IconButton(
+                    tooltip: 'Remove',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: onDelete,
+                    icon: Icon(
+                      Icons.delete_outline,
+                      size: 18,
+                      color: theme.colorScheme.error,
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -1068,6 +1080,57 @@ class _WeekBars extends StatelessWidget {
       0,
       (m, d) => d.totalCents > m ? d.totalCents : m,
     );
+    final textScaler = MediaQuery.textScalerOf(context);
+    final stack = MediaQuery.sizeOf(context).width < textScaler.scale(240);
+    Widget row(RevenueDay day) {
+      final active = day.date == selected;
+      final label = Text(
+        DateFormat('EEE').format(day.date),
+        style: theme.textTheme.bodySmall?.copyWith(
+          fontWeight: active ? FontWeight.w700 : null,
+          color: day.date.isAfter(today) ? Dt.textMuted(theme) : null,
+        ),
+      );
+      final amount = Text(
+        day.entries == 0 ? '–' : formatMoney(day.totalCents, currency),
+        textAlign: TextAlign.end,
+        style: Dt.tab(theme.textTheme.bodySmall!)
+            .copyWith(fontWeight: active ? FontWeight.w700 : null),
+      );
+      final bar = ClipRRect(
+        borderRadius: BorderRadius.circular(3),
+        child: LinearProgressIndicator(
+          value: max <= 0 ? 0 : (day.totalCents / max).clamp(0.0, 1.0),
+          minHeight: 10,
+          backgroundColor: scheme.outline.withValues(alpha: 0.35),
+          color: Dt.money(theme.brightness)
+              .withValues(alpha: active ? 1 : 0.55),
+        ),
+      );
+      return stack
+          ? Column(
+              children: [
+                Row(
+                  children: [
+                    label,
+                    const SizedBox(width: 12),
+                    Expanded(child: amount),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                bar,
+              ],
+            )
+          : Row(
+              children: [
+                SizedBox(width: textScaler.scale(40), child: label),
+                Expanded(child: bar),
+                const SizedBox(width: 10),
+                SizedBox(width: 118, child: amount),
+              ],
+            );
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
@@ -1080,59 +1143,7 @@ class _WeekBars extends StatelessWidget {
                   horizontal: 14,
                   vertical: 7,
                 ),
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 40,
-                      child: Text(
-                        DateFormat('EEE').format(d.date),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontWeight: d.date == selected
-                              ? FontWeight.w700
-                              : null,
-                          color: d.date.isAfter(today)
-                              ? Dt.textMuted(theme)
-                              : null,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(3),
-                        child: LinearProgressIndicator(
-                          value: max <= 0
-                              ? 0
-                              : (d.totalCents / max).clamp(0.0, 1.0),
-                          minHeight: 10,
-                          backgroundColor: scheme.outline.withValues(
-                            alpha: 0.35,
-                          ),
-                          color: d.date == selected
-                              ? Dt.money(theme.brightness)
-                              : Dt.money(theme.brightness)
-                                    .withValues(alpha: 0.55),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    SizedBox(
-                      width: 118,
-                      child: Text(
-                        d.entries == 0
-                            ? '–'
-                            : formatMoney(d.totalCents, currency),
-                        textAlign: TextAlign.right,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Dt.tab(theme.textTheme.bodySmall!).copyWith(
-                          fontWeight: d.date == selected
-                              ? FontWeight.w700
-                              : null,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                child: row(d),
               ),
             ),
         ],
