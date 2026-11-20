@@ -48,7 +48,8 @@ const snapshot = {
       new_clients: 1,
       existing_clients: 4,
       work_items_updated: 0,
-      reports_submitted: 0,
+      reports_submitted: 1,
+      outputs: [{ label: "Interviews booked", count: 2 }],
     }],
   },
   daily_reports: {
@@ -133,6 +134,7 @@ Deno.test("template keeps exact sections, recorded amounts, flags and assignee s
   assert(staff?.kind === "table");
   assert.equal(staff.rows[0][0], "Winnie");
   assert.match(JSON.stringify(detailed), /grouped under Winnie/);
+  assert.match(JSON.stringify(detailed), /Winnie · Interviews booked: 2/);
   assert.match(output.brief, /KSh 1,200\.50/);
   assert.match(output.brief, /Visa Granted/);
   assert(output.risks.some((risk) => risk.includes("33% of 6")));
@@ -170,9 +172,10 @@ Deno.test("Gemini selects a recorded movement and receives no staff or payment d
   }, async (_, request) => {
     const body = String(request?.body);
     assert(
-      !/Winne|Winnie|Unspecified|120050|Example Client|Example Editor/.test(
-        body,
-      ),
+      !/Winne|Winnie|Interviews booked|Unspecified|120050|Example Client|Example Editor/
+        .test(
+          body,
+        ),
     );
     assert.match(body, /Visa Granted/);
     const movement = ++calls === 1 ? 999 : 1;
@@ -190,15 +193,43 @@ Deno.test("Gemini selects a recorded movement and receives no staff or payment d
     .detailed.find((block) =>
       block.kind === "table" && block.columns[0] === "Time (EAT)"
     );
+  assert.match(
+    JSON.stringify(
+      (output as ReturnType<typeof buildTemplateReport>).template.quick,
+    ),
+    /2 status changes/,
+  );
   assert(table?.kind === "table");
   assert.deepEqual(table.rows, [
     ["9:03 AM", "Example Client", "Example Editor", "New", "Awaiting CAS"],
     [
-      "12:03 PM",
+      "12:03 PM (detected)",
       "Example Client",
       "Not recorded",
       "Awaiting CAS",
       "Visa Granted",
     ],
   ]);
+});
+
+Deno.test("an offer-only day uses its recorded milestone without a model request", async () => {
+  const output = await generateReport({
+    key: "unit-test",
+    model: "gemini-test",
+    snapshot: {
+      ...snapshot,
+      applications: {
+        ...snapshot.applications,
+        updates_today: { offers_logged: 1, applications_touched: 1 },
+      },
+      template_facts: {
+        ...snapshot.template_facts,
+        status_moves: [],
+        milestones: {},
+      },
+    },
+  }, () => {
+    throw new Error("Unexpected Gemini request");
+  });
+  assert.match(String(output.brief), /1 new offer date logged/);
 });

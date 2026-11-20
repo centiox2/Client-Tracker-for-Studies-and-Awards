@@ -234,7 +234,8 @@ For an existing database, apply `supabase/migrations/20261118080640_daily_ai_sum
 and the follow-ups `20261118082030_ai_summary_job_auth_guard.sql`,
 `20261118110032_manual_ai_summary.sql`, `20261118113801_ai_report_failure_messages.sql`, `20261118114826_report_readable_details.sql`, and
 `20261119053941_ai_summary_application_updates.sql` and
-`20261119054824_ai_summary_staff_activity.sql`, then deploy `supabase/functions/daily-ai-summary` with JWT verification disabled:
+`20261119054824_ai_summary_staff_activity.sql`, followed by
+`20261119102913_ai_summary_report_templates.sql` and `20261119105738_ai_summary_status_audit.sql`. Then deploy `supabase/functions/daily-ai-summary` with JWT verification disabled:
 the function authenticates its private job token itself, with the claim/finish RPCs
 restricted to `service_role`. The migration creates pg_net and uses existing
 pg_cron/Vault. It starts **disabled**, with no Gemini key or non-admin assignments.
@@ -274,4 +275,4 @@ AI reports now default to `gemini-3.5-flash-lite`, verified with this project’
 
 The Staff section lists people with recorded client counts, work-item activity, or report submissions that day, including configured output totals. Named activity is shown to authorized report readers and excluded from Gemini input.
 
-The AI report page uses one document panel with **Summary** and **Detailed report** views. Summary includes a short executive brief, recorded key figures, highlights, attention points and suggested actions. Detailed report adds human-readable figures and status breakdowns, with findings and suggested follow-up for each business area. Money is passed to Gemini in currency units while the recorded snapshot retains cents for exact display. Older reports without detailed findings still open normally.
+The report opens in **Quick View**. **Detailed report** shows the ten template sections, including the day's application status history, handlers and recorded staff activity. Both views use the same database snapshot. When several application movements qualify for the brief, Gemini chooses among the recorded facts. A single qualifying movement can be used directly. Older reports retain their original Summary and Detailed report views.

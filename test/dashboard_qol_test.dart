@@ -58,6 +58,33 @@ void main() {
     );
   }
 
+  test('daily application activity survives busy sync days and midnight', () {
+    final repo = ApplicationRepository(db);
+    final day = DateTime(2026, 11, 19);
+    final nextDay = DateTime(2026, 11, 20);
+    for (var id = 1; id <= 55; id++) {
+      db.raw.execute(
+        'INSERT INTO application_imports(id, imported_at) VALUES (?, ?)',
+        [id, day.add(Duration(minutes: id)).toIso8601String()],
+      );
+    }
+    final times = [
+      day.subtract(const Duration(seconds: 1)),
+      day,
+      nextDay.subtract(const Duration(seconds: 1)).toUtc(),
+      nextDay.toUtc(),
+    ];
+    for (final (id, time) in times.indexed) {
+      db.raw.execute(
+        "INSERT INTO application_changes(id, import_id, app_key, student, field, changed_at) "
+        "VALUES (?, 1, 'client', 'Client', 'status', ?)",
+        [id + 1, time.toIso8601String()],
+      );
+    }
+    expect(repo.imports().any((i) => i.id == 1), isFalse);
+    expect(repo.changesOn(day).map((c) => c.id), [3, 2]);
+  });
+
   testWidgets('overview opens tracker without silently creating a week', (
     tester,
   ) async {

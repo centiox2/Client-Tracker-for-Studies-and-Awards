@@ -51,10 +51,8 @@ class ApplicationsQuickView extends ConsumerWidget {
     bool on(DateTime? d, DateTime day) => d != null && _day(d) == day;
     int countOn(DateTime? Function(Application) f, DateTime day) =>
         apps.where((a) => on(f(a), day)).length;
-    final todaysUploads = imports.where((i) => _day(i.at) == today).toList();
-    final todaysChanges = [
-      for (final i in todaysUploads) ...repo.changesFor(i.id),
-    ];
+    final uploadedToday = imports.any((i) => _day(i.at.toLocal()) == today);
+    final todaysChanges = repo.changesOn(today);
     final notesToday = [
       for (final a in apps)
         for (final (d, text) in a.datedNotes)
@@ -127,10 +125,12 @@ class ApplicationsQuickView extends ConsumerWidget {
     }
     final byKey = {for (final a in apps) a.key: a};
     final changesByStudent = <String, List<ApplicationChange>>{};
+    final applicationsWithNotes = {for (final (app, _) in notesToday) app.key};
     for (final c in todaysChanges) {
       // Notes and dates already show above from the data itself.
-      if (c.field == 'todo' ||
-          c.field.endsWith('_date') &&
+      if ((c.field == 'todo' && applicationsWithNotes.contains(c.key)) ||
+          byKey.containsKey(c.key) &&
+              c.field.endsWith('_date') &&
               c.newValue.isNotEmpty &&
               DateTime.tryParse(c.newValue) == today) {
         continue;
@@ -148,7 +148,7 @@ class ApplicationsQuickView extends ConsumerWidget {
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
         child: activity.isEmpty && changesByStudent.isEmpty
             ? Text(
-                todaysUploads.isEmpty
+                !uploadedToday
                     ? 'Nothing dated today yet. Upload today’s Airtable '
                           'export to see today’s progress.'
                     : 'Nothing new today in the tracker.',
@@ -764,7 +764,7 @@ class ApplicationsQuickView extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (latest != null && todaysUploads.isEmpty) ...[
+        if (latest != null && !uploadedToday) ...[
           Text(
             'No application upload today',
             style: theme.textTheme.bodySmall?.copyWith(

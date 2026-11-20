@@ -51,6 +51,9 @@ export async function generateReport(
 ) {
   const deadline = Date.now() + 85000;
   const template = templateSelection(job.snapshot);
+  if (template?.movements.length === 1) {
+    return buildTemplateReport(job.snapshot, template, 0);
+  }
   const input = JSON.stringify(
     template
       ? {

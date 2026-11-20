@@ -71,7 +71,7 @@ class AiSummaryPreview extends ConsumerWidget {
                     Text('${(latest['content'] as Map)['brief']}'),
                     const SizedBox(height: 8),
                     Text(
-                      'AI generated · Data as of ${_stamp(latest['cutoff_at'])}',
+                      'Data as of ${_stamp(latest['cutoff_at'])}',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],

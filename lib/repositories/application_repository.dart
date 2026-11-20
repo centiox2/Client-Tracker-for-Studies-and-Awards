@@ -374,6 +374,33 @@ class ApplicationRepository {
       ApplicationChange.fromRow(r),
   ];
 
+  /// Changes recorded on a local calendar day, newest first. Device imports
+  /// store local times and cloud imports can include a UTC offset.
+  List<ApplicationChange> changesOn(DateTime day) {
+    final start = DateTime(day.year, day.month, day.day);
+    final end = DateTime(day.year, day.month, day.day + 1);
+    // Narrow the text index scan before comparing instants. Allow for an
+    // offset on either side of the international date line.
+    String bound(int offset) => DateTime(
+      day.year,
+      day.month,
+      day.day + offset,
+    ).toIso8601String().split('T').first;
+    final changes = _db.raw
+        .select(
+          'SELECT * FROM application_changes WHERE changed_at >= ? AND changed_at < ?',
+          [bound(-2), bound(3)],
+        )
+        .map(ApplicationChange.fromRow)
+        .where((c) => !c.at.isBefore(start) && c.at.isBefore(end))
+        .toList();
+    changes.sort((a, b) {
+      final order = b.at.compareTo(a.at);
+      return order == 0 ? b.id.compareTo(a.id) : order;
+    });
+    return changes;
+  }
+
   /// The latest changes across uploads, newest first.
   List<ApplicationChange> recentChanges({int limit = 200}) => [
     for (final r in _db.raw.select(

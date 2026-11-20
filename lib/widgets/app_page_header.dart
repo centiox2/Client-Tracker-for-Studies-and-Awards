@@ -11,21 +11,6 @@ import 'clarity.dart';
 import 'sync_status.dart';
 import 'week_label.dart';
 
-/// The name of each page, as its header and the menu show it.
-String pageTitle(AppTab tab) => switch (tab) {
-  AppTab.home => 'Overview',
-  AppTab.dailyReports => 'Daily reports',
-  AppTab.todo => 'To-do',
-  AppTab.revenue => 'Revenue',
-  AppTab.applications => 'Applications',
-  AppTab.week => 'Weekly tracker',
-  AppTab.history => 'History',
-  AppTab.staff => 'Staff',
-  AppTab.reports => 'Reports',
-  AppTab.settings => 'Settings',
-  AppTab.aiSummary => 'AI summary',
-};
-
 /// The top of every page: today's date and the time (ticking each minute,
 /// so a screen left open shows how current it is), the page's title, and
 /// its toolbar — the sync status first, then [actions] (at most one
@@ -84,7 +69,7 @@ class _AppPageHeaderState extends ConsumerState<AppPageHeader> {
         MediaQuery.sizeOf(context).width >= 1050;
     return PageHeader(
       eyebrow: eyebrow,
-      title: widget.title ?? pageTitle(widget.tab),
+      title: widget.title ?? widget.tab.label,
       actions: [if (sync) const SyncStatusBadge(), ...widget.actions],
     );
   }

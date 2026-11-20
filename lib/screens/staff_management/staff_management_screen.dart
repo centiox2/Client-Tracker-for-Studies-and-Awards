@@ -644,11 +644,13 @@ class _Panel extends StatelessWidget {
             decoration: BoxDecoration(
               border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
             ),
-            child: Row(
+            child: OverflowBar(
+              alignment: MainAxisAlignment.spaceBetween,
+              overflowAlignment: OverflowBarAlignment.start,
+              spacing: 12,
+              overflowSpacing: 4,
               children: [
-                Expanded(
-                  child: Text(title, style: theme.textTheme.titleMedium),
-                ),
+                Text(title, style: theme.textTheme.titleMedium),
                 if (trailing != null)
                   Text(
                     trailing!,

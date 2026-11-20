@@ -373,13 +373,15 @@ class _MonthPanel extends StatelessWidget {
             decoration: BoxDecoration(
               border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
             ),
-            child: Row(
+            child: OverflowBar(
+              alignment: MainAxisAlignment.spaceBetween,
+              overflowAlignment: OverflowBarAlignment.start,
+              spacing: 12,
+              overflowSpacing: 4,
               children: [
-                Expanded(
-                  child: Text(
-                    DateFormat('MMMM y').format(month),
-                    style: theme.textTheme.titleMedium,
-                  ),
+                Text(
+                  DateFormat('MMMM y').format(month),
+                  style: theme.textTheme.titleMedium,
                 ),
                 Text(
                   '${weeks.length} ${weeks.length == 1 ? 'week' : 'weeks'} · '
@@ -575,42 +577,51 @@ class _WeekRow extends ConsumerWidget {
         child: Container(
           padding: const EdgeInsets.fromLTRB(20, 10, 6, 10),
           decoration: BoxDecoration(border: border),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    title,
-                    const SizedBox(height: 2),
-                    Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(
-                            text: '${summary.totals.newClients} new',
-                            style: TextStyle(
-                              color: Dt.newGreen(theme.brightness),
-                            ),
+          child: LayoutBuilder(
+            builder: (context, box) {
+              final details = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  title,
+                  const SizedBox(height: 2),
+                  Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: '${summary.totals.newClients} new',
+                          style: TextStyle(
+                            color: Dt.newGreen(theme.brightness),
                           ),
-                          const TextSpan(text: '  ·  '),
-                          TextSpan(
-                            text: '${summary.totals.existingClients} existing',
-                            style: TextStyle(
-                              color: Dt.existingBlue(theme.brightness),
-                            ),
+                        ),
+                        const TextSpan(text: '  ·  '),
+                        TextSpan(
+                          text: '${summary.totals.existingClients} existing',
+                          style: TextStyle(
+                            color: Dt.existingBlue(theme.brightness),
                           ),
-                          TextSpan(text: '  ·  ${summary.totals.total} total'),
-                        ],
-                      ),
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: Dt.textMuted(theme),
-                      ),
+                        ),
+                        TextSpan(text: '  ·  ${summary.totals.total} total'),
+                      ],
                     ),
-                  ],
-                ),
-              ),
-              actions,
-            ],
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: Dt.textMuted(theme),
+                    ),
+                  ),
+                ],
+              );
+              if (box.maxWidth < MediaQuery.textScalerOf(context).scale(240)) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [details, actions],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: details),
+                  actions,
+                ],
+              );
+            },
           ),
         ),
       );

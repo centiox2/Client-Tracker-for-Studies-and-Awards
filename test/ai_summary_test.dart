@@ -119,6 +119,42 @@ class _Person extends CurrentUserNotifier {
   AppUser? build() => user;
 }
 
+Map<String, dynamic> templateFixture() {
+  final data = summaryFixture();
+  final report = (data['summaries'] as List).first as Map;
+  (report['content'] as Map)['template'] = {
+    'version': 1,
+    'meta': 'Thursday, 19 November 2026 · Data as of 1:08 PM EAT',
+    'quick': [
+      {'kind': 'heading', 'text': 'Today at a Glance'},
+      {
+        'kind': 'table',
+        'columns': ['Clients', 'Net Revenue', 'Applications Updated'],
+        'rows': [
+          ['5', 'KSh 1,200.50', '3'],
+        ],
+      },
+    ],
+    'detailed': [
+      {'kind': 'heading', 'text': '6. Who Is Handling Applications'},
+      {
+        'kind': 'table',
+        'columns': [
+          'Assignee',
+          'Total records',
+          'Updated today',
+          'Status changes',
+          'New COE dates',
+        ],
+        'rows': [
+          ['Taylor Example', '4', '2', '1', '1'],
+        ],
+      },
+    ],
+  };
+  return data;
+}
+
 void main() {
   test('report failures show safe actionable server messages', () {
     expect(
@@ -536,38 +572,7 @@ void main() {
       tester.platformDispatcher.textScaleFactorTestValue = 2;
       addTearDown(tester.view.reset);
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-      final data = summaryFixture();
-      final report = (data['summaries'] as List).first as Map;
-      (report['content'] as Map)['template'] = {
-        'version': 1,
-        'meta': 'Thursday, 19 November 2026 · Data as of 1:08 PM EAT',
-        'quick': [
-          {'kind': 'heading', 'text': 'Today at a Glance'},
-          {
-            'kind': 'table',
-            'columns': ['Clients', 'Net Revenue', 'Applications Updated'],
-            'rows': [
-              ['5', 'KSh 1,200.50', '3'],
-            ],
-          },
-        ],
-        'detailed': [
-          {'kind': 'heading', 'text': '6. Who Is Handling Applications'},
-          {
-            'kind': 'table',
-            'columns': [
-              'Assignee',
-              'Total records',
-              'Updated today',
-              'Status changes',
-              'New COE dates',
-            ],
-            'rows': [
-              ['Taylor Example', '4', '2', '1', '1'],
-            ],
-          },
-        ],
-      };
+      final data = templateFixture();
       await tester.pumpWidget(
         ProviderScope(
           overrides: [

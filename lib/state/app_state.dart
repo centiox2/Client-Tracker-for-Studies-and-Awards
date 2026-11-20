@@ -184,17 +184,24 @@ class SessionNotifier extends Notifier<UserRole?> {
 
 /// Navigation sections, shared by sidebar (desktop) and bottom bar (mobile).
 enum AppTab {
-  home,
-  dailyReports,
-  todo,
-  week,
-  revenue,
-  applications,
-  history,
-  staff,
-  reports,
-  aiSummary,
-  settings,
+  home('Overview', Icons.grid_view_outlined, 'Home'),
+  dailyReports('Daily reports', Icons.description_outlined, 'Daily'),
+  todo('To-do', Icons.checklist),
+  week('Weekly tracker', Icons.calendar_today_outlined, 'Tracker'),
+  revenue('Revenue', Icons.payments_outlined),
+  applications('Applications', Icons.school_outlined, 'Apps'),
+  history('History', Icons.history),
+  staff('Staff', Icons.people_outline),
+  reports('Reports', Icons.show_chart),
+  aiSummary('AI summary', Icons.auto_awesome_outlined),
+  settings('Settings', Icons.settings_outlined);
+
+  const AppTab(this.label, this.icon, [String? shortLabel])
+    : shortLabel = shortLabel ?? label;
+
+  final String label;
+  final IconData icon;
+  final String shortLabel;
 }
 
 /// The shell's context, captured by [HomeShell] so helper functions outside

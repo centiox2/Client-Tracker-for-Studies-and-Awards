@@ -165,7 +165,36 @@ class _ReportTable extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, box) {
-        final minWidth = headers.length < 4
+        // At large accessibility sizes, three numeric columns can become
+        // narrower than a single currency amount. Keep each metric together.
+        if (quickFigures &&
+            rows.isNotEmpty &&
+            box.maxWidth < scale.scale(260)) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final (i, header) in headers.indexed)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(header, style: theme.textTheme.labelMedium),
+                      for (final (index, cells) in rows.indexed)
+                        if (i < cells.length)
+                          Text(
+                            '${cells[i]}',
+                            style: index == 0
+                                ? theme.textTheme.titleMedium
+                                : theme.textTheme.bodySmall,
+                          ),
+                    ],
+                  ),
+                ),
+            ],
+          );
+        }
+        final minWidth = headers.length < 3
             ? 0.0
             : scale.scale(76) * headers.length;
         final table = SizedBox(

@@ -182,9 +182,11 @@ export function templateSelection(snapshot: unknown) {
     movements.push(`${coes}.`);
   }
   if (value(updates.offers_logged)) {
-    wins.push(
-      `${plural(value(updates.offers_logged), "new offer date")} logged.`,
-    );
+    const offers = `${
+      plural(value(updates.offers_logged), "new offer date")
+    } logged.`;
+    wins.push(offers);
+    movements.push(offers);
   }
   if (value(map(source.weekly_tracker).today_new)) {
     wins.push(
@@ -240,6 +242,20 @@ export function buildTemplateReport(
   const reassignments = list(facts.reassignments);
   const nameFor = (x: unknown) =>
     handling.names.get(normalizedName(text(x))) ?? (x ? text(x) : "Unassigned");
+  const staffOutputs = people.flatMap((person) => {
+    const entries = list(person.outputs).filter((output) =>
+      value(output.count) > 0 && text(output.label) !== "—"
+    );
+    return entries.length
+      ? [
+        `${nameFor(person.name)} · ${
+          entries.map((output) =>
+            `${text(output.label)}: ${count(output.count)}`
+          ).join(" · ")
+        }`,
+      ]
+      : [];
+  });
   const today = dateAt(data.date);
   const cutoff = dateAt(data.cutoff_at);
   const time = cutoff ? `${clock.format(cutoff).toUpperCase()} EAT` : "—";
@@ -378,7 +394,11 @@ export function buildTemplateReport(
           count(clients.today_existing)
         } existing`,
         `${plural(payments, "payment")} · ${plural(refunds, "refund")}`,
-        plural(value(updates.statuses_changed), "status change"),
+        hasStatusEvents
+          ? plural(statusEvents.length, "status change")
+          : `${
+            plural(value(updates.statuses_changed), "application")
+          } changed status`,
       ],
     ]),
     heading("Running Totals"),
@@ -472,7 +492,11 @@ export function buildTemplateReport(
         statusEvents.map((event) => {
           const at = dateAt(event.at);
           return [
-            at ? clock.format(at).toUpperCase() : "—",
+            at
+              ? `${clock.format(at).toUpperCase()}${
+                event.exact_time === true ? "" : " (detected)"
+              }`
+              : "—",
             text(event.client),
             event.changed_by ? text(event.changed_by) : "Not recorded",
             displayStatus(text(event.from)),
@@ -526,7 +550,7 @@ export function buildTemplateReport(
       "Assignee",
       "Total records",
       "Updated today",
-      "Status changes",
+      "Applications with status changes",
       "New COE dates",
     ], [
       ...handling.rows.map((
@@ -589,6 +613,12 @@ export function buildTemplateReport(
         count(person.reports_submitted),
       ]),
     ),
+    ...(staffOutputs.length
+      ? [label("Reported outputs"), {
+        kind: "bullets" as const,
+        items: staffOutputs,
+      }]
+      : []),
     line(
       "Based on recorded client counts and daily report activity. Missing entries do not show how anyone spent their day.",
     ),

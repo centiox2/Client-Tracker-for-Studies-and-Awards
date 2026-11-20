@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/app_state.dart';
 import '../../state/mobile_navigation.dart';
-import '../../widgets/app_page_header.dart';
 import '../../widgets/panels.dart';
 
 class NavigationSection extends ConsumerWidget {
@@ -23,7 +22,7 @@ class NavigationSection extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              pinned.map(pageTitle).join(' · '),
+              pinned.map((tab) => tab.label).join(' · '),
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 12),
@@ -91,7 +90,7 @@ class _NavigationEditorState extends ConsumerState<_NavigationEditor> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      '${index + 1}. ${pageTitle(tab)}',
+                      '${index + 1}. ${tab.label}',
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
                     Wrap(
@@ -99,7 +98,7 @@ class _NavigationEditorState extends ConsumerState<_NavigationEditor> {
                       children: [
                         IconButton(
                           key: ValueKey('nav-up-${tab.name}'),
-                          tooltip: 'Move ${pageTitle(tab)} earlier',
+                          tooltip: 'Move ${tab.label} earlier',
                           onPressed: index == 0
                               ? null
                               : () => _move(index, index - 1),
@@ -107,7 +106,7 @@ class _NavigationEditorState extends ConsumerState<_NavigationEditor> {
                         ),
                         IconButton(
                           key: ValueKey('nav-down-${tab.name}'),
-                          tooltip: 'Move ${pageTitle(tab)} later',
+                          tooltip: 'Move ${tab.label} later',
                           onPressed: index == _pinned.length - 1
                               ? null
                               : () => _move(index, index + 1),
@@ -150,7 +149,7 @@ class _NavigationEditorState extends ConsumerState<_NavigationEditor> {
                               _defaults = false;
                             }),
                       icon: const Icon(Icons.add, size: 16),
-                      label: Text(pageTitle(tab)),
+                      label: Text(tab.label),
                     ),
                 ],
               ),

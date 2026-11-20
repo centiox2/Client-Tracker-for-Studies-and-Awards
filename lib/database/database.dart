@@ -330,6 +330,11 @@ class AppDatabase {
           ON application_changes(import_id);
       ''');
 
+      db.execute('''
+        CREATE INDEX IF NOT EXISTS idx_application_changes_time
+          ON application_changes(changed_at);
+      ''');
+
       // v13: personal accounts signed in on this device. A row is kept for
       // each account that signed in here, with a hash of its password so it
       // can also sign in without internet. [token] is the online sign-in,

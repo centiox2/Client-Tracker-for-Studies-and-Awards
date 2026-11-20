@@ -42,20 +42,6 @@ class _Result {
   final void Function(BuildContext context, WidgetRef ref) run;
 }
 
-const _pages = <(AppTab, String, IconData)>[
-  (AppTab.home, 'Overview', Icons.space_dashboard_outlined),
-  (AppTab.dailyReports, 'Daily reports', Icons.description_outlined),
-  (AppTab.todo, 'To-do', Icons.checklist),
-  (AppTab.week, 'Weekly tracker', Icons.calendar_view_week_outlined),
-  (AppTab.revenue, 'Revenue', Icons.payments_outlined),
-  (AppTab.applications, 'Applications', Icons.school_outlined),
-  (AppTab.history, 'History', Icons.history),
-  (AppTab.staff, 'Staff', Icons.groups_2_outlined),
-  (AppTab.reports, 'Reports', Icons.insights_outlined),
-  (AppTab.aiSummary, 'AI summary', Icons.auto_awesome_outlined),
-  (AppTab.settings, 'Settings', Icons.settings_outlined),
-];
-
 class _QuickSearchDialog extends ConsumerStatefulWidget {
   const _QuickSearchDialog();
 
@@ -80,10 +66,10 @@ class _QuickSearchDialogState extends ConsumerState<_QuickSearchDialog> {
     final search = TextSearch(rawQuery);
     final results = <_Result>[];
 
-    final role = ref.read(sessionProvider);
-    final user = ref.read(currentUserProvider);
-    final accounts = ref.read(accountsEnabledProvider);
-    final allowed = ref.read(availableAppTabsProvider);
+    final role = ref.watch(sessionProvider);
+    final user = ref.watch(currentUserProvider);
+    final accounts = ref.watch(accountsEnabledProvider);
+    final allowed = ref.watch(availableAppTabsProvider);
     bool may(AppTab tab) =>
         (!accounts || user != null) && allowed.contains(tab);
 
@@ -145,14 +131,14 @@ class _QuickSearchDialogState extends ConsumerState<_QuickSearchDialog> {
       }
     }
 
-    for (final (tab, label, icon) in _pages) {
+    for (final tab in AppTab.values) {
       if (!may(tab)) continue;
-      if (query.isEmpty || search.matches(label)) {
+      if (query.isEmpty || search.matches(tab.label)) {
         results.add(
           _Result(
             group: 'Pages',
-            icon: icon,
-            title: label,
+            icon: tab.icon,
+            title: tab.label,
             run: (_, ref) => ref.read(appActionsProvider).selectTab(tab),
           ),
         );

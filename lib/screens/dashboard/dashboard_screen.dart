@@ -806,10 +806,15 @@ class _ApplicationsPanel extends ConsumerWidget {
                                 ),
                               ),
                               if (a.assignee.isNotEmpty) ...[
-                                TagChip(
-                                  a.assignee,
-                                  AirtableTags.assignee(a.assignee),
-                                  dense: true,
+                                Flexible(
+                                  child: Align(
+                                    alignment: AlignmentDirectional.centerEnd,
+                                    child: TagChip(
+                                      a.assignee,
+                                      AirtableTags.assignee(a.assignee),
+                                      dense: true,
+                                    ),
+                                  ),
                                 ),
                                 const SizedBox(width: 8),
                               ],
@@ -844,7 +849,6 @@ class _ApplicationActivityPanel extends ConsumerWidget {
     final repo = ref.read(applicationRepositoryProvider);
     final today = DateUtils.dateOnly(DateTime.now());
     final apps = {for (final app in repo.all()) app.key: app};
-    final uploads = repo.imports();
     final updates = <String, Set<String>>{};
     final names = <String, String>{};
     void add(String key, String student, String detail) {
@@ -852,22 +856,19 @@ class _ApplicationActivityPanel extends ConsumerWidget {
       updates.putIfAbsent(key, () => {}).add(detail);
     }
 
-    for (final upload in uploads) {
-      if (!DateUtils.isSameDay(upload.at.toLocal(), today)) continue;
-      for (final change in repo.changesFor(upload.id).reversed) {
-        if (change.field.endsWith('_date') &&
-            apps.containsKey(change.key) &&
-            DateUtils.isSameDay(DateTime.tryParse(change.newValue), today)) {
-          continue;
-        }
-        add(
-          change.key,
-          change.student,
-          change.field == 'removed'
-              ? 'Removed from Airtable'
-              : ApplicationActivity.describe(change),
-        );
+    for (final change in repo.changesOn(today)) {
+      if (change.field.endsWith('_date') &&
+          apps.containsKey(change.key) &&
+          DateUtils.isSameDay(DateTime.tryParse(change.newValue), today)) {
+        continue;
       }
+      add(
+        change.key,
+        change.student,
+        change.field == 'removed'
+            ? 'Removed from Airtable'
+            : ApplicationActivity.describe(change),
+      );
     }
     for (final app in apps.values) {
       final milestones = [

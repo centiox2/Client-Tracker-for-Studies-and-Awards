@@ -40,6 +40,12 @@ class PageHeader extends StatelessWidget {
     final theme = Theme.of(context);
     final c = context.clarity;
     final phone = MediaQuery.sizeOf(context).width < 640;
+    final titleText = Text(
+      title,
+      style: theme.textTheme.headlineMedium?.copyWith(
+        fontSize: phone ? 24 : 28,
+      ),
+    );
     final heading = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -54,12 +60,14 @@ class PageHeader extends StatelessWidget {
             ),
           ),
         if (eyebrow != null) const SizedBox(height: 6),
-        Text(
-          title,
-          style: theme.textTheme.headlineMedium?.copyWith(
-            fontSize: phone ? 24 : 28,
+        if (title.contains(' '))
+          titleText
+        else
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: AlignmentDirectional.centerStart,
+            child: titleText,
           ),
-        ),
       ],
     );
     if (actions.isEmpty) return heading;

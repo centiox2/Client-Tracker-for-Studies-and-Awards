@@ -20,7 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'test_helpers.dart';
-import 'ai_summary_test.dart' show summaryFixture;
+import 'ai_summary_test.dart' show templateFixture;
 
 import 'package:client_tracker/services/ai_summary_service.dart';
 
@@ -228,7 +228,9 @@ void main() {
               ),
               reportViewProvider.overrideWithValue(_reports()),
               aiSummaryAccessProvider.overrideWith((ref) async => true),
-              aiSummariesProvider.overrideWith((ref) async => summaryFixture()),
+              aiSummariesProvider.overrideWith(
+                (ref) async => templateFixture(),
+              ),
               aiSummarySettingsProvider.overrideWith(
                 (ref) async => {
                   'enabled': false,
@@ -283,6 +285,21 @@ void main() {
           );
         }
         expect(tester.takeException(), isNull);
+        if (mode == 'max-text' && (name == 'staff' || name == 'history')) {
+          final heading = name == 'staff'
+              ? find.text('Team')
+              : find.textContaining(RegExp(r'^[A-Za-z]+ [0-9]{4}$')).first;
+          final paragraph = tester.renderObject<RenderParagraph>(heading);
+          final firstWord = paragraph.text.toPlainText().split(' ').first;
+          final boxes = paragraph.getBoxesForSelection(
+            TextSelection(baseOffset: 0, extentOffset: firstWord.length),
+          );
+          expect(
+            boxes.map((box) => box.top).toSet(),
+            hasLength(1),
+            reason: 'The count beside the title must not split a word across lines.',
+          );
+        }
         if (name == 'application-details') {
           final status = find.descendant(
             of: find.byType(AlertDialog),

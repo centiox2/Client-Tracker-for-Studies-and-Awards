@@ -93,80 +93,19 @@ class HomeShell extends ConsumerStatefulWidget {
 class _HomeShellState extends ConsumerState<HomeShell> {
   final _focusNode = FocusNode();
 
-  static const _reportsTab = _AppTabInfo(
-    AppTab.reports,
-    'Reports',
-    Icons.show_chart,
-  );
-
-  static const _adminTabs = <_AppTabInfo>[
-    _AppTabInfo(
-      AppTab.home,
-      'Overview',
-      Icons.grid_view_outlined,
-      shortLabel: 'Home',
-    ),
-    _dailyReportsTab,
-    _todoTab,
-    _AppTabInfo(
-      AppTab.week,
-      'Weekly tracker',
-      Icons.calendar_today_outlined,
-      shortLabel: 'Tracker',
-    ),
-    _revenueTab,
-    _applicationsTab,
-    _AppTabInfo(AppTab.history, 'History', Icons.history),
-    _AppTabInfo(AppTab.staff, 'Staff', Icons.people_outline),
-    _reportsTab,
-    _AppTabInfo(AppTab.aiSummary, 'AI summary', Icons.auto_awesome_outlined),
-    _AppTabInfo(AppTab.settings, 'Settings', Icons.settings_outlined),
-  ];
-
-  static const _dailyReportsTab = _AppTabInfo(
-    AppTab.dailyReports,
-    'Daily reports',
-    Icons.description_outlined,
-    shortLabel: 'Daily',
-  );
-
-  static const _todoTab = _AppTabInfo(AppTab.todo, 'To-do', Icons.checklist);
-
-  static const _applicationsTab = _AppTabInfo(
-    AppTab.applications,
-    'Applications',
-    Icons.school_outlined,
-    shortLabel: 'Apps',
-  );
-
-  static const _revenueTab = _AppTabInfo(
-    AppTab.revenue,
-    'Revenue',
-    Icons.payments_outlined,
-  );
-
   /// View-only profiles (Director, Team): nothing that changes data.
   bool get _isViewer => !ref.read(canEditProvider);
 
   /// The pages this profile may open: revenue only for the admin and the
   /// director; Settings for everyone (their own part of it).
-  List<_AppTabInfo> get _tabs {
-    return [
-      for (final tab in ref.read(availableAppTabsProvider))
-        _adminTabs.firstWhere((item) => item.tab == tab),
-    ];
-  }
+  List<AppTab> get _tabs => ref.read(availableAppTabsProvider);
 
-  AppTab _visibleTab(
-    AppTab requested,
-    List<_AppTabInfo> allowed,
-    bool isViewer,
-  ) {
-    if (allowed.any((item) => item.tab == requested)) return requested;
-    if (isViewer && allowed.any((item) => item.tab == AppTab.reports)) {
+  AppTab _visibleTab(AppTab requested, List<AppTab> allowed, bool isViewer) {
+    if (allowed.contains(requested)) return requested;
+    if (isViewer && allowed.contains(AppTab.reports)) {
       return AppTab.reports;
     }
-    return allowed.first.tab;
+    return allowed.first;
   }
 
   AppTab get _activeTab =>
@@ -475,7 +414,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     ];
     final index = keys.indexOf(event.logicalKey);
     if (index >= 0 && index < _tabs.length) {
-      ref.read(navTabProvider.notifier).set(_tabs[index].tab);
+      ref.read(navTabProvider.notifier).set(_tabs[index]);
     }
     return KeyEventResult.ignored;
   }
@@ -551,7 +490,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   }
 
   /// The phone's "More" sheet: the pages that don't fit the bottom bar.
-  void _showMore(List<_AppTabInfo> tabs, AppTab current) {
+  void _showMore(List<AppTab> tabs, AppTab current) {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -564,10 +503,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                 ListTile(
                   leading: Icon(item.icon),
                   title: Text(item.label),
-                  selected: item.tab == current,
+                  selected: item == current,
                   onTap: () {
                     Navigator.of(sheet).pop();
-                    ref.read(navTabProvider.notifier).set(item.tab);
+                    ref.read(navTabProvider.notifier).set(item);
                   },
                 ),
               const SizedBox(height: 8),
@@ -622,10 +561,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   Widget build(BuildContext context) {
     final isViewer = !ref.watch(canEditProvider);
     // Async AI access and Admin page assignments update desktop navigation too.
-    ref.watch(availableAppTabsProvider);
+    final allowed = ref.watch(availableAppTabsProvider);
     ref.watch(currentUserProvider);
     final requested = ref.watch(navTabProvider);
-    final allowed = _tabs;
     // Daily reports: a count of unread notifications and work to review,
     // or a dot when nothing has been submitted today.
     final badge = ref.watch(reportBadgeProvider);
@@ -662,16 +600,13 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     );
 
     if (!desktop) {
-      final main = ref.watch(mobileBarTabsProvider);
-      final barTabs = [
-        for (final tab in main) allowed.firstWhere((item) => item.tab == tab),
-      ];
+      final barTabs = ref.watch(mobileBarTabsProvider);
       final moreTabs = [
         for (final item in allowed)
-          if (!main.contains(item.tab)) item,
+          if (!barTabs.contains(item)) item,
       ];
       final useMore = moreTabs.isNotEmpty;
-      final barIndex = barTabs.indexWhere((item) => item.tab == tab);
+      final barIndex = barTabs.indexOf(tab);
       return Scaffold(
         body: SafeArea(
           child: Column(
@@ -687,7 +622,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           selectedIndex: barIndex >= 0 ? barIndex : barTabs.length,
           onDestinationSelected: (index) {
             if (index < barTabs.length) {
-              ref.read(navTabProvider.notifier).set(barTabs[index].tab);
+              ref.read(navTabProvider.notifier).set(barTabs[index]);
             } else {
               _showMore(moreTabs, tab);
             }
@@ -695,25 +630,25 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           destinations: [
             for (final item in barTabs)
               NavigationDestination(
-                icon: item.tab == AppTab.todo
+                icon: item == AppTab.todo
                     ? TodoNewBadge(child: Icon(item.icon))
                     : _reportBadge(
-                        item.tab == AppTab.dailyReports,
+                        item == AppTab.dailyReports,
                         reportCount,
                         reportDue,
                         Icon(item.icon),
                       ),
                 selectedIcon: Icon(item.icon),
-                label: item.shortLabel ?? item.label,
+                label: item.shortLabel,
                 tooltip: item.label,
               ),
             if (useMore)
               NavigationDestination(
                 icon: _reportBadge(
-                  moreTabs.any((t) => t.tab == AppTab.dailyReports),
+                  moreTabs.contains(AppTab.dailyReports),
                   reportCount,
                   reportDue,
-                  moreTabs.any((t) => t.tab == AppTab.todo)
+                  moreTabs.contains(AppTab.todo)
                       ? const TodoNewBadge(child: Icon(Icons.menu))
                       : const Icon(Icons.menu),
                 ),
@@ -755,7 +690,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
               child: _AppSidebar(
                 reportDue: reportDue,
                 reportCount: reportCount,
-                tabs: _tabs,
+                tabs: allowed,
                 selected: tab,
                 onSelect: (value) =>
                     ref.read(navTabProvider.notifier).set(value),
@@ -769,16 +704,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   }
 }
 
-class _AppTabInfo {
-  const _AppTabInfo(this.tab, this.label, this.icon, {this.shortLabel});
-  final AppTab tab;
-  final String label;
-  final IconData icon;
-
-  /// Used in the phone's bottom bar, where six long labels don't fit.
-  final String? shortLabel;
-}
-
 /// The sidebar (248px): the brand, search, the menu, a backup notice when
 /// one is due, and who's signed in with the light/dark switch and sign out.
 class _AppSidebar extends ConsumerWidget {
@@ -790,7 +715,7 @@ class _AppSidebar extends ConsumerWidget {
     required this.onSelect,
     required this.onSearch,
   });
-  final List<_AppTabInfo> tabs;
+  final List<AppTab> tabs;
 
   /// Nothing recorded today yet: a dot on Daily reports.
   final bool reportDue;
@@ -829,15 +754,11 @@ class _AppSidebar extends ConsumerWidget {
     );
   }
 
-  Widget _navItem(
-    BuildContext context,
-    _AppTabInfo item, {
-    bool strip = false,
-  }) {
+  Widget _navItem(BuildContext context, AppTab item, {bool strip = false}) {
     final theme = Theme.of(context);
     final c = context.clarity;
-    final active = selected == item.tab;
-    final dot = item.tab == AppTab.dailyReports && reportCount > 0
+    final active = selected == item;
+    final dot = item == AppTab.dailyReports && reportCount > 0
         ? Tooltip(
             message: 'New notifications or work to review',
             child: Badge.count(
@@ -845,7 +766,7 @@ class _AppSidebar extends ConsumerWidget {
               count: reportCount,
             ),
           )
-        : item.tab == AppTab.dailyReports && reportDue
+        : item == AppTab.dailyReports && reportDue
         ? Tooltip(
             message: 'Nothing submitted today yet',
             child: Container(
@@ -858,7 +779,7 @@ class _AppSidebar extends ConsumerWidget {
               ),
             ),
           )
-        : item.tab == AppTab.todo
+        : item == AppTab.todo
         ? const TodoNewBadge()
         : null;
     final icon = Icon(
@@ -893,8 +814,7 @@ class _AppSidebar extends ConsumerWidget {
                   ),
                 ),
                 ?dot,
-                if (item.tab == AppTab.todo)
-                  const QuickTodoButton(compact: true),
+                if (item == AppTab.todo) const QuickTodoButton(compact: true),
               ],
             ),
           );
@@ -905,10 +825,10 @@ class _AppSidebar extends ConsumerWidget {
         borderRadius: BorderRadius.circular(Dt.rSm),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          key: strip ? ValueKey('strip-${item.tab.name}') : null,
+          key: strip ? ValueKey('strip-${item.name}') : null,
           borderRadius: BorderRadius.circular(Dt.rSm),
           hoverColor: c.neutralBg,
-          onTap: () => onSelect(item.tab),
+          onTap: () => onSelect(item),
           child: Semantics(
             selected: active,
             button: true,
@@ -939,7 +859,7 @@ class _AppSidebar extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             for (final item in tabs)
-              if (item.tab != AppTab.settings)
+              if (item != AppTab.settings)
                 _navItem(context, item, strip: strip),
           ],
         ),
@@ -1000,7 +920,7 @@ class _AppSidebar extends ConsumerWidget {
           ],
           // Settings at the foot of the menu, above who's signed in.
           for (final item in tabs)
-            if (item.tab == AppTab.settings) _navItem(context, item),
+            if (item == AppTab.settings) _navItem(context, item),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10),
             child: Divider(height: 1, color: c.border),
@@ -1061,8 +981,7 @@ class _AppSidebar extends ConsumerWidget {
             ),
           const SizedBox(height: 8),
           for (final item in tabs)
-            if (item.tab == AppTab.settings)
-              _navItem(context, item, strip: true),
+            if (item == AppTab.settings) _navItem(context, item, strip: true),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10),
             child: Divider(height: 1, color: c.border),

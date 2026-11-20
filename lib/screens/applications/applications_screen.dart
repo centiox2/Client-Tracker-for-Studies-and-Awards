@@ -540,11 +540,12 @@ class _ApplicationsScreenState extends ConsumerState<ApplicationsScreen> {
         children: [
           viewSwitch,
           const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(child: updated ?? const SizedBox()),
-              if (widget.canUpload) _uploadButton(),
-            ],
+          OverflowBar(
+            alignment: MainAxisAlignment.spaceBetween,
+            overflowAlignment: OverflowBarAlignment.start,
+            spacing: 12,
+            overflowSpacing: 8,
+            children: [?updated, if (widget.canUpload) _uploadButton()],
           ),
         ],
       );
